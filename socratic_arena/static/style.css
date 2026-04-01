@@ -1,0 +1,406 @@
+/* Socratic Arena — Clean, scientist-friendly UI */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+    --bg: #1a1a2e;
+    --bg-panel: #16213e;
+    --bg-input: #0f3460;
+    --text: #e0e0e0;
+    --text-dim: #888;
+    --accent: #e94560;
+    --accent-soft: #533483;
+    --human: #2d6a4f;
+    --agent: #1d3557;
+    --correction: #e94560;
+    --border: #333;
+    --radius: 6px;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    overflow: hidden;
+}
+
+#app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+/* Header */
+#header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+}
+
+#header h1 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--accent);
+}
+
+#session-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+#session-title {
+    color: var(--text-dim);
+    font-size: 14px;
+}
+
+button {
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-input);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.2s;
+}
+
+button:hover {
+    background: var(--accent-soft);
+}
+
+/* Main layout */
+#main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* Chat panel */
+#chat-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    min-width: 400px;
+}
+
+#chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+}
+
+.message {
+    margin-bottom: 12px;
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    max-width: 90%;
+    position: relative;
+}
+
+.message.human {
+    background: var(--human);
+    margin-left: auto;
+    border-bottom-right-radius: 2px;
+}
+
+.message.agent {
+    background: var(--agent);
+    margin-right: auto;
+    border-bottom-left-radius: 2px;
+}
+
+.message .role {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.message .content {
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+}
+
+.message .actions {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.message:hover .actions {
+    opacity: 1;
+}
+
+.message .actions button {
+    padding: 2px 8px;
+    font-size: 11px;
+    border: none;
+    background: var(--correction);
+    color: white;
+    border-radius: 3px;
+}
+
+.message.tagged {
+    border-left: 3px solid var(--correction);
+}
+
+/* Chat input */
+#chat-input-area {
+    display: flex;
+    gap: 8px;
+    padding: 12px;
+    background: var(--bg-panel);
+    border-top: 1px solid var(--border);
+}
+
+#chat-input {
+    flex: 1;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-input);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 14px;
+    resize: none;
+}
+
+#chat-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+#btn-send {
+    align-self: flex-end;
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+    font-weight: 600;
+    padding: 10px 20px;
+}
+
+/* Workspace panel */
+#workspace-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 400px;
+}
+
+#workspace-tabs {
+    display: flex;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+}
+
+.tab {
+    flex: 1;
+    padding: 10px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 13px;
+}
+
+.tab.active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+}
+
+.tab-content {
+    display: none;
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+.placeholder {
+    color: var(--text-dim);
+    text-align: center;
+    padding: 40px;
+    font-style: italic;
+}
+
+/* Timeline */
+.timeline-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+}
+
+.timeline-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    flex-shrink: 0;
+}
+
+.timeline-dot.correction {
+    background: var(--correction);
+}
+
+.timeline-dot.fork {
+    background: #e9c46a;
+}
+
+.timeline-info {
+    flex: 1;
+}
+
+.timeline-info .seq {
+    color: var(--text-dim);
+    font-size: 11px;
+}
+
+/* Corrections list */
+.correction-item {
+    padding: 12px;
+    margin-bottom: 8px;
+    background: var(--bg-panel);
+    border-left: 3px solid var(--correction);
+    border-radius: var(--radius);
+}
+
+.correction-item .severity {
+    font-size: 11px;
+    text-transform: uppercase;
+    color: var(--correction);
+    margin-bottom: 4px;
+}
+
+.correction-item .missing {
+    font-size: 14px;
+    margin-bottom: 4px;
+}
+
+.correction-item .constraint {
+    font-size: 13px;
+    color: var(--text-dim);
+    font-style: italic;
+}
+
+/* Status bar */
+#status-bar {
+    display: flex;
+    gap: 24px;
+    padding: 6px 16px;
+    background: var(--bg-panel);
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-dim);
+}
+
+/* Dialogs */
+#dialog-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+}
+
+#dialog-overlay.hidden {
+    display: none;
+}
+
+.dialog {
+    display: none;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    min-width: 400px;
+    max-width: 600px;
+}
+
+.dialog.active {
+    display: block;
+}
+
+.dialog h2 {
+    margin-bottom: 16px;
+    font-size: 16px;
+    color: var(--accent);
+}
+
+.dialog label {
+    display: block;
+    margin-bottom: 12px;
+    font-size: 13px;
+    color: var(--text-dim);
+}
+
+.dialog input, .dialog textarea, .dialog select {
+    display: block;
+    width: 100%;
+    margin-top: 4px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-input);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 14px;
+}
+
+.dialog-buttons {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 16px;
+}
+
+/* Session list */
+.session-item {
+    padding: 10px;
+    margin-bottom: 6px;
+    background: var(--bg-input);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.session-item:hover {
+    background: var(--accent-soft);
+}
+
+.session-item .title {
+    font-weight: 600;
+}
+
+.session-item .meta {
+    font-size: 12px;
+    color: var(--text-dim);
+}
+
+/* Streaming indicator */
+.streaming {
+    animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
