@@ -124,6 +124,129 @@ class WorkspaceManager:
             logger.warning("Git snapshot failed: %s", e)
             return None
 
+    def create_worktree(
+        self, workspace_path: str, branch_name: str, start_commit: str
+    ) -> Path:
+        """Create a git worktree for a fork.
+
+        Args:
+            workspace_path: The main workspace (has the .git directory).
+            branch_name: Name for the new branch (e.g., 'fork-<uuid>').
+            start_commit: The commit hash to start from.
+
+        Returns:
+            Path to the new worktree directory.
+        """
+        worktree_dir = self.base_dir / branch_name
+        worktree_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create a new branch at the specified commit and add a worktree for it
+        subprocess.run(
+            ["git", "worktree", "add", "-b", branch_name, str(worktree_dir), start_commit],
+            cwd=workspace_path,
+            capture_output=True,
+            check=True,
+            env={**os.environ, "GIT_AUTHOR_NAME": "Socratic Arena",
+                 "GIT_AUTHOR_EMAIL": "arena@local",
+                 "GIT_COMMITTER_NAME": "Socratic Arena",
+                 "GIT_COMMITTER_EMAIL": "arena@local"},
+        )
+
+        # Ensure arena meta dir exists (not committed)
+        (worktree_dir / ".arena_meta").mkdir(exist_ok=True)
+
+        return worktree_dir
+
+    def diff_worktrees(
+        self, workspace_path: str, branch_a: str, branch_b: str
+    ) -> dict:
+        """Diff two branches in the same repo.
+
+        Args:
+            workspace_path: The main workspace (has the .git directory).
+            branch_a: First branch name (typically 'main' or 'master').
+            branch_b: Second branch name (the fork branch).
+
+        Returns:
+            Dict with 'stat' (summary) and 'diff' (full patch) keys.
+        """
+        try:
+            stat_result = subprocess.run(
+                ["git", "diff", "--stat", branch_a, branch_b],
+                cwd=workspace_path,
+                capture_output=True,
+                text=True,
+            )
+            diff_result = subprocess.run(
+                ["git", "diff", branch_a, branch_b],
+                cwd=workspace_path,
+                capture_output=True,
+                text=True,
+            )
+            return {
+                "stat": stat_result.stdout.strip() if stat_result.returncode == 0 else "",
+                "diff": diff_result.stdout.strip() if diff_result.returncode == 0 else "",
+            }
+        except Exception as e:
+            logger.warning("Git diff failed: %s", e)
+            return {"stat": "", "diff": ""}
+
+    def get_branch_name(self, workspace_path: str) -> str | None:
+        """Get the current branch name of a workspace."""
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=workspace_path,
+                capture_output=True,
+                text=True,
+            )
+            return result.stdout.strip() if result.returncode == 0 else None
+        except Exception:
+            return None
+
+    def get_log(self, workspace_path: str, branch: str = "HEAD", max_count: int = 50) -> list[dict]:
+        """Get git log entries for a branch.
+
+        Returns list of dicts with 'hash', 'subject', 'timestamp' keys.
+        """
+        try:
+            result = subprocess.run(
+                ["git", "log", "--format=%H|%s|%aI", f"--max-count={max_count}", branch],
+                cwd=workspace_path,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                return []
+            entries = []
+            for line in result.stdout.strip().split("\n"):
+                if not line:
+                    continue
+                parts = line.split("|", 2)
+                if len(parts) == 3:
+                    entries.append({
+                        "hash": parts[0],
+                        "subject": parts[1],
+                        "timestamp": parts[2],
+                    })
+            return entries
+        except Exception:
+            return []
+
+    def remove_worktree(self, workspace_path: str, branch_name: str) -> bool:
+        """Remove a git worktree."""
+        worktree_dir = self.base_dir / branch_name
+        try:
+            subprocess.run(
+                ["git", "worktree", "remove", str(worktree_dir), "--force"],
+                cwd=workspace_path,
+                capture_output=True,
+                check=True,
+            )
+            return True
+        except subprocess.CalledProcessError:
+            return False
+
 
 class SessionManager:
     """Manages active sessions, agent lifecycles, and interaction capture."""

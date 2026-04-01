@@ -34,12 +34,24 @@
             <div id="workspace-panel">
                 <div id="workspace-tabs">
                     <button class="tab active" onclick="switchTab('timeline')">Timeline</button>
+                    <button class="tab" onclick="switchTab('forks')">Forks</button>
+                    <button class="tab" onclick="switchTab('compare')">Compare</button>
                     <button class="tab" onclick="switchTab('corrections')">Corrections</button>
                     <button class="tab" onclick="switchTab('workspace')">Workspace</button>
                 </div>
                 <div id="tab-timeline" class="tab-content active">
                     <div id="timeline-view">
                         <p class="placeholder">Start a session to see the interaction timeline.</p>
+                    </div>
+                </div>
+                <div id="tab-forks" class="tab-content">
+                    <div id="forks-list">
+                        <p class="placeholder">No forks yet. Click the fork button on any exchange to explore alternatives.</p>
+                    </div>
+                </div>
+                <div id="tab-compare" class="tab-content">
+                    <div id="compare-view">
+                        <p class="placeholder">Select a fork to compare trajectories side by side.</p>
                     </div>
                 </div>
                 <div id="tab-corrections" class="tab-content">
@@ -60,6 +72,7 @@
             <span id="status-text">Ready</span>
             <span id="snapshot-count">Snapshots: 0</span>
             <span id="correction-count">Corrections: 0</span>
+            <span id="fork-count">Forks: 0</span>
         </footer>
     </div>
 
@@ -117,6 +130,22 @@
             </label>
             <div class="dialog-buttons">
                 <button onclick="submitCorrection()">Tag</button>
+                <button onclick="hideDialogs()">Cancel</button>
+            </div>
+        </div>
+
+        <!-- Fork Dialog -->
+        <div id="fork-dialog" class="dialog" onclick="event.stopPropagation()">
+            <h2>Fork &amp; Rewind</h2>
+            <p id="fork-context" class="fork-context-text"></p>
+            <label>What would you ask instead?
+                <textarea id="fork-intervention" rows="3" placeholder="e.g., 'Have you considered the sample size?'"></textarea>
+            </label>
+            <label>Notes (optional):
+                <textarea id="fork-notes" rows="2" placeholder="Why are you trying this alternative?"></textarea>
+            </label>
+            <div class="dialog-buttons">
+                <button onclick="submitFork()" class="btn-fork">Fork</button>
                 <button onclick="hideDialogs()">Cancel</button>
             </div>
         </div>

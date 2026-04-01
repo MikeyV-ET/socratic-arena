@@ -3,6 +3,8 @@
 let currentSessionId = null;
 let ws = null;
 let pendingCorrectionExchangeId = null;
+let pendingForkSnapshotId = null;
+let snapshotExchangeMap = {}; // maps exchange_id -> snapshot_id
 
 // ---------------------------------------------------------------------------
 // API helpers
@@ -134,6 +136,10 @@ function connectWebSocket(sessionId) {
         } else if (data.type === 'correction_tagged') {
             refreshCorrections();
             refreshTimeline();
+        } else if (data.type === 'fork_created') {
+            refreshForks();
+            refreshTimeline();
+            setStatus('Fork created');
         } else if (data.type === 'error') {
             setStatus('Error: ' + data.detail);
         }
@@ -182,20 +188,25 @@ function handleChatKeydown(event) {
 // Chat rendering
 // ---------------------------------------------------------------------------
 
-function addMessage(role, content, exchangeId = null, hasCorrection = false) {
+function addMessage(role, content, exchangeId = null, hasCorrection = false, snapshotId = null) {
     const chatDiv = document.getElementById('chat-messages');
     const msgDiv = document.createElement('div');
     msgDiv.className = `message ${role}${hasCorrection ? ' tagged' : ''}`;
     if (exchangeId) msgDiv.dataset.exchangeId = exchangeId;
+    if (snapshotId) msgDiv.dataset.snapshotId = snapshotId;
 
-    const tagButton = role === 'agent' && exchangeId
-        ? `<div class="actions"><button onclick="showCorrectionDialog('${exchangeId}')">Tag</button></div>`
-        : '';
+    let actionButtons = '';
+    if (role === 'agent' && exchangeId) {
+        actionButtons = `<div class="actions">
+            <button class="btn-tag" onclick="showCorrectionDialog('${exchangeId}')">Tag</button>
+            <button class="btn-fork-action" onclick="showForkDialog('${exchangeId}')">Fork</button>
+        </div>`;
+    }
 
     msgDiv.innerHTML = `
         <div class="role">${role}</div>
         <div class="content">${escapeHtml(content)}</div>
-        ${tagButton}
+        ${actionButtons}
     `;
 
     chatDiv.appendChild(msgDiv);
@@ -231,9 +242,16 @@ function finalizeStreaming(result) {
         streamingDiv.classList.remove('streaming');
         if (result && result.exchange_id) {
             streamingDiv.dataset.exchangeId = result.exchange_id;
+            if (result.snapshot && result.snapshot.id) {
+                streamingDiv.dataset.snapshotId = result.snapshot.id;
+                snapshotExchangeMap[result.exchange_id] = result.snapshot.id;
+            }
             const actions = document.createElement('div');
             actions.className = 'actions';
-            actions.innerHTML = `<button onclick="showCorrectionDialog('${result.exchange_id}')">Tag</button>`;
+            actions.innerHTML = `
+                <button class="btn-tag" onclick="showCorrectionDialog('${result.exchange_id}')">Tag</button>
+                <button class="btn-fork-action" onclick="showForkDialog('${result.exchange_id}')">Fork</button>
+            `;
             streamingDiv.appendChild(actions);
         }
         if (result && result.agent_response) {
@@ -325,25 +343,55 @@ async function refreshCorrections() {
 async function refreshTimeline() {
     if (!currentSessionId) return;
     try {
-        const snapshots = await api('GET', `/api/sessions/${currentSessionId}/snapshots`);
+        const forkPoints = await api('GET', `/api/sessions/${currentSessionId}/fork-points`);
+        const forks = await api('GET', `/api/sessions/${currentSessionId}/forks`);
+
+        // Build lookup: snapshot_id -> fork count
+        const forkCounts = {};
+        for (const fp of forkPoints) {
+            forkCounts[fp.id] = fp.fork_count || 0;
+        }
+
         const view = document.getElementById('timeline-view');
-        if (snapshots.length <= 1) {
+        if (forkPoints.length === 0) {
             view.innerHTML = '<p class="placeholder">Interaction timeline will appear here.</p>';
         } else {
-            view.innerHTML = snapshots.slice(1).map(s => `
-                <div class="timeline-item">
-                    <div class="timeline-dot${s.has_exchange ? '' : ' fork'}"></div>
-                    <div class="timeline-info">
-                        <div>Exchange #${s.sequence_num}</div>
-                        <div class="seq">${s.timestamp || ''} | ${s.workspace_state ? s.workspace_state.slice(0, 8) : 'no snapshot'}</div>
+            view.innerHTML = forkPoints.map(s => {
+                const hasForks = (forkCounts[s.id] || 0) > 0;
+                const dotClass = s.has_correction ? 'correction' : (hasForks ? 'fork' : '');
+                return `
+                    <div class="timeline-item">
+                        <div class="timeline-dot ${dotClass}"></div>
+                        <div class="timeline-info">
+                            <div>
+                                Exchange #${s.sequence_num}
+                                ${s.has_correction ? '<span class="badge correction-badge">correction</span>' : ''}
+                                ${hasForks ? `<span class="badge fork-badge">${forkCounts[s.id]} fork${forkCounts[s.id] > 1 ? 's' : ''}</span>` : ''}
+                            </div>
+                            <div class="seq">${s.timestamp || ''} | ${s.workspace_state ? s.workspace_state.slice(0, 8) : 'no snapshot'}</div>
+                        </div>
+                        <div class="timeline-actions">
+                            <button class="btn-timeline-fork" onclick="showForkDialogFromSnapshot('${s.id}')">Fork</button>
+                        </div>
                     </div>
-                </div>
-            `).join('');
+                `;
+            }).join('');
         }
-        document.getElementById('snapshot-count').textContent = `Snapshots: ${snapshots.length}`;
+        document.getElementById('snapshot-count').textContent = `Snapshots: ${forkPoints.length + 1}`;
     } catch (e) {
         console.error('Failed to refresh timeline:', e);
     }
+}
+
+function showForkDialogFromSnapshot(snapshotId) {
+    pendingForkSnapshotId = snapshotId;
+    document.getElementById('fork-context').textContent = 'Forking from snapshot';
+    hideAllDialogs();
+    document.getElementById('dialog-overlay').classList.remove('hidden');
+    document.getElementById('fork-dialog').classList.add('active');
+    document.getElementById('fork-intervention').value = '';
+    document.getElementById('fork-notes').value = '';
+    document.getElementById('fork-intervention').focus();
 }
 
 // ---------------------------------------------------------------------------
@@ -375,4 +423,230 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// ---------------------------------------------------------------------------
+// Fork & Rewind
+// ---------------------------------------------------------------------------
+
+async function showForkDialog(exchangeId) {
+    // Find the snapshot ID for this exchange
+    let snapshotId = snapshotExchangeMap[exchangeId];
+
+    if (!snapshotId) {
+        // Try to find it from the fork points API
+        try {
+            const points = await api('GET', `/api/sessions/${currentSessionId}/fork-points`);
+            for (const point of points) {
+                for (const ex of (point.exchanges || [])) {
+                    if (ex.id === exchangeId) {
+                        snapshotId = point.id;
+                        snapshotExchangeMap[exchangeId] = snapshotId;
+                        break;
+                    }
+                }
+                if (snapshotId) break;
+            }
+        } catch (e) {
+            console.error('Failed to find snapshot for exchange:', e);
+        }
+    }
+
+    if (!snapshotId) {
+        alert('Could not find the snapshot for this exchange. Try refreshing the page.');
+        return;
+    }
+
+    pendingForkSnapshotId = snapshotId;
+
+    // Show the exchange content as context
+    const msgDiv = document.querySelector(`[data-exchange-id="${exchangeId}"]`);
+    const content = msgDiv ? msgDiv.querySelector('.content').textContent : '';
+    document.getElementById('fork-context').textContent =
+        'Forking from: "' + content.slice(0, 100) + (content.length > 100 ? '...' : '') + '"';
+
+    hideAllDialogs();
+    document.getElementById('dialog-overlay').classList.remove('hidden');
+    document.getElementById('fork-dialog').classList.add('active');
+    document.getElementById('fork-intervention').value = '';
+    document.getElementById('fork-notes').value = '';
+    document.getElementById('fork-intervention').focus();
+}
+
+async function submitFork() {
+    if (!pendingForkSnapshotId) return;
+
+    const intervention = document.getElementById('fork-intervention').value.trim();
+    const notes = document.getElementById('fork-notes').value.trim();
+
+    if (!intervention) {
+        alert('Please enter your alternative question or intervention.');
+        return;
+    }
+
+    setStatus('Creating fork...');
+    hideDialogs();
+
+    try {
+        const result = await api('POST', `/api/snapshots/${pendingForkSnapshotId}/fork`, {
+            alternative_intervention: intervention,
+            notes: notes || null,
+        });
+
+        await refreshForks();
+        await refreshTimeline();
+        setStatus('Fork created successfully');
+
+        // Automatically show the comparison
+        showComparison(result.fork.id);
+    } catch (e) {
+        setStatus('Fork failed: ' + e.message);
+        alert('Failed to create fork: ' + e.message);
+    }
+}
+
+async function refreshForks() {
+    if (!currentSessionId) return;
+    try {
+        const forks = await api('GET', `/api/sessions/${currentSessionId}/forks`);
+        const list = document.getElementById('forks-list');
+        document.getElementById('fork-count').textContent = `Forks: ${forks.length}`;
+
+        if (forks.length === 0) {
+            list.innerHTML = '<p class="placeholder">No forks yet. Click the fork button on any exchange to explore alternatives.</p>';
+            return;
+        }
+
+        list.innerHTML = forks.map(f => `
+            <div class="fork-item" onclick="showComparison('${f.id}')">
+                <div class="fork-header">
+                    <span class="fork-icon">&#x1F500;</span>
+                    <span class="fork-label">Fork at exchange #${f.source_sequence_num || '?'}</span>
+                    <span class="fork-status">${f.forked_session_status || 'active'}</span>
+                </div>
+                <div class="fork-intervention">${escapeHtml(f.alternative_intervention)}</div>
+                ${f.notes ? `<div class="fork-notes">${escapeHtml(f.notes)}</div>` : ''}
+                <div class="fork-meta">${f.created_at || ''}</div>
+            </div>
+        `).join('');
+    } catch (e) {
+        console.error('Failed to refresh forks:', e);
+    }
+}
+
+async function showComparison(forkId) {
+    // Switch to compare tab
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab')[2].classList.add('active'); // Compare tab
+    document.getElementById('tab-compare').classList.add('active');
+
+    const view = document.getElementById('compare-view');
+    view.innerHTML = '<p class="placeholder">Loading comparison...</p>';
+
+    try {
+        const comparison = await api('GET', `/api/forks/${forkId}/compare`);
+        renderComparison(comparison);
+    } catch (e) {
+        view.innerHTML = `<p class="placeholder">Failed to load comparison: ${escapeHtml(e.message)}</p>`;
+    }
+}
+
+function renderComparison(comparison) {
+    const view = document.getElementById('compare-view');
+    const forkSeq = comparison.fork_point_sequence || 0;
+
+    // Split exchanges into shared (before fork) and divergent (after fork)
+    const origExchanges = comparison.original.exchanges || [];
+    const forkExchanges = comparison.forked.exchanges || [];
+
+    // Shared exchanges (before fork point)
+    const sharedOrig = origExchanges.filter(e => e.sequence_num <= forkSeq);
+    // Divergent exchanges
+    const divergentOrig = origExchanges.filter(e => e.sequence_num > forkSeq);
+    const divergentFork = forkExchanges.filter(e => e.sequence_num > 0); // skip initial snap
+
+    let html = `
+        <div class="compare-header">
+            <h3>Trajectory Comparison</h3>
+            <p class="compare-meta">Fork point: exchange #${forkSeq}</p>
+        </div>
+    `;
+
+    // Shared context (collapsed)
+    if (sharedOrig.length > 0) {
+        html += `
+            <details class="compare-shared">
+                <summary>Shared context (${sharedOrig.length} exchanges before fork)</summary>
+                <div class="compare-exchanges">
+                    ${sharedOrig.map(e => `
+                        <div class="compare-exchange ${e.role}">
+                            <span class="role-badge">${e.role}</span>
+                            ${escapeHtml(e.content)}
+                        </div>
+                    `).join('')}
+                </div>
+            </details>
+        `;
+    }
+
+    // Side-by-side divergent
+    html += `
+        <div class="compare-divergent">
+            <div class="compare-column">
+                <div class="compare-column-header">Original</div>
+                ${divergentOrig.length === 0 ? '<p class="placeholder">No further exchanges</p>' :
+                    divergentOrig.map(e => `
+                        <div class="compare-exchange ${e.role}">
+                            <span class="role-badge">${e.role}</span>
+                            ${escapeHtml(e.content)}
+                        </div>
+                    `).join('')
+                }
+            </div>
+            <div class="compare-divider"></div>
+            <div class="compare-column">
+                <div class="compare-column-header">Fork</div>
+                ${divergentFork.length === 0 ? '<p class="placeholder">No exchanges yet</p>' :
+                    divergentFork.map(e => `
+                        <div class="compare-exchange ${e.role}">
+                            <span class="role-badge">${e.role}</span>
+                            ${escapeHtml(e.content)}
+                        </div>
+                    `).join('')
+                }
+            </div>
+        </div>
+    `;
+
+    // Workspace diff
+    if (comparison.workspace_diff && comparison.workspace_diff.stat) {
+        html += `
+            <details class="compare-diff">
+                <summary>Workspace differences</summary>
+                <pre class="diff-content">${escapeHtml(comparison.workspace_diff.stat)}</pre>
+                ${comparison.workspace_diff.diff ? `<pre class="diff-patch">${escapeHtml(comparison.workspace_diff.diff)}</pre>` : ''}
+            </details>
+        `;
+    }
+
+    view.innerHTML = html;
+}
+
+// Update loadSession to also build snapshot map and load forks
+const _originalLoadSession = loadSession;
+loadSession = async function(sessionId) {
+    await _originalLoadSession(sessionId);
+    // Build snapshot-exchange map from fork points
+    try {
+        const points = await api('GET', `/api/sessions/${sessionId}/fork-points`);
+        for (const point of points) {
+            for (const ex of (point.exchanges || [])) {
+                snapshotExchangeMap[ex.id] = point.id;
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load fork points:', e);
+    }
+    await refreshForks();
 }

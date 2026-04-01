@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from .session_manager import SessionManager
+from .fork_engine import ForkEngine
 from .agent_backends.grok_stdio import GrokStdioBackend, EchoBackend
 
 logging.basicConfig(level=logging.INFO)
@@ -23,15 +24,17 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Socratic Arena", version="0.1.0")
 
-# Global session manager (initialized on startup)
+# Global session manager and fork engine (initialized on startup)
 manager: SessionManager = None
+fork_engine: ForkEngine = None
 
 
 @app.on_event("startup")
 async def startup():
-    global manager
+    global manager, fork_engine
     db_path = os.environ.get("SOCRATIC_ARENA_DB", None)
     manager = SessionManager(db_path=db_path)
+    fork_engine = ForkEngine(manager)
     logger.info("Socratic Arena started")
 
 
@@ -61,6 +64,13 @@ class TagCorrectionRequest(BaseModel):
 class UpdateCorrectionRequest(BaseModel):
     operating_constraint: Optional[str] = None
     severity: Optional[str] = None
+
+
+class CreateForkRequest(BaseModel):
+    alternative_intervention: str
+    notes: Optional[str] = None
+    backend: str = "echo"  # "echo" or "grok"
+    model: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +172,84 @@ async def get_corrections(session_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Fork & Rewind endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/sessions/{session_id}/fork-points")
+async def list_fork_points(session_id: str):
+    """List all valid fork points (snapshots) for a session."""
+    return fork_engine.list_fork_points(session_id)
+
+
+@app.post("/api/snapshots/{snapshot_id}/fork")
+async def create_fork(snapshot_id: str, req: CreateForkRequest):
+    """Create a fork from a snapshot with a different intervention."""
+    if req.backend == "grok":
+        backend = GrokStdioBackend(model=req.model)
+    else:
+        backend = EchoBackend()
+
+    try:
+        result = await fork_engine.create_fork(
+            snapshot_id=snapshot_id,
+            alternative_intervention=req.alternative_intervention,
+            notes=req.notes,
+            backend=backend,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/api/sessions/{session_id}/forks")
+async def list_forks(session_id: str):
+    """List all forks from a session."""
+    return fork_engine.get_forks(session_id)
+
+
+@app.get("/api/forks/{fork_id}")
+async def get_fork(fork_id: str):
+    """Get a single fork."""
+    fork = fork_engine.get_fork(fork_id)
+    if not fork:
+        raise HTTPException(status_code=404, detail="Fork not found")
+    return fork
+
+
+@app.get("/api/forks/{fork_id}/compare")
+async def compare_fork(fork_id: str):
+    """Compare a fork's trajectory against the original."""
+    fork = fork_engine.get_fork(fork_id)
+    if not fork:
+        raise HTTPException(status_code=404, detail="Fork not found")
+
+    # Find the original session from the source snapshot
+    db = manager._session_factory()
+    try:
+        from .models import Snapshot
+        source_snap = db.query(Snapshot).get(fork["source_snapshot_id"])
+        if not source_snap:
+            raise HTTPException(status_code=404, detail="Source snapshot not found")
+        original_session_id = source_snap.session_id
+    finally:
+        db.close()
+
+    return fork_engine.compare_trajectories(
+        original_session_id, fork["forked_session_id"]
+    )
+
+
+@app.get("/api/sessions/{session_id}/fork-tree")
+async def get_fork_tree(session_id: str):
+    """Get the full fork tree for a session."""
+    try:
+        return fork_engine.get_fork_tree(session_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
 # WebSocket for streaming
 # ---------------------------------------------------------------------------
 
@@ -240,6 +328,20 @@ async def websocket_session(ws: WebSocket, session_id: str):
                         what_was_missing=what_was_missing,
                     )
                     await ws.send_json({"type": "correction_tagged", "tag": tag})
+                except Exception as e:
+                    await ws.send_json({"type": "error", "detail": str(e)})
+
+            elif msg_type == "create_fork":
+                snapshot_id = data.get("snapshot_id", "")
+                alternative = data.get("alternative_intervention", "")
+                notes = data.get("notes", "")
+                try:
+                    result = await fork_engine.create_fork(
+                        snapshot_id=snapshot_id,
+                        alternative_intervention=alternative,
+                        notes=notes,
+                    )
+                    await ws.send_json({"type": "fork_created", "result": result})
                 except Exception as e:
                     await ws.send_json({"type": "error", "detail": str(e)})
 
