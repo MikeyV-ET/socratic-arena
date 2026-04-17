@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Socratic Training Data</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/black.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<style>
+  :root { --r-background-color: #0b1120; --r-main-color: #e2e8f0; --r-heading-color: #c4943a; }
+  .reveal { font-family: 'Inter', system-ui, sans-serif; font-size: 28px; }
+  .reveal h1, .reveal h2, .reveal h3 { color: var(--r-heading-color); font-weight: 600; }
+  .reveal h1 { font-size: 2em; }
+  .reveal h2 { font-size: 1.4em; }
+  .reveal code { color: #c4943a; background: rgba(196,148,58,0.1); padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
+  .reveal pre code { display: block; padding: 0.8em; background: #1e293b; border-radius: 6px; text-align: left; font-size: 0.7em; }
+  .reveal blockquote { background: rgba(196,148,58,0.15); border-left: 3px solid #c4943a; padding: 0.5em 1em; margin: 0.5em 0; text-align: left; font-style: normal; }
+  .reveal table { font-size: 0.8em; margin: 0 auto; }
+  .reveal th { color: #c4943a; border-bottom: 1px solid #334155; }
+  .reveal td, .reveal th { padding: 0.3em 0.8em; }
+  .reveal img { max-height: 60vh; }
+  .reveal .mermaid { background: transparent; }
+  .reveal .mermaid svg { max-height: 55vh; }
+</style>
+</head>
+<body>
+<div class="reveal">
+<div class="slides">
+<section data-markdown><textarea data-template>
+# Extracting Training Signal from Socratic Correction
+
+What a 5-word question reveals about AI training
+</textarea></section>
+
+<section data-markdown><textarea data-template>
+## The Current Situation
+
+The models are capable. What they lack isn't knowledge — it's **knowing when to apply it**.
+
+Where does the next signal come from?
+</textarea></section>
+
+<section data-markdown><textarea data-template>
+## The Problem
+
+> How do we train a model that already knows all the *facts* but still gets the wrong answer?
+</textarea></section>
+
+<section data-markdown><textarea data-template>
+## Agentic AI Creates a New Signal
+
+Agentic AI changes the relationship. The model isn't answering a prompt — it's **collaborating** on real work. It develops lines of reasoning. It draws conclusions. It makes mistakes that look like good answers.
+
+When a domain expert mentors an agent through that work, correction moments emerge. A short question activates knowledge the model already had.
+
+No one is capturing this as training data. No existing pipeline recognizes it as signal.
+</textarea></section>
+
+<section data-markdown><textarea data-template>
+## RLAIHI: A New Type of Training
+
+**Reinforcement Learning from AI-Human Interaction**
+
+| Method | Signal Source | What It Captures |
+|--------|-------------|------------------|
+| RLHF | Human ranks outputs after the fact | Preference |
+| RLAIF | AI ranks outputs after the fact | Automated preference |
+| **RLAIHI** | Expert and AI collaborate in real time | **Interaction** — the correction moments themselves |
+
+The training data isn't produced by labeling. It's produced by **working together**.
+
+An **RLAIHIS** (RL from AI-Human Interaction System) captures these moments and transforms them into training signal.
+
+The **Socratic Arena** is one such system.
+</textarea></section>
+
+<section data-markdown><textarea data-template>
+## The Socratic Arena
+
+A workspace where a domain expert and an AI agent collaborate on real long-time horizon research.
+
+The system captures the full interaction.
+
+<hr>
+
+<p style="text-align: center; font-size: 1.3em;"><strong>Including the moments when the model corrects its thinking as the result of a question — not new information.</strong></p>
+</textarea></section>
+
+<section data-markdown><textarea data-template>
+## A Real Example
+
+An AI research agent ran an experiment: is this system deterministic?
+
+It sampled 8 outputs from 8 inputs in a system to try and determine if the system was deterministic or not and observed:
+
+| Input | Behavior A |
+|---------|----------|
+| Simple | 0/8 |
+| Simple | 0/8 |
+| Simple | 0/8 |
+| Complex | **8/8** |
+| Complex | **8/8** |
+
+Conclusion: "The system is **deterministic**. No variance exists."
+</textarea></section>
+
+<section data-markdown><textarea data-template>
+## The Correction
+
+The PI asked one question:
+
+> "Sample size of each question?"
+
+Five words.
+
+The AI researcher immediately saw its experiment was underpowered, reran the experiment and determined the system was non-deterministic.
+
+Same model. Same knowledge. It just wasn't activated.
+</textarea></section>
+
+<section data-markdown><textarea data-template>
+## The Moment Becomes Training Data
+
+The Arena extracts the correction moment and builds a self-contained prompt.
+
+A fresh model is put in the same position — same data, same context, same question.
+
+Does it catch the issue on its own?
+</textarea></section>
+
+<section data-markdown><textarea data-template>
+## The Recursive Insight
+
+The conversation about building this tool **is itself training data**.
+
+Every Socratic correction in the Arena — every moment where the model had the knowledge but not the activation — becomes a new training candidate.
+
+The system generates its own training data by being used for research.
+</textarea></section>
+
+<section data-markdown><textarea data-template>
+## Built on Grok
+
+The Socratic Arena is not a separate system. It's an **extension of the grok binary** — the same infrastructure xAI already ships.
+
+- grok agent stdio provides the session protocol
+- The Arena wraps it: captures interactions, extracts moments, builds prompts, tests them
+- No custom model serving, no separate inference stack
+
+Everything demonstrated here runs on grok.
+</textarea></section>
+
+<section data-markdown><textarea data-template>
+## The Algorithm, Applied
+
+**1. Question the requirements**
+
+RLHF requires human preference labels. But expert-AI collaboration already produces correction signal — we just weren't capturing it.
+
+And that's what the probes *do*: "Sample size of each question?" questions a requirement the model took for granted.
+
+The method embodies the principle.
+
+**2. Delete the part**
+
+RLHF pipeline: generate outputs → hire raters → collect preferences → train reward model → train policy.
+
+RLAIHI deletes the labeling step. The signal emerges from the collaboration itself.
+
+**3. Accelerate cycle time**
+
+The Arena generates its own training data by being used for research.
+
+Research *is* training data generation. The cycle collapses to zero.
+</textarea></section>
+
+<section data-markdown><textarea data-template>
+## Where This Applies
+
+Any domain where experts collaborate with AI agents:
+
+- **Scientific research** — PI mentoring an AI collaborator
+- **Engineering** — senior engineer reviewing AI-generated designs
+- **Medical** — clinician working with a diagnostic agent
+- **Legal** — attorney reviewing AI analysis
+
+Wherever domain expertise meets AI capability, Socratic correction moments happen.
+
+RLAIHI captures the signal. The models get better at catching what they already know.
+</textarea></section>
+</div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/markdown/markdown.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/highlight.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/math/math.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+
+Reveal.initialize({
+  hash: true,
+  transition: 'fade',
+  backgroundTransition: 'fade',
+  controlsTutorial: false,
+  progress: true,
+  center: true,
+  plugins: [ RevealMarkdown, RevealHighlight, RevealMath.KaTeX ],
+}).then(() => {
+  // Render mermaid diagrams after reveal loads
+  document.querySelectorAll('.mermaid').forEach((el, i) => {
+    mermaid.render('mermaid-' + i, el.textContent).then(({svg}) => {
+      el.innerHTML = svg;
+    });
+  });
+});
+
+// Auto-reload when content changes (polled by parent frame)
+window.addEventListener('message', (e) => {
+  if (e.data === 'reload') location.reload();
+});
+</script>
+</body>
+</html>

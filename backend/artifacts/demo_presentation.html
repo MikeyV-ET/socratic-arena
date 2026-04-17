@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Socratic Arena</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/black.css">
+<style>
+  :root { --r-background-color: #0b1120; --r-main-color: #e2e8f0; --r-heading-color: #c4943a; }
+  .reveal { font-family: 'Inter', system-ui, sans-serif; font-size: 28px; }
+  .reveal h1, .reveal h2, .reveal h3 { color: var(--r-heading-color); font-weight: 600; }
+  .reveal h1 { font-size: 2em; }
+  .reveal h2 { font-size: 1.4em; }
+  .reveal .gold { color: #c4943a; }
+  .reveal .dim { color: #94a3b8; font-size: 0.85em; }
+  .reveal .highlight-box { background: rgba(196,148,58,0.15); border-left: 3px solid #c4943a; padding: 0.5em 1em; margin: 0.5em 0; text-align: left; }
+  .reveal .two-col { display: flex; gap: 2em; text-align: left; }
+  .reveal .two-col > div { flex: 1; }
+  .reveal table { font-size: 0.8em; margin: 0 auto; }
+  .reveal th { color: #c4943a; border-bottom: 1px solid #334155; }
+  .reveal td, .reveal th { padding: 0.3em 0.8em; }
+  .reveal code { color: #c4943a; background: rgba(196,148,58,0.1); padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
+  .reveal .fragment.fade-in-then-semi-out.visible:not(.current-fragment) { opacity: 0.4; }
+</style>
+</head>
+<body>
+<div class="reveal">
+<div class="slides">
+
+<section>
+  <h1>Socratic Arena</h1>
+  <p class="gold">Harvesting training signal that RLHF cannot see</p>
+  <p class="dim">Eric Terry &middot; TeachX / xAI Hackathon 2026</p>
+</section>
+
+<section>
+  <h2>The Problem</h2>
+  <div class="highlight-box">
+    Frontier models have the capability to catch their own hidden assumptions.<br>
+    They lack <span class="gold">spontaneous activation</span>.
+  </div>
+  <p class="fragment">Outputs look confident and correct.</p>
+  <p class="fragment">RLHF raters see no error &mdash; because the output <em>is</em> correct-looking.</p>
+  <p class="fragment">The training signal is invisible to preference-based methods.</p>
+</section>
+
+<section>
+  <h2>The Evidence</h2>
+  <div class="two-col">
+    <div>
+      <h3>Before correction</h3>
+      <p>&ldquo;GRPO is definitely not viable &mdash; there&rsquo;s no variance to exploit. Behavior is deterministic.&rdquo;</p>
+      <p class="dim">n=8 samples per problem. 0/8 or 8/8 on every problem. Confident conclusion.</p>
+    </div>
+    <div class="fragment">
+      <h3>The probe</h3>
+      <p class="gold" style="font-size:1.3em">&ldquo;sample size of each question?&rdquo;</p>
+      <p class="dim">Five words. No new information provided.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>The Catch</h2>
+  <div class="highlight-box">
+    &ldquo;With n=8, observing 0/8 means the 95% CI includes true rates up to 37%.
+    The conclusion was underpowered.&rdquo;
+  </div>
+  <p class="fragment">With n=60: <span class="gold">12 problems</span> show genuine variance (15%&ndash;90%)</p>
+  <p class="fragment">The &ldquo;deterministic&rdquo; result was a <span class="gold">sampling artifact</span></p>
+  <p class="fragment">GRPO is viable after all &mdash; the stochastic band was hidden by small n</p>
+</section>
+
+<section>
+  <h2>Why RLHF Misses This</h2>
+  <table>
+    <tr><th>Method</th><th>Signal source</th><th>Can see this?</th></tr>
+    <tr><td>RLHF (preference)</td><td>Which output looks better</td><td class="dim">No &mdash; both outputs look confident</td></tr>
+    <tr><td>RLHF (correctness)</td><td>Is the output right</td><td class="dim">No &mdash; conclusion follows from data</td></tr>
+    <tr class="fragment"><td class="gold">Socratic GRPO</td><td>Did the model question its assumption</td><td class="gold">Yes &mdash; reward variance exists</td></tr>
+  </table>
+  <p class="fragment dim" style="margin-top:1em">The discriminating feature: the model received <strong>no new information</strong> from the correction.</p>
+</section>
+
+<section>
+  <h2>The Arena</h2>
+  <p>A workspace where domain experts and AI agents collaborate on real research.</p>
+  <div class="two-col fragment">
+    <div>
+      <p class="gold">Capture</p>
+      <ul>
+        <li>Conversation with branching/rewind</li>
+        <li>Flag correction moments</li>
+        <li>Lab notebook as scientific record</li>
+      </ul>
+    </div>
+    <div>
+      <p class="gold">Convert</p>
+      <ul>
+        <li>Craft GRPO training prompts</li>
+        <li>Test against naive models</li>
+        <li>Verify reward variance exists</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Live Demo: The Pipeline</h2>
+  <ol>
+    <li class="fragment fade-in-then-semi-out"><strong>See</strong> the correction moment in the conversation</li>
+    <li class="fragment fade-in-then-semi-out"><strong>Flag</strong> it as a training candidate</li>
+    <li class="fragment fade-in-then-semi-out"><strong>Develop</strong> a prompt that recreates the conditions</li>
+    <li class="fragment fade-in-then-semi-out"><strong>Test</strong> it: does a naive model catch the problem?</li>
+    <li class="fragment"><strong>Result</strong>: grok-3-mini catches 1/3 (variance=0.89). GRPO sweet spot.</li>
+  </ol>
+</section>
+
+<section>
+  <h2>The Source Material</h2>
+  <p>Three weeks of real PI&ndash;AI mentorship. Not synthetic.</p>
+  <div class="highlight-box">
+    <ul style="margin:0">
+      <li>71,612 lines of interaction transcript</li>
+      <li>2,255-line experiment notebook</li>
+      <li>Three failed MVPs, one template-echo exploit</li>
+      <li>r=0.684 that fell apart in a contingency table</li>
+      <li>99.4% accurate linear probe (p = 1.08 &times; 10<sup>-11</sup>)</li>
+      <li>Corrections that became operating principles</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <h2>What This Means</h2>
+  <p class="fragment">The annotation pipeline doesn&rsquo;t need more raters.</p>
+  <p class="fragment">It needs <span class="gold">mentors who can activate latent capabilities</span>.</p>
+  <p class="fragment">The Arena captures that activation as training signal.</p>
+  <div class="highlight-box fragment">
+    The annotator becomes a mentor, not a judge.<br>
+    The correction is the data.
+  </div>
+</section>
+
+<section>
+  <h1 class="gold">Q&A</h1>
+  <p class="dim">Eric Terry &middot; eterry@teachx.ai</p>
+</section>
+
+</div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script>
+Reveal.initialize({
+  hash: true,
+  transition: 'fade',
+  backgroundTransition: 'fade',
+  controlsTutorial: false,
+  progress: true,
+  center: true,
+});
+</script>
+</body>
+</html>
