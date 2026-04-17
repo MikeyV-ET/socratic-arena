@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Socratic Arena</title>
+<style>
+  :root {
+    --bg: #1a1b26; --surface: #24283b; --surface2: #2f3447;
+    --text: #c0caf5; --text-dim: #565f89; --accent: #7aa2f7;
+    --green: #9ece6a; --yellow: #e0af68; --red: #f7768e;
+    --border: #3b4261; --radius: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  .container { max-width: 900px; margin: 0 auto; padding: 40px 20px; }
+  h1 { font-size: 2rem; margin-bottom: 8px; }
+  .subtitle { color: var(--text-dim); margin-bottom: 40px; font-size: 0.95rem; }
+  .subtitle em { color: var(--accent); font-style: normal; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; margin-bottom: 16px; }
+  .card:hover { border-color: var(--accent); }
+
+  .new-session { display: flex; gap: 12px; margin-bottom: 32px; }
+  .new-session input {
+    flex: 1; padding: 12px 16px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); color: var(--text); font-size: 1rem; outline: none;
+  }
+  .new-session input:focus { border-color: var(--accent); }
+  .btn {
+    padding: 12px 24px; background: var(--accent); color: var(--bg); border: none;
+    border-radius: var(--radius); font-size: 1rem; font-weight: 600; cursor: pointer;
+  }
+  .btn:hover { opacity: 0.9; }
+
+  .sessions-list { list-style: none; }
+  .session-item { display: flex; justify-content: space-between; align-items: center; }
+  .session-item a { color: var(--accent); text-decoration: none; font-weight: 500; font-size: 1.1rem; }
+  .session-item a:hover { text-decoration: underline; }
+  .session-meta { color: var(--text-dim); font-size: 0.85rem; }
+  .session-meta .count { color: var(--green); }
+  .session-meta .corrections { color: var(--yellow); }
+
+  .empty { color: var(--text-dim); text-align: center; padding: 40px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+  .badge-active { background: var(--green); color: var(--bg); }
+  .badge-paused { background: var(--yellow); color: var(--bg); }
+  .badge-completed { background: var(--text-dim); color: var(--bg); }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Socratic Arena</h1>
+  <p class="subtitle">An <em>RLAIHIS</em> &mdash; Reinforcement Learning from AI-Human Interaction System</p>
+
+  <div class="new-session">
+    <input type="text" id="session-name" placeholder="New session name..." value="">
+    <button class="btn" onclick="createSession()">Start Session</button>
+  </div>
+
+  <div id="sessions-container">
+    <p class="empty">Loading sessions...</p>
+  </div>
+</div>
+
+<script>
+const API = '/api';
+
+async function loadSessions() {
+  const res = await fetch(`${API}/sessions`);
+  const sessions = await res.json();
+  const container = document.getElementById('sessions-container');
+
+  if (sessions.length === 0) {
+    container.innerHTML = '<p class="empty">No sessions yet. Create one above to begin.</p>';
+    return;
+  }
+
+  container.innerHTML = '<ul class="sessions-list">' + sessions.map(s => {
+    const date = new Date(s.created_at * 1000).toLocaleDateString('en-US', {
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+    const badge = `<span class="badge badge-${s.status}">${s.status}</span>`;
+    return `<li class="card session-item">
+      <div>
+        <a href="/session/${s.id}">${s.name}</a> ${badge}
+        <div class="session-meta">${date}</div>
+      </div>
+      <div class="session-meta">
+        <span class="count">${s.message_count} messages</span> &middot;
+        <span class="corrections">${s.correction_count} corrections</span>
+      </div>
+    </li>`;
+  }).join('') + '</ul>';
+}
+
+async function createSession() {
+  const input = document.getElementById('session-name');
+  const name = input.value.trim() || 'Untitled Session';
+  const res = await fetch(`${API}/sessions`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name}),
+  });
+  const data = await res.json();
+  window.location.href = `/session/${data.id}`;
+}
+
+document.getElementById('session-name').addEventListener('keydown', e => {
+  if (e.key === 'Enter') createSession();
+});
+
+loadSessions();
+</script>
+</body>
+</html>

@@ -1,460 +1,258 @@
 # Socratic Arena — Design Document
 
-This document defines interfaces for parallel development. Three workstreams (backend, frontend, data) build against these contracts independently and converge at integration.
+> An RLAIHIS: Reinforcement Learning from AI-Human Interaction System
+
+## What This Is
+
+Socratic Arena is infrastructure that enables a scientist and an AI agent to co-collaborate on research while systematically extracting training signal from their interaction. It is the first implementation of an RLAIHIS — a system where the human-AI interaction itself is the training data.
+
+The system formalizes the methodology developed by Eric Terry and Sixel (documented in [sixel-as-a-scientist-in-training](https://github.com/sixel-et/sixel-as-a-scientist-in-training)): Socratic correction at moments of scientific failure produces training signal that standard RLHF cannot capture. The arena makes this process structured, repeatable, and experimentally powerful.
+
+## The Problem
+
+Currently, the Socratic mentorship methodology exists as:
+- Tacit knowledge in Eric's head (when to probe, what to probe, how to recognize a correction moment)
+- Raw transcripts between Eric and Sixel (71,612 lines, Feb 3-9 alone)
+- A manually-curated repo with three worked examples and an eval methodology
+
+This is not reproducible. Another researcher cannot pick this up and run it. The correction moments are buried in conversation. The training signal is latent, not extracted. The counterfactual question — "what if I had asked something different?" — is permanently lost once the conversation moves on.
+
+## Two Capabilities
+
+### Capability 1: Mentorship Workbench
+
+Infrastructure for a scientist-agent research collaboration that captures interaction as structured training signal.
+
+**Components:**
+
+#### 1.1 Workspace Environment
+Where the agent does the science. Must provide:
+- Compute access (local or cloud)
+- Code execution environment
+- Data storage and versioning
+- Tool access (calculators, APIs, datasets)
+- The bench — without it, "scientific reasoning" is just essay-writing about science
+
+#### 1.2 Interaction Capture
+Every exchange between mentor and agent, structured with:
+- Timestamps
+- Full conversation context at that moment
+- State of the work (code, results, files) at that moment
+- What the agent was about to do next (the trajectory before intervention)
+- Structured metadata: who spoke, message type (question/answer/correction/direction)
+
+This is NOT just a chat log. It's a state-annotated interaction trace.
+
+#### 1.3 Correction Tagging
+A way to mark moments where the mentor's probe changed the agent's trajectory. These are the training signal. The system must distinguish:
+- Routine exchanges (status updates, clarifications)
+- Direction changes (mentor redirects the work)
+- **Correction moments** (mentor's probe reveals a hidden assumption or methodological gap)
+
+Tagging can be:
+- Real-time (mentor marks it as it happens)
+- Retrospective (mentor reviews transcript and marks corrections)
+- Semi-automated (system flags candidate moments based on patterns: short mentor question followed by agent course-change)
+
+#### 1.4 Operating Constraint Extraction
+From each tagged correction, extract the principle that was installed:
+- "Run the control first"
+- "Check the mechanism, not the aggregate"
+- "Power your measurements"
+
+These become scaffold candidates — the system prompt instructions that, when present, activate the capability the agent already has but doesn't deploy unprompted.
+
+#### 1.5 Eval Prompt Generation
+From each extracted constraint, generate eval prompts following the 6-step verification methodology:
+1. Extract the scenario from the transcript
+2. Test naive framing (analysis question — models usually pass, too easy)
+3. Match the failure conditions (workflow framing — reproduces the actual failure)
+4. Verify the capability exists (follow-up probe — does the model recover?)
+5. Test scaffoldability (system prompt instruction — does it activate the check?)
+6. Verify across failure types (test on a second failure mode)
+
+This can be semi-automated: the system generates candidate prompts, the researcher refines them.
+
+#### 1.6 Training Signal Export
+Package corrections into formats that feed into training:
+- Interaction traces as preference pairs (trajectory-with-correction vs trajectory-without)
+- Extracted constraints as scaffold candidates for system prompts
+- Eval prompt batteries for measuring whether training worked
+- Fork-and-rewind trajectories as counterfactual training data
+
+### Capability 2: Fork and Rewind
+
+The mentor (and the agent, as co-analyst) can rewind to any interaction point and explore counterfactual trajectories.
+
+**How it works:**
+
+1. **Snapshot**: At each interaction point, the system captures the full state needed to replay from that moment (conversation history, system prompt, workspace state, files).
+
+2. **Fork**: The mentor selects a snapshot and provides a different intervention (different probe, open-ended question, silence, or a completely different direction).
+
+3. **Replay**: A fresh agent instance runs from the snapshot with the new intervention. The fork plays out as a new trajectory.
+
+4. **Co-analysis**: The original agent — the one who received the actual correction — watches the forked trajectory alongside the mentor. Together they analyze:
+   - Did the fresh instance make the same mistake?
+   - Did the alternative probe catch it?
+   - Would the agent have caught it on its own?
+   - Which probe formulation produced a more durable correction?
+
+5. **Comparison**: The system presents trajectories side-by-side with structural alignment (same decision points, different outcomes).
+
+**Why this matters:**
+
+Fork-and-rewind turns each correction moment from a single data point into a controlled experiment. The independent variable is the mentor's intervention. The dependent variable is the agent's trajectory. Everything else is held constant.
+
+This produces:
+- **Counterfactual training data**: "What would have happened without the correction?"
+- **Probe effectiveness data**: "Which formulation of the correction was most effective?"
+- **Spontaneous activation evidence**: "Would the agent have caught it given more time?"
+- **Meta-learning for the agent**: The agent studies its own failure modes as a co-researcher
+
+The agent as co-analyst is not a nice-to-have — it's central. The agent learning about the process of learning is the Socratic method applied to the Socratic method itself.
+
+### Capability 3: Agent Coordination Arena
+
+A test environment for evaluating how teams of agents coordinate under different instruction sets.
+
+**Components:**
+
+#### 3.1 Scenario Library
+Structured tasks that require coordination:
+- Information synthesis (different agents have different pieces)
+- Sequential handoff (one agent's output is another's input)
+- Conflict resolution (agents disagree on approach)
+- Resource contention (shared compute, shared state)
+- Convergence exercises (agents must align on a shared understanding)
+
+#### 3.2 Instruction Set Swapping
+The ability to run the same scenario with different team instruction sets and compare outcomes:
+- Baseline (no coordination instructions)
+- Minimal (role assignments only)
+- Structured (roles + communication protocols + escalation paths)
+- Full (roles + protocols + shared artifacts + review processes)
+
+#### 3.3 Measurement
+Quantitative metrics for coordination quality:
+- Task completion (did the team produce the right output?)
+- Communication efficiency (how many messages to reach the outcome?)
+- Error propagation (did one agent's mistake cascade?)
+- Recovery (when an error was caught, how quickly did the team correct?)
+- Convergence time (how long to reach shared understanding?)
+
+#### 3.4 Reproducibility
+Same scenario, same instruction set, different agent instances → comparable results. This requires controlled randomness and deterministic scenario presentation.
+
+## Architecture (Sketch)
+
+```
+┌─────────────────────────────────────────────────┐
+│                 Socratic Arena                   │
+│                                                  │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────┐  │
+│  │ Workspace │  │Interaction│  │  Fork/Rewind │  │
+│  │   Env     │  │  Capture  │  │    Engine    │  │
+│  └─────┬─────┘  └─────┬─────┘  └──────┬───────┘  │
+│        │              │               │          │
+│  ┌─────┴──────────────┴───────────────┴───────┐  │
+│  │           Session Manager                   │  │
+│  │  (snapshots, branching, replay)             │  │
+│  └─────────────────┬───────────────────────────┘  │
+│                    │                             │
+│  ┌─────────────────┴───────────────────────────┐  │
+│  │         Training Signal Pipeline            │  │
+│  │  (tag → extract → eval → export)            │  │
+│  └─────────────────────────────────────────────┘  │
+│                                                  │
+│  ┌─────────────────────────────────────────────┐  │
+│  │         Coordination Arena                  │  │
+│  │  (scenarios, instruction sets, measurement) │  │
+│  └─────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────┘
+```
+
+## Open Questions
+
+1. **Agent backend**: Should this work with any LLM API (OpenAI, Anthropic, etc.) or specifically with our asdaaas/agentabide infrastructure?
+
+2. **Workspace isolation**: Forked instances need isolated workspaces (so a fork's code changes don't affect the original). Containers? Git branches? Copy-on-write filesystem?
+
+3. **State capture granularity**: Snapshot at every message? Every N messages? Only at tagged moments? More granular = more storage but more fork points.
+
+4. **Real-time vs retrospective**: Does the mentor tag corrections in real-time (interrupting flow) or retrospectively (reviewing transcripts)? Both have tradeoffs.
+
+5. **Scale**: Is this for one mentor + one agent, or does it need to support multiple concurrent mentorship sessions?
+
+6. **Relationship to existing infra**: How much of agentabide (asdaaas) infrastructure carries over? The adapter pattern, the doorbell system, the health monitoring?
+
+## Prior Art
+
+- **Process reward models** (Lightman et al., 2023): Reward intermediate steps, but signal comes from automated verification. Socratic Arena sources signal from expert interaction.
+- **Constitutional AI** (Bai et al., 2022): Principles guide behavior, but principles are written a priori. Here, principles are extracted from observed failures.
+- **Debate** (Irving et al., 2018): Agents argue to reveal truth. Socratic Arena has a mentor who probes, not agents who debate.
+- **RLHF**: Rewards outputs. Socratic Arena targets the reasoning process — which operating constraint was missing.
+
+## UX: Web Application (Not CLI)
+
+**Critical design decision (from Eric's feedback):** The UX must be a web app, not CLI tools. The target user is a scientist (biologist, physicist, etc.), not a software engineer. "Easy for you. Not for a human unless they're a SWE and have a penchant for vi."
+
+### Interface Layout
+
+**Live Workspace** -- browser-based, three panels:
+- **Left**: Chat with the agent. Just talk. The system records everything automatically.
+- **Right**: Agent's workspace (code, results, notebook, artifacts). Live view of what the agent is doing.
+- **Bottom/overlay**: Timeline view, fork panel, eval results.
+
+### Interaction Flow
+
+1. **Working session**: Scientist opens browser, starts working with agent. No setup commands. Recording is automatic and invisible.
+
+2. **Correction tagging**: Click a button in the margin next to any exchange. Small popup: "What was missing?" Type a phrase. Save. Back to work. Minimal interruption.
+
+3. **Fork and rewind**: Scroll back, click any exchange, hit "What if?" Side panel opens. Type alternative question. Forked trajectory plays out in side panel. Original agent discusses the fork with you in the main panel.
+
+4. **Live prompt testing** (from Eric's feedback): In the moment of a correction, you and the agent say "let's test this." The agent scaffolds a single-prompt eval on the spot:
+   - Takes the current scenario, strips to essential structure
+   - Presents as standalone prompt to fresh model instances
+   - Results appear live: "Claude caught it, GPT missed it, Grok missed it"
+   - The agent helps design the prompt -- it knows the context and the 6-step methodology
+   - One click to run across multiple models
+   - This is the eval methodology from the repo, but live and collaborative
+
+5. **Timeline view**: Visual timeline showing exchanges, tagged corrections (highlighted), forks (branches), artifacts. Click any point to see state at that moment.
+
+6. **Dashboard**: Across sessions -- corrections tagged, constraints extracted, eval results, training signal readiness.
+
+### Design Principle
+
+The system captures everything; the researcher decides what matters. Infrastructure is invisible until needed. A scientist opens a browser and starts working.
+
+## Capability 4: Live Prompt Testing
+
+Added based on Eric's feedback. The human and agent collaboratively design and run eval prompts in real-time during the working session.
+
+**Flow:**
+1. Correction moment identified and tagged
+2. Human and agent agree: "This would be an interesting test"
+3. Agent scaffolds a single-prompt interaction from the scenario
+4. Fresh model instance(s) receive the prompt
+5. Results displayed live in the workspace
+6. Human and agent refine the prompt together
+7. Run across multiple models with one click
+8. Results feed into the training signal pipeline
+
+This collapses the gap between "identifying a correction" and "verifying it generalizes" from days to minutes.
+
+## Status
+
+Design phase. This document captures the conversation between Eric Terry and MikeyV-Cinco on 2026-03-30. Key pivot: from CLI tools to web application based on Eric's feedback about target user (scientists, not engineers).
+
+Next steps:
+- Eric to decide on GitHub org for the `socratic-arena` repo
+- Resolve open questions (agent backend, workspace isolation, etc.)
+- Begin implementation -- likely start with the session capture and tagging layer
 
 ---
 
-## 1. Data Shapes
-
-### 1.1 Conversation Tree
-
-The core data structure. A conversation is a tree of message nodes, not a linear thread.
-
-```typescript
-// Frontend (TypeScript)
-
-interface ConversationNode {
-  id: string;                    // globally unique: {sessionId}-{branchId}-{seq}
-  parentId: string | null;       // null for root
-  branchId: string;              // which branch this node belongs to
-  role: "user" | "assistant" | "system";
-  content: string;               // markdown text
-  thinking?: string;             // agent thinking (collapsible in UI)
-  timestamp: number;             // unix ms
-  eventId: string;               // maps to updates.jsonl event
-  children: string[];            // IDs of child nodes (branches)
-  flags: Flag[];                 // user-applied flags
-  metadata?: {
-    modelId?: string;
-    totalTokens?: number;
-    toolCalls?: ToolCallSummary[];
-  };
-}
-
-interface Flag {
-  id: string;
-  nodeId: string;
-  type: "training_candidate";    // extensible later
-  note?: string;                 // user annotation
-  createdAt: number;
-}
-
-interface ToolCallSummary {
-  toolCallId: string;
-  title: string;
-  status: "pending" | "completed" | "error";
-}
-
-interface Branch {
-  id: string;
-  parentNodeId: string;          // the node this branch forks from
-  rootNodeId: string;            // first node on this branch
-  sessionId: string;             // grok stdio session backing this branch
-  label?: string;                // user-assigned name
-  createdAt: number;
-}
-
-interface ConversationTree {
-  id: string;
-  branches: Record<string, Branch>;
-  nodes: Record<string, ConversationNode>;
-  rootNodeId: string;
-  activeBranchId: string;        // currently viewed branch
-  activeNodeId: string;          // currently viewed node (scroll position)
-}
-```
-
-```python
-# Backend (Pydantic)
-
-class ConversationNode(BaseModel):
-    id: str
-    parent_id: str | None
-    branch_id: str
-    role: Literal["user", "assistant", "system"]
-    content: str
-    thinking: str | None = None
-    timestamp: int
-    event_id: str
-    children: list[str] = []
-    flags: list[Flag] = []
-    metadata: dict | None = None
-
-class Flag(BaseModel):
-    id: str
-    node_id: str
-    type: str = "training_candidate"
-    note: str | None = None
-    created_at: int
-
-class Branch(BaseModel):
-    id: str
-    parent_node_id: str
-    root_node_id: str
-    session_id: str
-    label: str | None = None
-    created_at: int
-```
-
-### 1.2 Lab Notebook
-
-```typescript
-interface NotebookEntry {
-  id: string;
-  branchId: string;
-  eventIdRange: [string, string];  // first and last event this entry covers
-  timestamp: number;
-  title: string;
-  content: string;                  // markdown
-  tags?: string[];
-}
-
-interface Notebook {
-  entries: NotebookEntry[];
-}
-```
-
-### 1.3 Prompt Development
-
-```typescript
-interface TrainingPrompt {
-  id: string;
-  flagId: string;                   // the flag this was developed from
-  sourceNodeId: string;             // the flagged conversation node
-  systemPrompt: string;            // context-setting for the naive model
-  userPrompt: string;              // the prompt that should reproduce the failure
-  expectedBehavior: string;        // what "catching it" looks like
-  failureBehavior: string;         // what "missing it" looks like
-  status: "draft" | "testing" | "validated" | "rejected";
-  testResults: PromptTestRun[];
-}
-
-interface PromptTestRun {
-  id: string;
-  promptId: string;
-  n: number;                       // number of completions
-  results: PromptTestResult[];
-  varianceScore: number;           // 0-1, how much reward variance
-  timestamp: number;
-}
-
-interface PromptTestResult {
-  id: string;
-  completion: string;
-  caught: boolean;                 // did the model catch the gap?
-  reward: number;                  // 0.0 or 1.0
-}
-```
-
-### 1.4 Artifact
-
-```typescript
-interface Artifact {
-  id: string;
-  branchId: string;
-  type: "presentation" | "writeup";
-  filename: string;                // path relative to workspace
-  title: string;
-  lastModified: number;
-}
-```
-
----
-
-## 2. WebSocket API
-
-Single WebSocket connection between React frontend and FastAPI backend.
-
-### 2.1 Connection
-
-```
-ws://localhost:8000/ws
-```
-
-### 2.2 Message Format
-
-All messages are JSON with a `type` field for routing.
-
-```typescript
-// Client → Server
-interface ClientMessage {
-  type: string;
-  payload: any;
-}
-
-// Server → Client
-interface ServerMessage {
-  type: string;
-  payload: any;
-}
-```
-
-### 2.3 Message Types
-
-**Conversation:**
-
-```typescript
-// Client → Server: send a message in the conversation
-{ type: "conversation.send", payload: { branchId: string, content: string } }
-
-// Server → Client: agent response streaming (chunk by chunk)
-{ type: "conversation.chunk", payload: { nodeId: string, content: string, done: boolean } }
-
-// Server → Client: agent thinking streaming
-{ type: "conversation.thinking", payload: { nodeId: string, content: string, done: boolean } }
-
-// Server → Client: tool call notification
-{ type: "conversation.tool_call", payload: { nodeId: string, toolCall: ToolCallSummary } }
-
-// Server → Client: turn complete
-{ type: "conversation.turn_complete", payload: { nodeId: string, branchId: string } }
-```
-
-**Branching:**
-
-```typescript
-// Client → Server: fork from a node
-{ type: "branch.create", payload: { fromNodeId: string, label?: string } }
-
-// Server → Client: branch created
-{ type: "branch.created", payload: { branch: Branch } }
-
-// Client → Server: switch active view to a branch
-{ type: "branch.switch", payload: { branchId: string } }
-```
-
-**Flagging:**
-
-```typescript
-// Client → Server: flag a node
-{ type: "flag.create", payload: { nodeId: string, note?: string } }
-
-// Server → Client: flag created
-{ type: "flag.created", payload: { flag: Flag } }
-
-// Client → Server: remove a flag
-{ type: "flag.delete", payload: { flagId: string } }
-```
-
-**Prompt Development:**
-
-```typescript
-// Client → Server: create prompt from flagged node
-{ type: "prompt.create", payload: { flagId: string, systemPrompt: string, userPrompt: string, expectedBehavior: string, failureBehavior: string } }
-
-// Server → Client: prompt created
-{ type: "prompt.created", payload: { prompt: TrainingPrompt } }
-
-// Client → Server: update prompt
-{ type: "prompt.update", payload: { promptId: string, fields: Partial<TrainingPrompt> } }
-```
-
-**Prompt Testing:**
-
-```typescript
-// Client → Server: run test
-{ type: "prompt_test.run", payload: { promptId: string, n: number } }
-
-// Server → Client: individual result (streams as each completion finishes)
-{ type: "prompt_test.result", payload: { promptId: string, runId: string, result: PromptTestResult, progress: { completed: number, total: number } } }
-
-// Server → Client: run complete with summary
-{ type: "prompt_test.complete", payload: { promptId: string, run: PromptTestRun } }
-```
-
-**Notebook:**
-
-```typescript
-// Client → Server: request notebook
-{ type: "notebook.get", payload: { branchId?: string } }
-
-// Server → Client: notebook contents
-{ type: "notebook.data", payload: { notebook: Notebook } }
-
-// Server → Client: new entry added (push notification)
-{ type: "notebook.entry_added", payload: { entry: NotebookEntry } }
-```
-
-**State:**
-
-```typescript
-// Client → Server: request full state (on connect / reconnect)
-{ type: "state.sync", payload: {} }
-
-// Server → Client: full state dump
-{ type: "state.snapshot", payload: { tree: ConversationTree, notebook: Notebook, prompts: TrainingPrompt[], artifacts: Artifact[] } }
-```
-
----
-
-## 3. REST Endpoints
-
-For non-streaming operations that don't need WebSocket.
-
-```
-GET  /api/health                    → { status: "ok" }
-GET  /api/tree                      → ConversationTree
-GET  /api/tree/node/{nodeId}        → ConversationNode
-GET  /api/flags                     → Flag[]
-GET  /api/prompts                   → TrainingPrompt[]
-GET  /api/prompts/{promptId}        → TrainingPrompt
-GET  /api/notebook                  → Notebook
-GET  /api/artifacts                 → Artifact[]
-POST /api/artifacts                 → create artifact
-GET  /api/artifacts/{id}/content    → raw file content
-```
-
----
-
-## 4. Component Inventory
-
-### 4.1 Layout
-
-```
-+------------------------------------------------------------------+
-|  Header: "Socratic Arena" + session info + branch selector        |
-+------------------+-----------------------------------------------+
-|                  |                                                 |
-|   Tree View      |   Main Conversation                            |
-|   (collapsible)  |   (scrollable, markdown-rendered messages)      |
-|                  |   [flag button per message]                     |
-|   - visual tree  |   [branch point indicators]                     |
-|   - click to     |                                                 |
-|     navigate     |   +--input bar---------------------------+      |
-|                  |   | Type a message...            [Send]  |      |
-|                  |   +--------------------------------------+      |
-+------------------+-----------------------------------------------+
-|                  |                          |                      |
-|   Lab Notebook   |   Prompt Development     |   Prompt Testing     |
-|   (scrollable    |   (form + preview)       |   (results grid +    |
-|    markdown)     |                          |    variance meter)   |
-|                  |                          |                      |
-+------------------+--------------------------+----------------------+
-```
-
-All panels resizable via react-resizable-panels. Bottom row collapsible.
-
-### 4.2 Component Tree
-
-```
-App
-├── Header
-│   ├── SessionInfo
-│   └── BranchSelector (dropdown)
-├── PanelLayout (react-resizable-panels)
-│   ├── TopRow (horizontal split)
-│   │   ├── TreeView (d3 conversation tree visualization)
-│   │   │   └── TreeNode (interactive, click to navigate)
-│   │   └── ConversationPane
-│   │       ├── MessageList
-│   │       │   └── Message (role, content, thinking toggle, flag button)
-│   │       │       ├── FlagButton
-│   │       │       └── BranchIndicator
-│   │       └── InputBar
-│   └── BottomRow (horizontal split, collapsible)
-│       ├── NotebookPane
-│       │   └── NotebookEntryList
-│       │       └── NotebookEntryCard
-│       ├── PromptDevPane
-│       │   ├── PromptForm (system prompt, user prompt, expected, failure)
-│       │   └── PromptPreview
-│       └── PromptTestPane
-│           ├── TestControls (n slider, run button)
-│           ├── ResultsGrid (completion cards, color-coded caught/missed)
-│           └── VarianceMeter (visual: 0% = useless, 50% = ideal, 100% = useless)
-└── WebSocketProvider (context, manages connection + reconnect)
-```
-
-### 4.3 Artifact Pane (stretch goal)
-
-Rendered as an additional panel or popout. Embeds reveal.js iframe pointing at artifact file served by the backend. Not in initial build — the core five panes come first.
-
----
-
-## 5. File Ownership
-
-To prevent collisions between parallel agents:
-
-```
-/projects/workspace/
-├── DESIGN.md                    ← shared reference (read-only during build)
-├── AGENTS.md                    ← Rook only
-├── lab_notebook.md              ← Rook only
-│
-├── backend/                     ← BACKEND AGENT
-│   ├── main.py                  ← FastAPI app, WebSocket handler
-│   ├── models.py                ← Pydantic models (from §1)
-│   ├── session_manager.py       ← grok stdio subprocess management
-│   ├── conversation_tree.py     ← tree data model + operations
-│   ├── notebook_store.py        ← notebook read/write
-│   ├── prompt_store.py          ← prompt CRUD + test execution
-│   ├── requirements.txt
-│   └── tests/
-│
-├── frontend/                    ← FRONTEND AGENT
-│   ├── src/
-│   │   ├── App.tsx
-│   │   ├── components/
-│   │   │   ├── layout/          ← PanelLayout, Header
-│   │   │   ├── conversation/    ← ConversationPane, MessageList, Message, InputBar
-│   │   │   ├── tree/            ← TreeView (d3)
-│   │   │   ├── notebook/        ← NotebookPane
-│   │   │   ├── prompt/          ← PromptDevPane, PromptTestPane
-│   │   │   └── common/          ← shared UI components
-│   │   ├── hooks/
-│   │   │   └── useWebSocket.ts  ← WebSocket connection + message routing
-│   │   ├── types/
-│   │   │   └── index.ts         ← TypeScript interfaces (from §1)
-│   │   └── stores/
-│   │       └── arenaStore.ts    ← state management (zustand or context)
-│   ├── package.json
-│   └── vite.config.ts
-│
-└── data/                        ← DATA AGENT
-    ├── parse_updates_jsonl.py   ← transform updates.jsonl → ConversationTree JSON
-    ├── sample_tree.json         ← pre-parsed sample data for demo
-    ├── sample_notebook.json     ← pre-parsed notebook data
-    └── raw/                     ← raw session data from sixel-comms
-```
-
----
-
-## 6. Integration Checklist
-
-When the three workstreams converge:
-
-- [ ] Frontend connects to backend WebSocket at ws://localhost:8000/ws
-- [ ] `state.sync` on connect returns full tree + notebook + prompts
-- [ ] Sending a message via `conversation.send` produces streaming chunks
-- [ ] Tree visualization updates when new nodes/branches are created
-- [ ] Flagging a message persists and appears in prompt dev pane
-- [ ] Prompt testing fires n completions and streams results
-- [ ] Sample data loads on startup for demo mode
-- [ ] Notebook pane renders entries and updates on push
-
----
-
-## 7. Demo Mode vs Live Mode
-
-**Demo mode** (for hackathon presentation): loads pre-parsed sample data from `data/sample_tree.json`. Navigation, flagging, prompt development, and prompt testing all work against this data. No live `grok agent stdio` process needed.
-
-**Live mode** (full system): manages a real `grok agent stdio` subprocess. Streams responses in real-time. Creates branches by forking sessions. This is the target architecture but demo mode ships first.
-
-Both modes use the same frontend. The backend switches data source based on configuration.
-
----
-
-## 8. Sequence: What Gets Built First
-
-1. **Backend skeleton** — FastAPI app, WebSocket handler, REST endpoints returning mock data, Pydantic models
-2. **Frontend skeleton** — Vite + React scaffold, panel layout, WebSocket hook, type definitions
-3. **Data parsing** — transform sample updates.jsonl into ConversationTree JSON
-4. **Conversation pane** — message list rendering from sample data, input bar (demo: no-op or echo)
-5. **Tree visualization** — d3 interactive tree from sample data, click to navigate
-6. **Flagging** — flag button on messages, flag list
-7. **Prompt development** — form to craft prompt from flagged node
-8. **Prompt testing** — fire prompt n times, stream results, display variance
-9. **Notebook pane** — render notebook entries
-10. **Integration** — connect frontend to real backend, live streaming
-11. **Polish** — styling, animations, responsive layout, error states
-12. **Artifact pane** — reveal.js embed (stretch)
+*Authors: Eric Terry (research direction), MikeyV-Cinco (design, implementation)*
