@@ -217,6 +217,20 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
     const branch = t.branches[t.activeBranchId];
     if (!branch) return [];
 
+    // Build ancestors from selectedNodeId (or activeNodeId) so the walk
+    // follows the path toward the target node at fork points.
+    const targetId = state.selectedNodeId || t.activeNodeId;
+    const ancestors = new Set<string>();
+    let anc: ConversationNode | undefined = targetId ? t.nodes[targetId] : undefined;
+    while (anc) {
+      ancestors.add(anc.id);
+      anc = anc.parentId ? t.nodes[anc.parentId] : undefined;
+    }
+
+    const pickNext = (children: string[]): string | undefined =>
+      children.find((cid) => ancestors.has(cid)) ??
+      children.find((cid) => t.nodes[cid]?.branchId === t.activeBranchId);
+
     const nodes: ConversationNode[] = [];
 
     const getNodePath = (nodeId: string): ConversationNode[] => {
@@ -234,15 +248,11 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
       const forkPoint = t.nodes[branch.parentNodeId];
       if (forkPoint) {
         let current: ConversationNode | undefined;
-        const nextOnBranch = forkPoint.children.find(
-          (cid) => t.nodes[cid]?.branchId === t.activeBranchId
-        );
+        const nextOnBranch = pickNext(forkPoint.children);
         current = nextOnBranch ? t.nodes[nextOnBranch] : undefined;
         while (current) {
           nodes.push(current);
-          const nextId: string | undefined = current.children.find(
-            (cid) => t.nodes[cid]?.branchId === t.activeBranchId
-          );
+          const nextId = pickNext(current.children);
           current = nextId ? t.nodes[nextId] : undefined;
         }
       }
@@ -250,9 +260,7 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
       let current: ConversationNode | undefined = t.nodes[branch.rootNodeId];
       while (current) {
         nodes.push(current);
-        const nextId: string | undefined = current.children.find(
-          (cid) => t.nodes[cid]?.branchId === t.activeBranchId
-        );
+        const nextId = pickNext(current.children);
         current = nextId ? t.nodes[nextId] : undefined;
       }
     }
@@ -403,7 +411,11 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
 
   selectNode: (nodeId) => set({ selectedNodeId: nodeId }),
   scrollToNode: (nodeId) => {
-    set({ selectedNodeId: nodeId, scrollTargetId: nodeId });
+    set((state) => ({
+      selectedNodeId: nodeId,
+      scrollTargetId: nodeId,
+      tree: { ...state.tree, activeNodeId: nodeId },
+    }));
     get().sendWs?.({
       type: "viewport.focus",
       payload: { pane: "navigate", nodeId, source: "click" },

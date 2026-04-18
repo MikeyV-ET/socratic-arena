@@ -6,7 +6,7 @@ import { useArenaStore } from '@/stores/arenaStore'
 
 // Expose store for e2e testing (Selenium can call window.__ARENA_STORE__)
 if (import.meta.env.DEV) {
-  (window as never)['__ARENA_STORE__'] = useArenaStore;
+  (window as any).__ARENA_STORE__ = useArenaStore;
 }
 
 // Apply saved theme on load

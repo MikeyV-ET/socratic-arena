@@ -59,7 +59,6 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   const historyAgent = useArenaStore((s) => s.historyAgent);
   const setHistoryAgent = useArenaStore((s) => s.setHistoryAgent);
   const setHistoryTree = useArenaStore((s) => s.setHistoryTree);
-  const setTree = useArenaStore((s) => s.setTree);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const userScrolling = useRef(false);

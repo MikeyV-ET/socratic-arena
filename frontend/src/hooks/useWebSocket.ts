@@ -66,6 +66,8 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       const updContent = msg.payload.content as string;
       const updThinking = msg.payload.thinking as string | undefined;
       store.updateLiveNode(updNodeId, updContent, updThinking);
+      store.setAwaitingResponse(false);
+      store.triggerScrollToBottom();
       break;
     }
 

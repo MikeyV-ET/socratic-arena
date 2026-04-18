@@ -14,6 +14,7 @@ export function InputBar() {
     if (!ta) return;
     ta.style.height = "auto";
     ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
+    useArenaStore.getState().triggerScrollToBottom();
   }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
