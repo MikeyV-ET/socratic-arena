@@ -78,6 +78,9 @@ echo "[1/3] Starting backend..."
 cd "$SCRIPT_DIR"
 setsid nohup env ARENA_AGENT="$AGENT" python3 -m uvicorn main:app \
     --host 0.0.0.0 --port 8000 \
+    --ws-max-size 33554432 \
+    --timeout-keep-alive 120 \
+    --log-level info \
     >> /tmp/arena_backend.log 2>&1 &
 BACKEND_PID=$!
 echo "$BACKEND_PID backend" >> "$PID_FILE"

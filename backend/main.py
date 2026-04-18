@@ -153,6 +153,10 @@ def _build_default_state() -> StateSnapshot:
     return st
 
 state: StateSnapshot = _build_default_state()
+# Node IDs created by the arena conversation (not live-tailed).
+# _trim_state_payload preserves paths through these so snapshots don't drop arena messages.
+_arena_node_ids: set[str] = set()
+
 user_viewport: dict = {
     "conversationNode": "", "workbenchTab": "history", "source": "",
     "workbenchFocus": {},  # {tab, contentId, contentType, summary}
@@ -173,11 +177,15 @@ LIVE_TAIL_INTERVAL = 2.0  # seconds between polls
 
 
 def _trim_state_payload(payload: dict) -> dict:
-    """Trim state.snapshot payload to only active-branch nodes.
+    """Trim state.snapshot payload to active-branch nodes + arena conversation nodes.
 
     The full tree can have thousands of nodes across many branches.
     The client only renders the active branch, so we walk from root
-    toward activeNodeId, keeping only nodes on that path.
+    toward activeNodeId, keeping nodes on that path.
+
+    Also preserves paths through any arena-created conversation nodes
+    (tracked in _arena_node_ids) so that snapshots from flag/prompt
+    operations don't drop messages the user just sent.
     """
     tree = payload.get("tree", {})
     all_nodes = tree.get("nodes", {})
@@ -193,28 +201,43 @@ def _trim_state_payload(payload: dict) -> dict:
     nid = active_id
     while nid and nid in all_nodes:
         if nid in ancestors:
-            break  # cycle in parent chain
+            break
         ancestors.add(nid)
         nid = all_nodes[nid].get("parentId", "") or ""
 
+    # Also include ancestor paths for all arena conversation nodes
+    for arena_id in _arena_node_ids:
+        nid = arena_id
+        while nid and nid in all_nodes:
+            if nid in ancestors:
+                break
+            ancestors.add(nid)
+            nid = all_nodes[nid].get("parentId", "") or ""
+
     # Walk from root following ancestors, then continue on active branch
     kept: dict[str, dict] = {}
-    cur = root_id
-    while cur and cur in all_nodes:
-        kept[cur] = all_nodes[cur]
-        children = all_nodes[cur].get("children", [])
-        nxt = None
-        for cid in children:
-            if cid in ancestors:
-                nxt = cid
-                break
-        if not nxt:
+
+    def _walk_from(start_id: str):
+        cur = start_id
+        while cur and cur in all_nodes and cur not in kept:
+            kept[cur] = all_nodes[cur]
+            children = all_nodes[cur].get("children", [])
+            # Follow ALL children that are ancestors (handles forks)
+            followed_any = False
             for cid in children:
-                node = all_nodes.get(cid, {})
-                if node.get("branchId") == active_branch:
-                    nxt = cid
-                    break
-        cur = nxt
+                if cid in ancestors:
+                    _walk_from(cid)
+                    followed_any = True
+            if not followed_any:
+                # No ancestor children; follow the active branch
+                for cid in children:
+                    node = all_nodes.get(cid, {})
+                    if node.get("branchId") == active_branch:
+                        _walk_from(cid)
+                        break
+            break  # only process this node once
+
+    _walk_from(root_id)
 
     trimmed_tree = {**tree, "nodes": kept}
     return {**payload, "tree": trimmed_tree}
@@ -538,6 +561,7 @@ async def handle_conversation_send(ws: WebSocket, payload: dict):
         content=content,
     )
     state.tree.nodes[user_node.id] = user_node
+    _arena_node_ids.add(user_node.id)
     if state.tree.active_node_id and state.tree.active_node_id in state.tree.nodes:
         state.tree.nodes[state.tree.active_node_id].children.append(user_node.id)
 
@@ -551,13 +575,27 @@ async def handle_conversation_send(ws: WebSocket, payload: dict):
         agent_label=_current_agent,
     )
     state.tree.nodes[assistant_node.id] = assistant_node
+    _arena_node_ids.add(assistant_node.id)
     user_node.children.append(assistant_node.id)
     state.tree.active_node_id = assistant_node.id
 
-    # Broadcast updated tree
+    # Broadcast new nodes incrementally (NOT full state.snapshot, which
+    # gets trimmed and can drop arena nodes when live tailer moves activeNodeId)
     await broadcast({
-        "type": "state.snapshot",
-        "payload": state.model_dump(),
+        "type": "tree.live_node",
+        "payload": {
+            "action": "add",
+            "node": user_node.model_dump(),
+            "parentId": user_node.parent_id,
+        },
+    })
+    await broadcast({
+        "type": "tree.live_node",
+        "payload": {
+            "action": "add",
+            "node": assistant_node.model_dump(),
+            "parentId": assistant_node.parent_id,
+        },
     })
 
     # Signal waiting for agent (adapter delivers response asynchronously)
@@ -1444,10 +1482,12 @@ async def load_persisted_data():
 
 
 @app.on_event("shutdown")
-async def shutdown_agent():
-    global agent
-    if agent:
-        await agent.stop()
+async def shutdown_cleanup():
+    global _live_task, _test_http_client
+    if _live_task and not _live_task.done():
+        _live_task.cancel()
+    if _test_http_client and not _test_http_client.is_closed:
+        await _test_http_client.aclose()
 
 
 @app.post("/api/agent/action")
