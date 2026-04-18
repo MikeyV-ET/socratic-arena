@@ -183,6 +183,46 @@ def run_browser_e2e():
 
         # Step 5: Write response to outbox
         if node_id:
+            # Step 5a: Simulate live tailer drift — inject a fake node via the
+            # Zustand store that changes activeNodeId BEFORE the response arrives.
+            # This reproduces what happens when minutes pass: the live tailer
+            # adds nodes from updates.jsonl, each calling addLiveNode which
+            # resets activeNodeId to the live-tailed node.
+            log("5a", "Injecting fake live-tailed node to drift activeNodeId...")
+            drift_result = driver.execute_script("""
+                const store = window.__ARENA_STORE__;
+                if (!store) return {error: 'no __ARENA_STORE__ global'};
+                const state = store.getState();
+                const assistantNodeId = arguments[0];
+                const assistantNode = state.tree.nodes[assistantNodeId];
+                if (!assistantNode) return {error: 'assistant node not found'};
+                // Fork from the SAME parent as the arena assistant node.
+                // This creates a sibling path — exactly what the live tailer does.
+                const forkParent = assistantNode.parentId;
+                const fakeNode = {
+                    id: 'fake_livetail_' + Date.now(),
+                    parentId: forkParent,
+                    branchId: state.tree.activeBranchId,
+                    role: 'assistant',
+                    content: '[live tailer simulated node]',
+                    children: [],
+                    flags: [],
+                    thinking: null,
+                    agent_label: null,
+                };
+                // addLiveNode sets activeNodeId = fakeNode.id (the drift!)
+                store.getState().addLiveNode(fakeNode, forkParent);
+                const after = store.getState();
+                return {
+                    before: assistantNodeId,
+                    after: after.tree.activeNodeId,
+                    drifted: after.tree.activeNodeId !== assistantNodeId,
+                };
+            """, node_id)
+            log("5a", f"Drift result: {drift_result}")
+            results["drift_injected"] = drift_result.get("drifted", False) if drift_result else False
+            time.sleep(0.5)
+
             resp_file = OUTBOX_DIR / f"resp_{test_id}.json"
             with open(resp_file, "w") as f:
                 json.dump({

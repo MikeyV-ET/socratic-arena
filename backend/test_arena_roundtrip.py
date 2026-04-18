@@ -338,6 +338,380 @@ def test_full_roundtrip():
 
 
 # ============================================================================
+# Test 7b: Response survives in tree after live tailer runs
+# ============================================================================
+
+async def _test_response_survives_in_state():
+    """Send message, deliver response, reconnect, verify the response content
+    is still present in the state.snapshot. Catches the bug where the live
+    tailer changes activeNodeId and _trim_state_payload drops arena nodes."""
+
+    # Drain pending
+    httpx.get(f"{ARENA_URL}/api/adapter/pending", timeout=5)
+
+    test_content = f"[survival test {uuid.uuid4().hex[:8]}]"
+    test_response = f"[survival response {uuid.uuid4().hex[:8]}]"
+
+    # Step 1: Send message and deliver response
+    async with websockets.connect(WS_URL, max_size=WS_MAX_SIZE) as ws:
+        raw = await asyncio.wait_for(ws.recv(), timeout=5)
+        snapshot = json.loads(raw)
+        branch_id = snapshot["payload"]["tree"]["activeBranchId"]
+
+        await ws.send(json.dumps({
+            "type": "conversation.send",
+            "payload": {"branchId": branch_id, "content": test_content},
+        }))
+
+        # Collect node_id from turn_start
+        node_id = None
+        try:
+            while True:
+                raw = await asyncio.wait_for(ws.recv(), timeout=2)
+                msg = json.loads(raw)
+                if msg["type"] == "conversation.turn_start":
+                    node_id = msg["payload"]["nodeId"]
+        except asyncio.TimeoutError:
+            pass
+
+        if not node_id:
+            resp = httpx.get(f"{ARENA_URL}/api/adapter/pending", timeout=5)
+            pending = resp.json().get("messages", [])
+            if pending:
+                node_id = pending[0].get("nodeId")
+        assert node_id, "No nodeId found"
+
+        # Deliver response
+        r = httpx.post(
+            f"{ARENA_URL}/api/adapter/response",
+            json={"nodeId": node_id, "content": test_response},
+            timeout=5,
+        )
+        assert r.status_code == 200
+
+    # Step 2: Wait for live tailer to run (it polls every 2s and can change activeNodeId)
+    await asyncio.sleep(3)
+
+    # Step 3: Reconnect and get fresh state.snapshot
+    async with websockets.connect(WS_URL, max_size=WS_MAX_SIZE) as ws:
+        raw = await asyncio.wait_for(ws.recv(), timeout=5)
+        snapshot = json.loads(raw)
+        tree = snapshot["payload"]["tree"]
+        nodes = tree.get("nodes", {})
+
+        # The assistant node must exist in the snapshot
+        assert node_id in nodes, (
+            f"Assistant node {node_id[:12]} missing from state.snapshot after reconnect! "
+            f"Tree has {len(nodes)} nodes, activeNodeId={tree.get('activeNodeId', '?')[:12]}"
+        )
+        actual_content = nodes[node_id].get("content", "")
+        assert actual_content == test_response, (
+            f"Assistant node content wrong. Expected: {test_response!r}, "
+            f"Got: {actual_content!r}"
+        )
+
+        # Also check: is the node reachable via the active branch walk?
+        # Walk from root following activeBranchId
+        active_branch = tree.get("activeBranchId", "")
+        active_node = tree.get("activeNodeId", "")
+        ancestors = set()
+        curr = active_node
+        while curr and curr in nodes:
+            ancestors.add(curr)
+            curr = nodes[curr].get("parentId") or ""
+
+        # Walk the tree like getActiveBranchNodes does
+        def pick_next(children):
+            for c in children:
+                if c in ancestors:
+                    return c
+            for c in children:
+                if nodes.get(c, {}).get("branchId") == active_branch:
+                    return c
+            return None
+
+        root_id = tree.get("rootNodeId", "")
+        rendered = set()
+        curr = root_id
+        while curr and curr in nodes:
+            rendered.add(curr)
+            children = nodes[curr].get("children", [])
+            curr = pick_next(children)
+
+        node_rendered = node_id in rendered
+        print(f"  INFO: node in snapshot: YES, node rendered by branch walk: {'YES' if node_rendered else 'NO'}")
+        print(f"  INFO: activeNodeId={active_node[:12]}, assistant nodeId={node_id[:12]}")
+        if not node_rendered:
+            print(f"  FAIL (rendering): Node exists in tree but not reachable via getActiveBranchNodes walk.")
+            print(f"         This is the bug: live tailer changed activeNodeId, arena nodes are on a different path.")
+            raise AssertionError(
+                f"Assistant node {node_id[:12]} exists in snapshot but not rendered. "
+                f"activeNodeId={active_node[:12]} (different path)."
+            )
+        print(f"  PASS: Response survives in state and is renderable after live tailer cycle.")
+
+
+def test_response_survives_in_state():
+    asyncio.get_event_loop().run_until_complete(_test_response_survives_in_state())
+
+
+# ============================================================================
+# Test 7c: Frontend simulation — stays on same WS, tracks activeNodeId drift
+# ============================================================================
+
+async def _test_frontend_rendering_after_live_tailer():
+    """Simulates the real frontend: stays connected on the same WS, applies
+    all tree.live_node events (which change activeNodeId), then checks if
+    arena nodes would still be rendered by getActiveBranchNodes.
+
+    This catches the bug Eric sees: response delivered OK but not rendered
+    because the live tailer moved activeNodeId to a different path."""
+
+    # Drain pending
+    httpx.get(f"{ARENA_URL}/api/adapter/pending", timeout=5)
+
+    test_content = f"[frontend sim {uuid.uuid4().hex[:8]}]"
+    test_response = f"[frontend resp {uuid.uuid4().hex[:8]}]"
+
+    async with websockets.connect(WS_URL, max_size=WS_MAX_SIZE) as ws:
+        # Get initial state (like frontend onopen)
+        raw = await asyncio.wait_for(ws.recv(), timeout=5)
+        snapshot = json.loads(raw)
+        tree = snapshot["payload"]["tree"]
+        nodes = dict(tree.get("nodes", {}))
+        active_node_id = tree.get("activeNodeId", "")
+        active_branch = tree.get("activeBranchId", "")
+        root_id = tree.get("rootNodeId", "")
+
+        print(f"  INFO: initial activeNodeId={active_node_id[:12]}, {len(nodes)} nodes")
+
+        # Send conversation.send
+        await ws.send(json.dumps({
+            "type": "conversation.send",
+            "payload": {"branchId": active_branch, "content": test_content},
+        }))
+
+        # Collect all events, simulating frontend state updates
+        assistant_node_id = None
+        try:
+            while True:
+                raw = await asyncio.wait_for(ws.recv(), timeout=2)
+                msg = json.loads(raw)
+
+                if msg["type"] == "tree.live_node" and msg["payload"].get("action") == "add":
+                    # Simulate addLiveNode: add node, update activeNodeId
+                    node = msg["payload"]["node"]
+                    parent_id = msg["payload"].get("parentId")
+                    nodes[node["id"]] = node
+                    if parent_id and parent_id in nodes:
+                        parent = nodes[parent_id]
+                        children = parent.get("children", [])
+                        if node["id"] not in children:
+                            children.append(node["id"])
+                            parent["children"] = children
+                    active_node_id = node["id"]  # <-- this is what addLiveNode does
+
+                elif msg["type"] == "conversation.turn_start":
+                    assistant_node_id = msg["payload"]["nodeId"]
+        except asyncio.TimeoutError:
+            pass
+
+        if not assistant_node_id:
+            resp = httpx.get(f"{ARENA_URL}/api/adapter/pending", timeout=5)
+            pending = resp.json().get("messages", [])
+            if pending:
+                assistant_node_id = pending[0].get("nodeId")
+        assert assistant_node_id, "No assistant nodeId found"
+
+        print(f"  INFO: assistant nodeId={assistant_node_id[:12]}, activeNodeId after events={active_node_id[:12]}")
+
+        # Wait for live tailer to fire and drift activeNodeId (polls every 2s)
+        print(f"  INFO: waiting 8s for live tailer to drift activeNodeId...")
+        drift_deadline = asyncio.get_event_loop().time() + 8
+        while asyncio.get_event_loop().time() < drift_deadline:
+            try:
+                raw = await asyncio.wait_for(ws.recv(), timeout=1)
+                msg = json.loads(raw)
+                if msg["type"] == "tree.live_node" and msg["payload"].get("action") == "add":
+                    node = msg["payload"]["node"]
+                    parent_id = msg["payload"].get("parentId")
+                    nodes[node["id"]] = node
+                    if parent_id and parent_id in nodes:
+                        parent = nodes[parent_id]
+                        children = parent.get("children", [])
+                        if node["id"] not in children:
+                            children.append(node["id"])
+                            parent["children"] = children
+                    active_node_id = node["id"]
+                elif msg["type"] == "state.snapshot":
+                    tree = msg["payload"]["tree"]
+                    nodes = dict(tree.get("nodes", {}))
+                    active_node_id = tree.get("activeNodeId", "")
+            except asyncio.TimeoutError:
+                pass
+        print(f"  INFO: after drift: activeNodeId={active_node_id[:12]}, same as assistant={active_node_id == assistant_node_id}")
+
+        # Deliver response via REST (simulating adapter)
+        r = httpx.post(
+            f"{ARENA_URL}/api/adapter/response",
+            json={"nodeId": assistant_node_id, "content": test_response},
+            timeout=5,
+        )
+        assert r.status_code == 200
+
+        # Collect the node_update and turn_complete, plus any live tailer events
+        got_update = False
+        try:
+            while True:
+                raw = await asyncio.wait_for(ws.recv(), timeout=4)
+                msg = json.loads(raw)
+
+                if msg["type"] == "conversation.node_update":
+                    nid = msg["payload"]["nodeId"]
+                    if nid in nodes:
+                        nodes[nid]["content"] = msg["payload"].get("content", "")
+                    got_update = (nid == assistant_node_id)
+
+                elif msg["type"] == "tree.live_node" and msg["payload"].get("action") == "add":
+                    node = msg["payload"]["node"]
+                    parent_id = msg["payload"].get("parentId")
+                    nodes[node["id"]] = node
+                    if parent_id and parent_id in nodes:
+                        parent = nodes[parent_id]
+                        children = parent.get("children", [])
+                        if node["id"] not in children:
+                            children.append(node["id"])
+                            parent["children"] = children
+                    active_node_id = node["id"]  # live tailer changes activeNodeId!
+
+                elif msg["type"] == "state.snapshot":
+                    # Full tree replacement (like setTree)
+                    tree = msg["payload"]["tree"]
+                    nodes = dict(tree.get("nodes", {}))
+                    active_node_id = tree.get("activeNodeId", "")
+        except asyncio.TimeoutError:
+            pass
+
+        assert got_update, "Never received conversation.node_update for assistant node"
+
+        # Now simulate getActiveBranchNodes with frontend's activeNodeId
+        ancestors = set()
+        curr = active_node_id
+        while curr and curr in nodes:
+            ancestors.add(curr)
+            curr = nodes[curr].get("parentId") or ""
+
+        def pick_next(children):
+            for c in children:
+                if c in ancestors:
+                    return c
+            for c in children:
+                if nodes.get(c, {}).get("branchId") == active_branch:
+                    return c
+            return None
+
+        rendered = set()
+        curr = root_id
+        while curr and curr in nodes:
+            rendered.add(curr)
+            children = nodes[curr].get("children", [])
+            curr = pick_next(children)
+
+        same_path = active_node_id == assistant_node_id or assistant_node_id in ancestors
+        node_rendered = assistant_node_id in rendered
+        node_has_content = nodes.get(assistant_node_id, {}).get("content") == test_response
+
+        print(f"  INFO: activeNodeId={active_node_id[:12]}, same_path={same_path}")
+        print(f"  INFO: node in tree: {assistant_node_id in nodes}, has content: {node_has_content}")
+        print(f"  INFO: node rendered by branch walk: {node_rendered}")
+
+        if not node_rendered:
+            print(f"  FAIL: Response delivered and stored, but NOT rendered by getActiveBranchNodes.")
+            print(f"         activeNodeId drifted to {active_node_id[:12]} (live tailer).")
+            print(f"         assistant node {assistant_node_id[:12]} is on a different path.")
+            raise AssertionError(
+                f"Frontend rendering bug reproduced: assistant node not in rendered path. "
+                f"activeNodeId={active_node_id[:12]} != assistantNodeId={assistant_node_id[:12]}"
+            )
+        print(f"  PASS: Response rendered correctly in frontend simulation.")
+
+
+def test_frontend_rendering_after_live_tailer():
+    asyncio.get_event_loop().run_until_complete(_test_frontend_rendering_after_live_tailer())
+
+
+# ============================================================================
+# Test 7d: Pure logic repro — activeNodeId on different path hides arena nodes
+# ============================================================================
+
+def test_activeNodeId_drift_hides_arena_nodes():
+    """Pure logic test: construct a tree where arena nodes and live-tailed nodes
+    fork from the same parent. Set activeNodeId to the live-tailed path.
+    Verify getActiveBranchNodes logic skips the arena nodes.
+
+    Tree structure:
+        root -> A -> B (fork point)
+                     ├── C (arena user) -> D (arena assistant, has response)
+                     └── E (live-tailed) -> F (live-tailed, activeNodeId)
+
+    activeNodeId = F. Branch walk should follow B->E->F, skipping C->D.
+    This IS the bug: D has the response content but is never rendered.
+    """
+    nodes = {
+        "root": {"id": "root", "parentId": "", "children": ["A"], "branchId": "main", "role": "system", "content": "root"},
+        "A": {"id": "A", "parentId": "root", "children": ["B"], "branchId": "main", "role": "assistant", "content": "a"},
+        "B": {"id": "B", "parentId": "A", "children": ["C", "E"], "branchId": "main", "role": "user", "content": "b (fork point)"},
+        "C": {"id": "C", "parentId": "B", "children": ["D"], "branchId": "main", "role": "user", "content": "arena user message"},
+        "D": {"id": "D", "parentId": "C", "children": [], "branchId": "main", "role": "assistant", "content": "RESPONSE FROM AGENT"},
+        "E": {"id": "E", "parentId": "B", "children": ["F"], "branchId": "main", "role": "assistant", "content": "live-tailed node"},
+        "F": {"id": "F", "parentId": "E", "children": [], "branchId": "main", "role": "assistant", "content": "live-tailed latest"},
+    }
+    active_node_id = "F"  # live tailer set this
+    active_branch = "main"
+    root_id = "root"
+
+    # Replicate getActiveBranchNodes logic
+    ancestors = set()
+    curr = active_node_id
+    while curr and curr in nodes:
+        ancestors.add(curr)
+        curr = nodes[curr].get("parentId") or ""
+
+    def pick_next(children):
+        for c in children:
+            if c in ancestors:
+                return c
+        for c in children:
+            if nodes.get(c, {}).get("branchId") == active_branch:
+                return c
+        return None
+
+    rendered = []
+    curr = root_id
+    while curr and curr in nodes:
+        rendered.append(curr)
+        children = nodes[curr].get("children", [])
+        curr = pick_next(children)
+
+    rendered_ids = set(rendered)
+    arena_response_rendered = "D" in rendered_ids
+    live_tail_rendered = "F" in rendered_ids
+
+    print(f"  INFO: rendered path: {' -> '.join(rendered)}")
+    print(f"  INFO: arena response node D rendered: {arena_response_rendered}")
+    print(f"  INFO: live-tail node F rendered: {live_tail_rendered}")
+    print(f"  INFO: ancestors of activeNodeId(F): {ancestors}")
+
+    # The bug: arena response (D) is NOT rendered, live tail (F) IS
+    assert live_tail_rendered, "Expected live-tail path to be rendered"
+    assert not arena_response_rendered, (
+        "Expected arena response NOT to be rendered (this would mean the bug is fixed). "
+        "If this assertion fires, the rendering logic no longer has the activeNodeId drift bug."
+    )
+    print(f"  PASS: Bug confirmed — arena response node D is hidden when activeNodeId drifts to F.")
+
+
+# ============================================================================
 # Test 8: Real adapter inbox write (uses real AGENTS_HOME, checks file delivery)
 # ============================================================================
 
@@ -385,6 +759,9 @@ def run_all():
         ("5. Adapter inbox write (isolated)", test_adapter_inbox_write),
         ("6. Adapter outbox poll (isolated)", test_adapter_outbox_poll),
         ("7. Full round trip (WS -> pending -> response -> WS)", test_full_roundtrip),
+        ("7b. Response survives in state after live tailer", test_response_survives_in_state),
+        ("7c. Frontend rendering after live tailer (repro)", test_frontend_rendering_after_live_tailer),
+        ("7d. activeNodeId drift hides arena nodes (logic repro)", test_activeNodeId_drift_hides_arena_nodes),
         ("8. Real inbox delivery", test_real_inbox_delivery),
     ]
 
