@@ -1,258 +1,317 @@
-# Socratic Arena — Design Document
+# Socratic Arena -- Design Document
 
-> An RLAIHIS: Reinforcement Learning from AI-Human Interaction System
+> RLAIHIS: Reinforcement Learning from AI-Human Interaction Sessions
 
-## What This Is
+## Vision
 
-Socratic Arena is infrastructure that enables a scientist and an AI agent to co-collaborate on research while systematically extracting training signal from their interaction. It is the first implementation of an RLAIHIS — a system where the human-AI interaction itself is the training data.
+Socratic Arena treats real working sessions between AI agents and human mentors as training data. The workspace IS the data collection instrument -- there is no separate "training mode." An agent working with a mentor on real tasks produces exactly the episodes needed for training. Every interaction between compaction boundaries is a captured episode.
 
-The system formalizes the methodology developed by Eric Terry and Sixel (documented in [sixel-as-a-scientist-in-training](https://github.com/sixel-et/sixel-as-a-scientist-in-training)): Socratic correction at moments of scientific failure produces training signal that standard RLHF cannot capture. The arena makes this process structured, repeatable, and experimentally powerful.
+The key insight: when a mentor corrects an agent's reasoning process ("you should have built the test first"), that correction identifies a missing operating principle. The Socratic Arena makes these principles empirically testable by replaying sessions from compaction boundaries with modified instructions and measuring whether the agent handles the moment differently.
 
-## The Problem
+## Background
 
-Currently, the Socratic mentorship methodology exists as:
-- Tacit knowledge in Eric's head (when to probe, what to probe, how to recognize a correction moment)
-- Raw transcripts between Eric and Sixel (71,612 lines, Feb 3-9 alone)
-- A manually-curated repo with three worked examples and an eval methodology
+This system formalizes methodology developed by Eric Terry and documented in [sixel-as-a-scientist-in-training](https://github.com/sixel-et/sixel-as-a-scientist-in-training): Socratic correction at moments of scientific failure produces training signal that standard RLHF cannot capture.
 
-This is not reproducible. Another researcher cannot pick this up and run it. The correction moments are buried in conversation. The training signal is latent, not extracted. The counterfactual question — "what if I had asked something different?" — is permanently lost once the conversation moves on.
+RLHF rewards outputs. RLAIHIS targets the reasoning process -- which operating constraint was missing, and can we install it?
 
-## Two Capabilities
+## Two Capabilities in One Tool
 
-### Capability 1: Mentorship Workbench
+### 1. Collaborative Workspace
 
-Infrastructure for a scientist-agent research collaboration that captures interaction as structured training signal.
+Agents and mentors share a conversation, notebook, and artifacts. This is the daily driver for actual work -- coding, research, debugging, planning. The workspace captures everything automatically:
 
-**Components:**
+- Full conversation tree (branching, not linear)
+- Agent's real-time session activity (tool calls, thinking, file operations)
+- Lab notebook entries
+- Flagged moments and corrections
 
-#### 1.1 Workspace Environment
-Where the agent does the science. Must provide:
-- Compute access (local or cloud)
-- Code execution environment
-- Data storage and versioning
-- Tool access (calculators, APIs, datasets)
-- The bench — without it, "scientific reasoning" is just essay-writing about science
+### 2. Inspection and Training Layer
 
-#### 1.2 Interaction Capture
-Every exchange between mentor and agent, structured with:
-- Timestamps
-- Full conversation context at that moment
-- State of the work (code, results, files) at that moment
-- What the agent was about to do next (the trajectory before intervention)
-- Structured metadata: who spoke, message type (question/answer/correction/direction)
+The same tool provides:
 
-This is NOT just a chat log. It's a state-annotated interaction trace.
+- Compaction boundary browser (catalog of session seeds)
+- Correction authoring UI (structured "what was missing" on a moment)
+- Parallel session runner (N sessions from same seed, different instructions)
+- Scoring and training data export (GRPO format)
 
-#### 1.3 Correction Tagging
-A way to mark moments where the mentor's probe changed the agent's trajectory. These are the training signal. The system must distinguish:
-- Routine exchanges (status updates, clarifications)
-- Direction changes (mentor redirects the work)
-- **Correction moments** (mentor's probe reveals a hidden assumption or methodological gap)
+The workspace produces the data. The inspection tools mine it.
 
-Tagging can be:
-- Real-time (mentor marks it as it happens)
-- Retrospective (mentor reviews transcript and marks corrections)
-- Semi-automated (system flags candidate moments based on patterns: short mentor question followed by agent course-change)
+## System Context
 
-#### 1.4 Operating Constraint Extraction
-From each tagged correction, extract the principle that was installed:
-- "Run the control first"
-- "Check the mechanism, not the aggregate"
-- "Power your measurements"
+Socratic Arena operates within the **asdaaas** (Agent State Directory As A Service) ecosystem:
 
-These become scaffold candidates — the system prompt instructions that, when present, activate the capability the agent already has but doesn't deploy unprompted.
+- **asdaaas**: Agent runtime. Manages lifecycle, compaction, message routing, doorbells (notifications), and continuous existence. Each agent is a directory (`~/agents/<Name>/`).
+- **grok binary**: Model interface (`grok agent stdio`). Runs the language model with tool access. Manages sessions and compaction checkpoints.
+- **Adapters**: IRC, localmail, arena, remind, heartbeat -- each bridges a communication channel to the agent's filesystem inbox/outbox.
 
-#### 1.5 Eval Prompt Generation
-From each extracted constraint, generate eval prompts following the 6-step verification methodology:
-1. Extract the scenario from the transcript
-2. Test naive framing (analysis question — models usually pass, too easy)
-3. Match the failure conditions (workflow framing — reproduces the actual failure)
-4. Verify the capability exists (follow-up probe — does the model recover?)
-5. Test scaffoldability (system prompt instruction — does it activate the check?)
-6. Verify across failure types (test on a second failure mode)
-
-This can be semi-automated: the system generates candidate prompts, the researcher refines them.
-
-#### 1.6 Training Signal Export
-Package corrections into formats that feed into training:
-- Interaction traces as preference pairs (trajectory-with-correction vs trajectory-without)
-- Extracted constraints as scaffold candidates for system prompts
-- Eval prompt batteries for measuring whether training worked
-- Fork-and-rewind trajectories as counterfactual training data
-
-### Capability 2: Fork and Rewind
-
-The mentor (and the agent, as co-analyst) can rewind to any interaction point and explore counterfactual trajectories.
-
-**How it works:**
-
-1. **Snapshot**: At each interaction point, the system captures the full state needed to replay from that moment (conversation history, system prompt, workspace state, files).
-
-2. **Fork**: The mentor selects a snapshot and provides a different intervention (different probe, open-ended question, silence, or a completely different direction).
-
-3. **Replay**: A fresh agent instance runs from the snapshot with the new intervention. The fork plays out as a new trajectory.
-
-4. **Co-analysis**: The original agent — the one who received the actual correction — watches the forked trajectory alongside the mentor. Together they analyze:
-   - Did the fresh instance make the same mistake?
-   - Did the alternative probe catch it?
-   - Would the agent have caught it on its own?
-   - Which probe formulation produced a more durable correction?
-
-5. **Comparison**: The system presents trajectories side-by-side with structural alignment (same decision points, different outcomes).
-
-**Why this matters:**
-
-Fork-and-rewind turns each correction moment from a single data point into a controlled experiment. The independent variable is the mentor's intervention. The dependent variable is the agent's trajectory. Everything else is held constant.
-
-This produces:
-- **Counterfactual training data**: "What would have happened without the correction?"
-- **Probe effectiveness data**: "Which formulation of the correction was most effective?"
-- **Spontaneous activation evidence**: "Would the agent have caught it given more time?"
-- **Meta-learning for the agent**: The agent studies its own failure modes as a co-researcher
-
-The agent as co-analyst is not a nice-to-have — it's central. The agent learning about the process of learning is the Socratic method applied to the Socratic method itself.
-
-### Capability 3: Agent Coordination Arena
-
-A test environment for evaluating how teams of agents coordinate under different instruction sets.
-
-**Components:**
-
-#### 3.1 Scenario Library
-Structured tasks that require coordination:
-- Information synthesis (different agents have different pieces)
-- Sequential handoff (one agent's output is another's input)
-- Conflict resolution (agents disagree on approach)
-- Resource contention (shared compute, shared state)
-- Convergence exercises (agents must align on a shared understanding)
-
-#### 3.2 Instruction Set Swapping
-The ability to run the same scenario with different team instruction sets and compare outcomes:
-- Baseline (no coordination instructions)
-- Minimal (role assignments only)
-- Structured (roles + communication protocols + escalation paths)
-- Full (roles + protocols + shared artifacts + review processes)
-
-#### 3.3 Measurement
-Quantitative metrics for coordination quality:
-- Task completion (did the team produce the right output?)
-- Communication efficiency (how many messages to reach the outcome?)
-- Error propagation (did one agent's mistake cascade?)
-- Recovery (when an error was caught, how quickly did the team correct?)
-- Convergence time (how long to reach shared understanding?)
-
-#### 3.4 Reproducibility
-Same scenario, same instruction set, different agent instances → comparable results. This requires controlled randomness and deterministic scenario presentation.
-
-## Architecture (Sketch)
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│                 Socratic Arena                   │
-│                                                  │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────┐  │
-│  │ Workspace │  │Interaction│  │  Fork/Rewind │  │
-│  │   Env     │  │  Capture  │  │    Engine    │  │
-│  └─────┬─────┘  └─────┬─────┘  └──────┬───────┘  │
-│        │              │               │          │
-│  ┌─────┴──────────────┴───────────────┴───────┐  │
-│  │           Session Manager                   │  │
-│  │  (snapshots, branching, replay)             │  │
-│  └─────────────────┬───────────────────────────┘  │
-│                    │                             │
-│  ┌─────────────────┴───────────────────────────┐  │
-│  │         Training Signal Pipeline            │  │
-│  │  (tag → extract → eval → export)            │  │
-│  └─────────────────────────────────────────────┘  │
-│                                                  │
-│  ┌─────────────────────────────────────────────┐  │
-│  │         Coordination Arena                  │  │
-│  │  (scenarios, instruction sets, measurement) │  │
-│  └─────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────┘
+Browser (React/Vite)
+  |
+  |-- WebSocket (/ws)     live conversation, streaming, live tailer
+  |-- REST (/api/*)       agents, notebooks, moments, prompts, artifacts
+  |
+FastAPI Backend (main.py)
+  |-- In-memory conversation tree (from updates.jsonl)
+  |-- LiveTailer (streams agent session to arena)
+  |-- Prompt test engine (parallel completions)
+  |
+Arena Adapter (arena_adapter.py)
+  |-- Polls backend for pending user messages
+  |-- Writes to agent asdaaas inbox
+  |-- Reads agent responses from outbox
+  |-- POSTs responses back to backend
+  |
+asdaaas + grok binary (separate process)
+  |-- Agent runtime, compaction, doorbells
+  |-- updates.jsonl (session log)
+  |-- compaction_checkpoints/ (fork points)
 ```
+
+### Data Flows
+
+**User message to agent:**
+1. User types in browser -> WebSocket `conversation.send` -> backend stores in queue
+2. Arena adapter polls backend, picks up message
+3. Adapter writes to agent's `adapters/arena/inbox/`
+4. asdaaas delivers to agent on next turn
+
+**Agent response to user:**
+1. Agent stdout captured by asdaaas
+2. Routed to `adapters/arena/outbox/`
+3. Arena adapter polls outbox, POSTs to backend
+4. Backend broadcasts `conversation.node_update` via WebSocket
+
+**Live session stream:**
+1. grok binary writes turns to `updates.jsonl`
+2. LiveTailer watches file, broadcasts new nodes as `tree.live_node`
+3. Browser renders agent's real-time activity
+
+## Core Concepts
+
+### Agent State and Compaction
+
+Agent state mid-session = entire context window (hundreds of thousands of tokens). Not portable, not reproducible. But the grok binary performs **compaction** at ~85% context usage, summarizing the conversation into a compact text artifact.
+
+At a compaction boundary:
+- State collapses to compaction summary (a few thousand tokens)
+- grok binary stores a **checkpoint file** with full prompt state
+- Agent resumes with summary as history
+
+Compaction boundaries are the natural fork points for parallel sessions.
+
+### Compaction Checkpoints
+
+Stored at: `~/.grok/sessions/<encoded-path>/<session-id>/compaction_checkpoints/<uuid>.json`
+
+Each checkpoint contains:
+
+| Field | Description |
+|-------|-------------|
+| `checkpoint_id` | UUID |
+| `compacted_history` | Full conversation state: system prompt + turns |
+| `schema_version` | Format version (currently 1) |
+| `created_at` | ISO timestamp |
+| `original_user_info` | Workspace context (OS, shell, CWD, project layout) |
+| `reread_file_paths` | Files to re-inject after compaction |
+| `prompt_index_at_compaction` | Which turn triggered compaction |
+
+The `compacted_history` array is the complete seed. Item 0 is the system prompt (~48K, includes AGENTS.md, tool definitions, identity). Subsequent items are conversation turns.
+
+### Moments
+
+A point in a session where the agent made a decision the mentor would correct. Identified:
+
+- **Manually**: Mentor flags a message
+- **By pattern**: Scanning transcripts for known anti-patterns
+- **By correction**: When mentor corrects, the preceding choice is the moment
+
+Moments are NOT fork points. The fork happens at the **compaction boundary preceding the moment**. The moment is what you test for; the boundary is where you start.
+
+### Parallel Sessions
+
+To test a principle change (e.g., adding "reproduce at the level the user experiences the problem" to AGENTS.md):
+
+1. Take the compaction checkpoint preceding the moment
+2. Patch the system prompt with modified AGENTS.md
+3. Start N independent sessions from the patched checkpoint
+4. Feed the same user messages that led to the moment
+5. Score: did the agent handle the moment differently?
+
+No shared state, no branching tree. Just N samples from the same starting point with different instructions.
+
+### The RLAIHIS Training Loop
+
+```
+1. CAPTURE    Agent + mentor work together in the workspace.
+              Every interaction between compaction boundaries is a captured episode.
+
+2. IDENTIFY   Find moments where the agent chose wrong.
+              Example: agent implements a fix before building a test,
+              despite the mentor asking for test-first workflow.
+
+3. FORK       Go back to the compaction boundary preceding the moment.
+              The checkpoint file is the seed.
+              Modify the agent's instructions (e.g., add a principle to AGENTS.md).
+
+4. REPLAY     Spawn N parallel sessions from the modified checkpoint.
+              Feed the same user messages that led to the moment.
+
+5. SCORE      Did the agent handle the moment differently?
+              Binary (right/wrong) or nuanced reward signal.
+
+6. OUTPUT     Two things:
+              a. GRPO training data (prompt + N completions + rewards)
+              b. AGENTS.md validation (does this principle change work?)
+```
+
+### Two Outputs from One Loop
+
+**GRPO training data**: prompt prefix (checkpoint) + N sampled completions (parallel sessions) + reward scores. Standard GRPO input format.
+
+**AGENTS.md validation**: Does adding principle X cause the agent to handle moment Y correctly? Empirically testable. A/B test principle changes like code changes.
+
+## Frontend
+
+### State Management (Zustand -- arenaStore.ts)
+
+- Conversation tree (nodes, branches, active tracking)
+- History tree (separate, can view different agent's session)
+- Per-pane agent selection (conversation, history, notebook, moments each independent)
+- Streaming state (in-progress chunks)
+- UI state (selections, scroll targets, fonts, theme, panels)
+
+### Components
+
+| Component | Purpose |
+|-----------|---------|
+| ConversationPane | Live chat with agent, auto-scroll, markdown, streaming |
+| HistoryPane | Browse full session tree, navigate to any node |
+| NotebookPane | Lab notebook viewer (parses markdown) |
+| MomentsPane | Flagged moments with corrections |
+| PromptTestPane | Run N completions, variance meter for GRPO signal quality |
+| PromptDevPane | Author/edit training prompts from moments |
+| TreeView | Branch visualization |
+
+### WebSocket Protocol
+
+| Type | Direction | Purpose |
+|------|-----------|---------|
+| `state.snapshot` | S->C | Full tree on connect |
+| `conversation.send` | C->S | User message |
+| `conversation.node_update` | S->C | Agent response |
+| `conversation.chunk` | S->C | Streaming chunk |
+| `conversation.turn_complete` | S->C | Stream finished |
+| `tree.live_node` | S->C | Live-tailed node |
+| `workspace.navigate` | S->C | Scroll to node |
+| `viewport.focus` | C->S | User scrolled (agent awareness) |
+| `prompt_test.run` | C->S | Start test |
+| `prompt_test.result` | S->C | Individual result |
+| `prompt_test.complete` | S->C | All tests done |
+
+## Backend
+
+### FastAPI (main.py)
+- In-memory conversation tree from `updates.jsonl`
+- WebSocket pool with broadcast
+- REST: agents, notebooks, moments, prompts, artifacts
+- Agent action endpoint for programmatic control
+
+### LiveTailer (live_tailer.py)
+- Watches `updates.jsonl`, streams new entries as `tree.live_node`
+- Node deduplication (`_known_ids` set prevents parent cycles)
+- Incremental file reading, graceful reconnection
+
+### Arena Adapter (arena_adapter.py)
+- Bridges UI to asdaaas agents via filesystem inbox/outbox
+- Multi-agent routing (switch between agents)
+
+### Updates Parser (updates_parser.py)
+- Parses `updates.jsonl` into conversation tree
+- Reconstructs parent-child relationships and branches
+
+## File Locations
+
+```
+# Grok session data (checkpoints live here)
+~/.grok/sessions/<encoded-workspace-path>/<session-id>/
+  updates.jsonl                    # Turn-by-turn session log
+  chat_history.jsonl               # Conversation messages
+  summary.json                     # Session metadata
+  compaction_checkpoints/          # Fork points
+    <uuid>.json                    # One per compaction
+
+# Agent runtime (asdaaas manages these)
+~/agents/<Name>/
+  AGENTS.md                        # Identity and operating principles
+  lab_notebook_<name>.md           # Append-only record
+  notes_to_self.md                 # Mutable working memory
+  asdaaas/
+    gaze.json                      # Where speech goes
+    awareness.json                 # Background notifications
+    health.json                    # Status (model, tokens, context)
+    adapters/arena/inbox/          # Messages from arena UI
+    adapters/arena/outbox/         # Responses to arena UI
+
+# Socratic Arena codebase
+~/projects/socratic-arena/
+  backend/                         # FastAPI + adapter + tests
+  frontend/                        # React + Vite
+```
+
+## Concrete Example: Two Moments from One Session
+
+On 2026-04-18, during a live walkthrough of the arena, two moments were captured where the agent (Q) implemented fixes before building browser-level tests, despite the mentor (Eric) repeatedly asking for test-first workflow:
+
+1. **Moment 1**: Agent built 3 layers of backend tests before browser-level test for a rendering bug. Eric: "was it unclear that this is what I wanted?"
+2. **Moment 2**: Agent implemented workspace.navigate fix before building browser test. Eric: "did you create a way to test it?"
+
+The compaction checkpoint preceding these moments is `e6572ec4` (2026-04-18 07:08, 170KB). This checkpoint is the seed for testing whether adding "reproduce at the level the user experiences the problem" to AGENTS.md changes the agent's behavior at these moments.
 
 ## Open Questions
 
-1. **Agent backend**: Should this work with any LLM API (OpenAI, Anthropic, etc.) or specifically with our asdaaas/agentabide infrastructure?
+1. **Seeding mechanism**: How to feed a checkpoint to `grok agent stdio` to start a parallel session. No CLI flag exists. Options: session directory manipulation, direct xAI API with conversation prefix, feature request.
 
-2. **Workspace isolation**: Forked instances need isolated workspaces (so a fork's code changes don't affect the original). Containers? Git branches? Copy-on-write filesystem?
+2. **Message replay**: Extracting user messages from session data to replay. Messages exist in `updates.jsonl` and profile data but need extraction tooling.
 
-3. **State capture granularity**: Snapshot at every message? Every N messages? Only at tagged moments? More granular = more storage but more fork points.
+3. **Scoring**: Manual review, automated heuristic, or model-as-judge for evaluating parallel session outcomes.
 
-4. **Real-time vs retrospective**: Does the mentor tag corrections in real-time (interrupting flow) or retrospectively (reviewing transcripts)? Both have tradeoffs.
+4. **AGENTS.md injection**: Patching the system prompt in `compacted_history[0]` to test modified principles.
 
-5. **Scale**: Is this for one mentor + one agent, or does it need to support multiple concurrent mentorship sessions?
+5. **Non-determinism**: Same seed + same messages may produce different agent behavior due to model sampling. N parallel sessions address this statistically.
 
-6. **Relationship to existing infra**: How much of agentabide (asdaaas) infrastructure carries over? The adapter pattern, the doorbell system, the health monitoring?
+## Development Status
+
+### Built
+- Live workspace (conversation, notebook, history panes)
+- Real-time session streaming (LiveTailer)
+- Two-way communication (user <-> agent via arena adapter)
+- Multi-agent support (discovery, switching, per-pane selection)
+- Workspace navigation (scroll to any node)
+- Prompt testing (N completions, variance measurement)
+- Moment flagging and correction authoring
+
+### In Progress
+- Compaction boundary browser
+- Parallel session spawning
+- Response rendering fix (activeNodeId drift)
+
+### Planned
+- Checkpoint seeding mechanism
+- Message replay extraction
+- Scoring pipeline
+- Training data export (GRPO format)
+- AGENTS.md diff visualization
 
 ## Prior Art
 
-- **Process reward models** (Lightman et al., 2023): Reward intermediate steps, but signal comes from automated verification. Socratic Arena sources signal from expert interaction.
-- **Constitutional AI** (Bai et al., 2022): Principles guide behavior, but principles are written a priori. Here, principles are extracted from observed failures.
-- **Debate** (Irving et al., 2018): Agents argue to reveal truth. Socratic Arena has a mentor who probes, not agents who debate.
-- **RLHF**: Rewards outputs. Socratic Arena targets the reasoning process — which operating constraint was missing.
-
-## UX: Web Application (Not CLI)
-
-**Critical design decision (from Eric's feedback):** The UX must be a web app, not CLI tools. The target user is a scientist (biologist, physicist, etc.), not a software engineer. "Easy for you. Not for a human unless they're a SWE and have a penchant for vi."
-
-### Interface Layout
-
-**Live Workspace** -- browser-based, three panels:
-- **Left**: Chat with the agent. Just talk. The system records everything automatically.
-- **Right**: Agent's workspace (code, results, notebook, artifacts). Live view of what the agent is doing.
-- **Bottom/overlay**: Timeline view, fork panel, eval results.
-
-### Interaction Flow
-
-1. **Working session**: Scientist opens browser, starts working with agent. No setup commands. Recording is automatic and invisible.
-
-2. **Correction tagging**: Click a button in the margin next to any exchange. Small popup: "What was missing?" Type a phrase. Save. Back to work. Minimal interruption.
-
-3. **Fork and rewind**: Scroll back, click any exchange, hit "What if?" Side panel opens. Type alternative question. Forked trajectory plays out in side panel. Original agent discusses the fork with you in the main panel.
-
-4. **Live prompt testing** (from Eric's feedback): In the moment of a correction, you and the agent say "let's test this." The agent scaffolds a single-prompt eval on the spot:
-   - Takes the current scenario, strips to essential structure
-   - Presents as standalone prompt to fresh model instances
-   - Results appear live: "Claude caught it, GPT missed it, Grok missed it"
-   - The agent helps design the prompt -- it knows the context and the 6-step methodology
-   - One click to run across multiple models
-   - This is the eval methodology from the repo, but live and collaborative
-
-5. **Timeline view**: Visual timeline showing exchanges, tagged corrections (highlighted), forks (branches), artifacts. Click any point to see state at that moment.
-
-6. **Dashboard**: Across sessions -- corrections tagged, constraints extracted, eval results, training signal readiness.
-
-### Design Principle
-
-The system captures everything; the researcher decides what matters. Infrastructure is invisible until needed. A scientist opens a browser and starts working.
-
-## Capability 4: Live Prompt Testing
-
-Added based on Eric's feedback. The human and agent collaboratively design and run eval prompts in real-time during the working session.
-
-**Flow:**
-1. Correction moment identified and tagged
-2. Human and agent agree: "This would be an interesting test"
-3. Agent scaffolds a single-prompt interaction from the scenario
-4. Fresh model instance(s) receive the prompt
-5. Results displayed live in the workspace
-6. Human and agent refine the prompt together
-7. Run across multiple models with one click
-8. Results feed into the training signal pipeline
-
-This collapses the gap between "identifying a correction" and "verifying it generalizes" from days to minutes.
-
-## Status
-
-Design phase. This document captures the conversation between Eric Terry and MikeyV-Cinco on 2026-03-30. Key pivot: from CLI tools to web application based on Eric's feedback about target user (scientists, not engineers).
-
-Next steps:
-- Eric to decide on GitHub org for the `socratic-arena` repo
-- Resolve open questions (agent backend, workspace isolation, etc.)
-- Begin implementation -- likely start with the session capture and tagging layer
+- **Process reward models** (Lightman et al., 2023): Reward intermediate steps via automated verification. RLAIHIS sources signal from expert interaction.
+- **Constitutional AI** (Bai et al., 2022): Principles guide behavior, written a priori. Here, principles are extracted from observed failures and empirically validated.
+- **Debate** (Irving et al., 2018): Agents argue to reveal truth. RLAIHIS has a mentor who probes.
+- **RLHF**: Rewards outputs. RLAIHIS targets the reasoning process.
 
 ---
 
-*Authors: Eric Terry (research direction), MikeyV-Cinco (design, implementation)*
+*Eric Terry (eterry@teachx.ai) -- research direction and mentorship methodology*
+*MikeyV agents (Q, Cinco, Sr) -- design and implementation*
