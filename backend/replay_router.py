@@ -7,7 +7,6 @@ extract turns, and run replay sessions.
 import asyncio
 import logging
 from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -15,7 +14,6 @@ from pydantic import BaseModel, Field
 from checkpoint_replayer import (
     CheckpointReplayer,
     ReplayResult,
-    get_chat_history_path,
 )
 
 log = logging.getLogger(__name__)
@@ -197,6 +195,79 @@ def _extract_turns_from_updates(updates_path: str, checkpoint_id: str) -> list[d
     return turns
 
 
+def _extract_conversation_from_updates(updates_path: str, checkpoint_id: str) -> list[dict]:
+    """Extract full user+assistant conversation from updates.jsonl between checkpoints.
+
+    Assembles user_message_chunk and agent_message_chunk events into complete
+    conversation entries suitable for chat_history.jsonl format.
+
+    Returns list of dicts:
+      [{"type": "user", "content": [{"type":"text","text":"..."}]},
+       {"type": "assistant", "content": "..."},
+       ...]
+    """
+    import json as _json
+
+    # First pass: find checkpoint boundary lines
+    target_line = None
+    next_cp_line = None
+
+    with open(updates_path) as f:
+        for i, line in enumerate(f):
+            d = _json.loads(line)
+            update = d.get("params", {}).get("update", {})
+            su = update.get("sessionUpdate", "")
+            if su == "compaction_checkpoint" and update.get("checkpoint_id") == checkpoint_id:
+                target_line = i
+            elif su == "compaction_checkpoint" and target_line is not None:
+                next_cp_line = i
+                break
+
+    if target_line is None:
+        return []
+
+    # Second pass: assemble user + assistant turns
+    entries: list[dict] = []
+    current_agent_chunks: list[str] = []
+
+    with open(updates_path) as f:
+        for i, line in enumerate(f):
+            if i <= target_line:
+                continue
+            if next_cp_line is not None and i >= next_cp_line:
+                break
+            d = _json.loads(line)
+            update = d.get("params", {}).get("update", {})
+            su = update.get("sessionUpdate", "")
+
+            if su == "user_message_chunk":
+                # Flush any pending agent response before starting new user turn
+                if current_agent_chunks:
+                    entries.append({"type": "assistant", "content": "".join(current_agent_chunks)})
+                    current_agent_chunks = []
+                content = update.get("content", {})
+                text = ""
+                if isinstance(content, dict) and content.get("type") == "text":
+                    text = content.get("text", "")
+                elif isinstance(content, str):
+                    text = content
+                if text.strip():
+                    entries.append({"type": "user", "content": [{"type": "text", "text": text}]})
+
+            elif su == "agent_message_chunk":
+                content = update.get("content", {})
+                if isinstance(content, dict) and content.get("type") == "text":
+                    current_agent_chunks.append(content.get("text", ""))
+                elif isinstance(content, str):
+                    current_agent_chunks.append(content)
+
+    # Flush trailing agent response
+    if current_agent_chunks:
+        entries.append({"type": "assistant", "content": "".join(current_agent_chunks)})
+
+    return entries
+
+
 @router.get("/checkpoints/{agent_name}/{checkpoint_id}/turns")
 async def get_post_checkpoint_turns(
     agent_name: str,
@@ -228,7 +299,11 @@ async def get_post_checkpoint_turns(
 
 @router.post("/run")
 async def start_replay(req: ReplayRequest):
-    """Start a replay session (or N parallel sessions)."""
+    """Start a single-shot replay session (or N parallel sessions).
+
+    Single-shot: all context (compacted_history + turns before inflection)
+    is loaded as history. ONE prompt is sent with the inflection turn.
+    """
     replayer = _get_replayer()
 
     path = replayer.find_checkpoint(req.agent_name, req.checkpoint_id)
@@ -246,77 +321,104 @@ async def start_replay(req: ReplayRequest):
             find_replace=fr,
         )
 
-    # Get session and extract user turns
+    # Extract full conversation (user + assistant) from updates.jsonl
     session_id = Path(path).parent.parent.name
-    chat_history = get_chat_history_path(req.agent_name, session_id)
-    if not chat_history:
-        raise HTTPException(404, "chat_history.jsonl not found")
+    updates_path = Path(path).parent.parent / "updates.jsonl"
+    if not updates_path.exists():
+        raise HTTPException(404, f"updates.jsonl not found for session {session_id}")
 
-    user_turns = replayer.extract_user_turns(chat_history)
-    if not user_turns:
-        raise HTTPException(400, "No user turns found to replay")
+    conversation = _extract_conversation_from_updates(str(updates_path), req.checkpoint_id)
+    if not conversation:
+        raise HTTPException(400, "No conversation found for this checkpoint")
 
-    # Override the inflection turn's content if requested
-    if req.inflection_override and req.stop_at_turn and req.stop_at_turn <= len(user_turns):
-        from checkpoint_replayer import UserTurn
-        idx = req.stop_at_turn - 1
-        original = user_turns[idx]
-        user_turns[idx] = UserTurn(
-            index=original.index,
-            content=req.inflection_override,
-            is_synthetic=original.is_synthetic,
-        )
+    # Find the inflection point: the Nth user turn in the conversation
+    # stop_at_turn is 1-indexed (turn 1, turn 2, ..., turn N)
+    inflection_idx = req.stop_at_turn if req.stop_at_turn else None
+
+    # Walk conversation entries, counting user turns to find split point
+    user_turn_count = 0
+    split_pos = len(conversation)  # default: inflection is after all turns
+    inflection_text = None
+
+    for i, entry in enumerate(conversation):
+        if entry["type"] == "user":
+            user_turn_count += 1
+            if inflection_idx and user_turn_count == inflection_idx:
+                split_pos = i
+                # Extract inflection turn text
+                content = entry["content"]
+                if isinstance(content, list) and len(content) > 0:
+                    inflection_text = content[0].get("text", "")
+                elif isinstance(content, str):
+                    inflection_text = content
+                break
+
+    if inflection_text is None:
+        # No specific inflection selected, use the last user turn
+        for i in range(len(conversation) - 1, -1, -1):
+            if conversation[i]["type"] == "user":
+                split_pos = i
+                content = conversation[i]["content"]
+                if isinstance(content, list) and len(content) > 0:
+                    inflection_text = content[0].get("text", "")
+                elif isinstance(content, str):
+                    inflection_text = content
+                break
+
+    if inflection_text is None:
+        raise HTTPException(400, "No user turn found for inflection point")
+
+    # Apply override if requested
+    if req.inflection_override:
+        inflection_text = req.inflection_override
+
+    # Context = everything before the inflection turn
+    context_entries = conversation[:split_pos]
+
+    log.info("Replay: %d context entries, inflection at user turn %d (%d chars)",
+             len(context_entries), inflection_idx or user_turn_count, len(inflection_text))
 
     # Start replay in background
-    replay_id = None
+    import uuid
+    replay_id = str(uuid.uuid4())
+    placeholder = ReplayResult(
+        replay_id=replay_id,
+        checkpoint_id=req.checkpoint_id,
+        agents_md_patched=bool(req.agents_md_patch),
+        stop_at_turn=inflection_idx or user_turn_count,
+        status="running",
+    )
 
     if req.n_parallel > 1:
-        async def run_parallel():
-            results = await replayer.replay_parallel(
-                checkpoint, user_turns,
-                n=req.n_parallel,
-                stop_at=req.stop_at_turn,
-            )
-            _replays[results[0].replay_id] = results
-
-        # Use first replay's ID
-        import uuid
-        replay_id = str(uuid.uuid4())
-        placeholder = ReplayResult(
-            replay_id=replay_id,
-            checkpoint_id=req.checkpoint_id,
-            agents_md_patched=bool(req.agents_md_patch),
-            stop_at_turn=req.stop_at_turn or len(user_turns),
-            status="running",
-        )
         _replays[replay_id] = [placeholder]
         asyncio.create_task(_run_parallel_replay(
-            replayer, checkpoint, user_turns, req.n_parallel,
-            req.stop_at_turn, replay_id,
+            replayer, checkpoint, replay_id,
+            agent_name=req.agent_name, n=req.n_parallel,
+            context_entries=context_entries, inflection_text=inflection_text,
         ))
     else:
-        import uuid
-        replay_id = str(uuid.uuid4())
-        placeholder = ReplayResult(
-            replay_id=replay_id,
-            checkpoint_id=req.checkpoint_id,
-            agents_md_patched=bool(req.agents_md_patch),
-            stop_at_turn=req.stop_at_turn or len(user_turns),
-            status="running",
-        )
         _replays[replay_id] = placeholder
         asyncio.create_task(_run_single_replay(
-            replayer, checkpoint, user_turns,
-            req.stop_at_turn, replay_id,
+            replayer, checkpoint, replay_id,
+            agent_name=req.agent_name,
+            context_entries=context_entries, inflection_text=inflection_text,
         ))
 
     return {"replay_id": replay_id, "status": "running", "n_parallel": req.n_parallel}
 
 
-async def _run_single_replay(replayer, checkpoint, user_turns, stop_at, replay_id):
-    """Background task for single replay."""
+async def _run_single_replay(
+    replayer, checkpoint, replay_id, agent_name="Q",
+    context_entries=None, inflection_text=None,
+):
+    """Background task for single-shot replay."""
     try:
-        result = await replayer.replay(checkpoint, user_turns, stop_at=stop_at)
+        result = await replayer.replay(
+            checkpoint, user_turns=[],
+            req_agent=agent_name,
+            context_entries=context_entries,
+            inflection_text=inflection_text,
+        )
         result.replay_id = replay_id
         _replays[replay_id] = result
     except Exception as e:
@@ -328,15 +430,25 @@ async def _run_single_replay(replayer, checkpoint, user_turns, stop_at, replay_i
                 r.error = str(e)
 
 
-async def _run_parallel_replay(replayer, checkpoint, user_turns, n, stop_at, replay_id):
-    """Background task for parallel replay."""
+async def _run_parallel_replay(
+    replayer, checkpoint, replay_id, agent_name="Q", n=3,
+    context_entries=None, inflection_text=None,
+):
+    """Background task for N parallel single-shot replays."""
     try:
-        results = await replayer.replay_parallel(
-            checkpoint, user_turns, n=n, stop_at=stop_at,
-        )
+        tasks = [
+            replayer.replay(
+                checkpoint, user_turns=[],
+                req_agent=agent_name,
+                context_entries=context_entries,
+                inflection_text=inflection_text,
+            )
+            for _ in range(n)
+        ]
+        results = await asyncio.gather(*tasks)
         for r in results:
-            r.replay_id = replay_id  # Group under one ID
-        _replays[replay_id] = results
+            r.replay_id = replay_id
+        _replays[replay_id] = list(results)
     except Exception as e:
         log.error("Parallel replay %s failed: %s", replay_id[:8], e)
 

@@ -34,6 +34,7 @@ log = logging.getLogger(__name__)
 
 # Grok session directory base
 GROK_SESSIONS_BASE = Path.home() / ".grok" / "sessions"
+DOPPELGANGERS_BASE = Path.home() / "agents" / "doppelgangers"
 
 
 @dataclass
@@ -97,8 +98,10 @@ class ReplayResult:
 class CheckpointReplayer:
     """Loads checkpoints, patches prompts, replays sessions."""
 
-    def __init__(self, grok_binary: str = "grok", model: str = "coding-mix-latest"):
-        self.grok_binary = grok_binary
+    PINNED_BINARY = str(Path.home() / ".grok" / "bin" / "archive" / "grok-0.1.174.et")
+
+    def __init__(self, grok_binary: str | None = None, model: str = "coding-mix-latest"):
+        self.grok_binary = grok_binary or (self.PINNED_BINARY if Path(self.PINNED_BINARY).exists() else "grok")
         self.model = model
 
     def load_checkpoint(self, path: str) -> Checkpoint:
@@ -263,18 +266,26 @@ class CheckpointReplayer:
     ) -> tuple[str, Path]:
         """Create a synthetic session directory from a checkpoint.
 
+        Creates the session under the real ~/.grok/sessions/ (so grok can find
+        auth, config, etc.) but keyed to the work_dir CWD.
+
         Returns (session_id, session_dir).
         """
         session_id = str(uuid.uuid4())
         encoded_cwd = url_quote(str(work_dir), safe="")
-        grok_sessions = work_dir / ".grok" / "sessions" / encoded_cwd
+        grok_sessions = GROK_SESSIONS_BASE / encoded_cwd
         session_dir = grok_sessions / session_id
         session_dir.mkdir(parents=True)
 
         # Write chat_history.jsonl from compacted_history
+        # Grok expects user content as [{"type":"text","text":"..."}], but
+        # compaction checkpoints store it as plain strings. Convert on write.
         chat_history = session_dir / "chat_history.jsonl"
         with open(chat_history, "w") as f:
             for entry in checkpoint.compacted_history:
+                entry = dict(entry)  # shallow copy
+                if entry.get("type") == "user" and isinstance(entry.get("content"), str):
+                    entry["content"] = [{"type": "text", "text": entry["content"]}]
                 f.write(json.dumps(entry) + "\n")
 
         # Write minimal summary.json
@@ -313,17 +324,31 @@ class CheckpointReplayer:
         user_turns: list[UserTurn],
         stop_at: int | None = None,
         on_turn: Any = None,
+        req_agent: str | None = None,
+        context_entries: list[dict] | None = None,
+        inflection_text: str | None = None,
     ) -> ReplayResult:
-        """Run a full replay session.
+        """Run a replay session.
+
+        Two modes:
+          Single-shot (preferred): Pass context_entries + inflection_text.
+            All context is loaded as history, one prompt is sent.
+          Legacy turn-by-turn: Pass user_turns + stop_at.
+            Each turn is sent as a separate prompt.
 
         Args:
             checkpoint: The checkpoint to replay from.
-            user_turns: User messages to feed after checkpoint.
-            stop_at: Stop after this many user turns (None = all).
+            user_turns: User messages for legacy turn-by-turn mode.
+            stop_at: Stop after this many user turns (legacy mode).
             on_turn: Optional async callback(ReplayTurnResult) for progress.
+            req_agent: Agent name for doppelganger directory naming.
+            context_entries: Chat history entries (user+assistant) to load
+                before the inflection point (single-shot mode).
+            inflection_text: The single user message to send as the prompt
+                (single-shot mode).
 
         Returns:
-            ReplayResult with all turn results.
+            ReplayResult with turn results.
         """
         replay_id = str(uuid.uuid4())
         result = ReplayResult(
@@ -335,34 +360,44 @@ class CheckpointReplayer:
             started_at=time.time(),
         )
 
-        work_dir = Path(tempfile.mkdtemp(prefix=f"replay_{replay_id[:8]}_"))
+        work_dir = DOPPELGANGERS_BASE / f"dopple{req_agent or 'X'}-{replay_id[:8]}"
+        work_dir.mkdir(parents=True, exist_ok=True)
+        session_dir = None
         try:
-            session_id, session_dir = self._create_synthetic_session(
-                checkpoint, work_dir
-            )
-            result.session_id = session_id
-            log.info(
-                "Replay %s: session %s in %s",
-                replay_id[:8], session_id[:8], work_dir,
-            )
-
-            turns_to_replay = user_turns[:stop_at] if stop_at else user_turns
             proc = await self._start_agent(work_dir)
             try:
-                await self._handshake(proc, session_id, work_dir)
-                log.info("Replay %s: handshake complete, replaying %d turns",
-                         replay_id[:8], len(turns_to_replay))
+                # Handshake: initialize + session/new + write history + session/load
+                session_id, session_dir = await self._handshake_with_new_session(
+                    proc, checkpoint, work_dir,
+                    context_entries=context_entries,
+                )
+                result.session_id = session_id
+                log.info(
+                    "Replay %s: session %s in %s",
+                    replay_id[:8], session_id[:8], work_dir,
+                )
 
-                for i, turn in enumerate(turns_to_replay):
-                    text = turn.content if isinstance(turn.content, str) else json.dumps(turn.content)
-                    log.info("Replay %s: turn %d/%d",
-                             replay_id[:8], i + 1, len(turns_to_replay))
-
-                    turn_result = await self._send_turn(proc, session_id, text, i)
+                if inflection_text:
+                    # Single-shot mode: all context already loaded, send ONE prompt
+                    log.info("Replay %s: single-shot prompt (%d chars)",
+                             replay_id[:8], len(inflection_text))
+                    turn_result = await self._send_turn(
+                        proc, session_id, inflection_text, 0
+                    )
                     result.turns.append(turn_result)
-
                     if on_turn:
                         await on_turn(turn_result)
+                else:
+                    # Legacy turn-by-turn mode
+                    turns_to_replay = user_turns[:stop_at] if stop_at else user_turns
+                    log.info("Replay %s: turn-by-turn, %d turns",
+                             replay_id[:8], len(turns_to_replay))
+                    for i, turn in enumerate(turns_to_replay):
+                        text = turn.content if isinstance(turn.content, str) else json.dumps(turn.content)
+                        turn_result = await self._send_turn(proc, session_id, text, i)
+                        result.turns.append(turn_result)
+                        if on_turn:
+                            await on_turn(turn_result)
 
                 result.status = "completed"
             finally:
@@ -374,7 +409,16 @@ class CheckpointReplayer:
             log.error("Replay %s failed: %s", replay_id[:8], e)
         finally:
             result.completed_at = time.time()
-            # Keep work_dir for inspection; caller can clean up
+            # Clean up synthetic session from ~/.grok/sessions/
+            if session_dir and session_dir.exists():
+                try:
+                    shutil.rmtree(session_dir)
+                    # Remove parent CWD dir if empty
+                    cwd_dir = session_dir.parent
+                    if cwd_dir.exists() and not any(cwd_dir.iterdir()):
+                        cwd_dir.rmdir()
+                except OSError as e:
+                    log.warning("Cleanup failed for %s: %s", session_dir, e)
 
         return result
 
@@ -385,10 +429,11 @@ class CheckpointReplayer:
         n: int = 3,
         stop_at: int | None = None,
         on_turn: Any = None,
+        req_agent: str | None = None,
     ) -> list[ReplayResult]:
         """Run N parallel replay sessions from the same checkpoint."""
         tasks = [
-            self.replay(checkpoint, user_turns, stop_at=stop_at, on_turn=on_turn)
+            self.replay(checkpoint, user_turns, stop_at=stop_at, on_turn=on_turn, req_agent=req_agent)
             for _ in range(n)
         ]
         return await asyncio.gather(*tasks)
@@ -397,7 +442,7 @@ class CheckpointReplayer:
 
     async def _start_agent(self, cwd: Path) -> asyncio.subprocess.Process:
         """Start a grok agent stdio subprocess."""
-        env = {**os.environ, "GROK_MODEL": self.model, "HOME": str(cwd)}
+        env = {**os.environ, "GROK_MODEL": self.model}
         cmd = [self.grok_binary, "agent", "stdio"]
 
         proc = await asyncio.create_subprocess_exec(
@@ -450,10 +495,20 @@ class CheckpointReplayer:
                 return frame
         raise TimeoutError(f"No result for RPC id {expected_id} within {timeout}s")
 
-    async def _handshake(
-        self, proc: asyncio.subprocess.Process, session_id: str, cwd: Path,
-    ):
-        """Complete the JSON-RPC handshake: initialize + session/load."""
+    async def _handshake_with_new_session(
+        self, proc: asyncio.subprocess.Process, checkpoint: Checkpoint, cwd: Path,
+        context_entries: list[dict] | None = None,
+    ) -> tuple[str, Path]:
+        """Sr-validated procedure: initialize + session/new + overwrite + session/load.
+
+        1. initialize + notifications/initialized
+        2. session/new — let grok create a trusted session structure
+        3. Overwrite chat_history.jsonl with checkpoint data
+        4. session/load — grok reads back the overwritten history
+        5. /yolo on — auto-approve tool calls
+
+        Returns (session_id, session_dir).
+        """
         # 1. initialize
         await self._send_json(proc, {
             "jsonrpc": "2.0", "id": 1,
@@ -472,9 +527,49 @@ class CheckpointReplayer:
             "method": "notifications/initialized",
         })
 
-        # 3. session/load with the synthetic session
+        # 3. session/new — grok creates all boilerplate files
         await self._send_json(proc, {
             "jsonrpc": "2.0", "id": 2,
+            "method": "session/new",
+            "params": {"cwd": str(cwd), "mcpServers": []},
+        })
+        resp = await self._read_result(proc, 2, timeout=30)
+        if "error" in resp:
+            raise RuntimeError(f"session/new failed: {resp['error']}")
+        session_id = resp.get("result", {}).get("sessionId", "")
+        if not session_id:
+            raise RuntimeError(f"session/new returned no sessionId: {resp}")
+
+        # Find the session directory grok created
+        encoded_cwd = url_quote(str(cwd), safe="")
+        session_dir = GROK_SESSIONS_BASE / encoded_cwd / session_id
+        if not session_dir.exists():
+            raise RuntimeError(f"session/new created session but dir not found: {session_dir}")
+
+        log.info("session/new created %s at %s", session_id[:8], session_dir)
+
+        # 4. Overwrite chat_history.jsonl with checkpoint data + context turns
+        chat_history = session_dir / "chat_history.jsonl"
+        with open(chat_history, "w") as f:
+            for entry in checkpoint.compacted_history:
+                entry = dict(entry)
+                if entry.get("type") == "user" and isinstance(entry.get("content"), str):
+                    entry["content"] = [{"type": "text", "text": entry["content"]}]
+                f.write(json.dumps(entry) + "\n")
+            # Append context entries (user+assistant pairs before inflection point)
+            if context_entries:
+                for entry in context_entries:
+                    entry = dict(entry)
+                    if entry.get("type") == "user" and isinstance(entry.get("content"), str):
+                        entry["content"] = [{"type": "text", "text": entry["content"]}]
+                    f.write(json.dumps(entry) + "\n")
+
+        log.info("Wrote %d checkpoint + %d context entries to chat_history.jsonl",
+                 len(checkpoint.compacted_history), len(context_entries or []))
+
+        # 5. session/load — grok reads the overwritten history
+        await self._send_json(proc, {
+            "jsonrpc": "2.0", "id": 3,
             "method": "session/load",
             "params": {
                 "sessionId": session_id,
@@ -482,20 +577,22 @@ class CheckpointReplayer:
                 "mcpServers": [],
             },
         })
-        resp = await self._read_result(proc, 2, timeout=120)
+        resp = await self._read_result(proc, 3, timeout=120)
         if "error" in resp:
             raise RuntimeError(f"session/load failed: {resp['error']}")
 
-        # 4. Enable yolo mode for tool auto-approval
+        # 6. Enable yolo mode for tool auto-approval
         await self._send_json(proc, {
-            "jsonrpc": "2.0", "id": 3,
+            "jsonrpc": "2.0", "id": 4,
             "method": "session/prompt",
             "params": {
                 "sessionId": session_id,
                 "prompt": [{"type": "text", "text": "/yolo on"}],
             },
         })
-        await self._read_result(proc, 3, timeout=30)
+        await self._read_result(proc, 4, timeout=30)
+
+        return session_id, session_dir
 
     async def _send_turn(
         self,
@@ -505,7 +602,7 @@ class CheckpointReplayer:
         turn_index: int,
     ) -> ReplayTurnResult:
         """Send one user message and collect the full response."""
-        rpc_id = 100 + turn_index
+        rpc_id = 100 + turn_index  # ids 1-4 used by handshake
         await self._send_json(proc, {
             "jsonrpc": "2.0", "id": rpc_id,
             "method": "session/prompt",
