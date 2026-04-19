@@ -385,7 +385,7 @@ async def start_replay(req: ReplayRequest):
         replay_id=replay_id,
         checkpoint_id=req.checkpoint_id,
         agents_md_patched=bool(req.agents_md_patch),
-        stop_at_turn=inflection_idx or user_turn_count,
+        stop_at_turn=1,  # single-shot: one prompt, one response
         status="running",
     )
 
