@@ -249,6 +249,7 @@ function PatchEditor({
   onModeChange,
   findReplace,
   onFindReplaceChange,
+  agentsMdFiles,
 }: {
   patch: string;
   onChange: (v: string) => void;
@@ -256,7 +257,10 @@ function PatchEditor({
   onModeChange: (m: "off" | "find_replace" | "full") => void;
   findReplace: { find: string; replace: string };
   onFindReplaceChange: (v: { find: string; replace: string }) => void;
+  agentsMdFiles: { path: string; content: string }[];
 }) {
+  const [viewingSource, setViewingSource] = useState(false);
+
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
@@ -264,10 +268,28 @@ function PatchEditor({
           AGENTS.md Patch
         </label>
         <div className="flex gap-1">
+          {agentsMdFiles.length > 0 && (
+            <button
+              onClick={() => setViewingSource(!viewingSource)}
+              className={`px-1.5 py-0.5 text-[9px] rounded transition-colors ${
+                viewingSource
+                  ? "bg-cyan-400/20 text-cyan-400"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              View Source
+            </button>
+          )}
           {(["off", "find_replace", "full"] as const).map((m) => (
             <button
               key={m}
-              onClick={() => onModeChange(m)}
+              onClick={() => {
+                onModeChange(m);
+                if (m === "full" && !patch && agentsMdFiles.length > 0) {
+                  onChange(agentsMdFiles.map((f) => f.content).join("\n\n---\n\n"));
+                }
+                setViewingSource(false);
+              }}
               className={`px-1.5 py-0.5 text-[9px] rounded transition-colors ${
                 mode === m
                   ? "bg-primary/20 text-primary"
@@ -278,11 +300,26 @@ function PatchEditor({
                 ? "None"
                 : m === "find_replace"
                   ? "Find/Replace"
-                  : "Full Patch"}
+                  : "Edit"}
             </button>
           ))}
         </div>
       </div>
+
+      {viewingSource && (
+        <div className="space-y-2">
+          {agentsMdFiles.map((f) => (
+            <div key={f.path}>
+              <div className="text-[9px] text-muted-foreground font-mono mb-0.5">
+                {f.path}
+              </div>
+              <div className="text-[11px] text-foreground whitespace-pre-wrap max-h-64 overflow-y-auto font-mono leading-relaxed bg-background/50 rounded p-1.5 border border-border">
+                {f.content}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {mode === "find_replace" && (
         <div className="space-y-1">
@@ -309,8 +346,8 @@ function PatchEditor({
         <textarea
           value={patch}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="Paste full replacement AGENTS.md content..."
-          className="w-full bg-muted text-foreground text-[11px] px-2 py-1.5 rounded-md border border-border font-mono h-32 resize-y focus:outline-none focus:ring-1 focus:ring-ring"
+          placeholder="Edit the AGENTS.md content to use in replay..."
+          className="w-full bg-muted text-foreground text-[11px] px-2 py-1.5 rounded-md border border-border font-mono h-48 resize-y focus:outline-none focus:ring-1 focus:ring-ring"
         />
       )}
     </div>
@@ -427,7 +464,8 @@ function ReplayTurnCard({
           </span>
         </div>
         <div className="text-[11px] text-muted-foreground mt-0.5 truncate">
-          {turn.user_message.slice(0, 100)}
+          {turn.user_message.slice(0, 120)}
+          {turn.user_message.length > 120 ? "..." : ""}
         </div>
       </button>
 
@@ -437,7 +475,7 @@ function ReplayTurnCard({
             <div className="text-[9px] uppercase tracking-wider text-muted-foreground mb-0.5">
               User
             </div>
-            <div className="text-[11px] text-foreground whitespace-pre-wrap max-h-48 overflow-y-auto font-mono leading-relaxed bg-background/50 rounded p-1.5">
+            <div className="text-[11px] text-foreground whitespace-pre-wrap max-h-64 overflow-y-auto font-mono leading-relaxed bg-background/50 rounded p-1.5">
               {turn.user_message}
             </div>
           </div>
@@ -475,6 +513,7 @@ export function SessionInspector() {
   );
   const [fullPatch, setFullPatch] = useState("");
   const [findReplace, setFindReplace] = useState({ find: "", replace: "" });
+  const [agentsMdFiles, setAgentsMdFiles] = useState<{ path: string; content: string }[]>([]);
 
   // Replay state
   const [replayId, setReplayId] = useState<string | null>(null);
@@ -514,6 +553,15 @@ export function SessionInspector() {
       })
       .catch(() => setCheckpoints([]))
       .finally(() => setLoadingCPs(false));
+
+    // Also fetch AGENTS.md files for this agent
+    fetch(`${API_BASE}/api/replay/agents/${selectedAgent}/agents-md`)
+      .then((r) => r.json())
+      .then((data) => {
+        setAgentsMdFiles(data.files || []);
+        setFullPatch("");
+      })
+      .catch(() => setAgentsMdFiles([]));
   }, [selectedAgent]);
 
   // Fetch turns when checkpoint changes
@@ -663,6 +711,7 @@ export function SessionInspector() {
               onModeChange={setPatchMode}
               findReplace={findReplace}
               onFindReplaceChange={setFindReplace}
+              agentsMdFiles={agentsMdFiles}
             />
 
             {/* Controls */}

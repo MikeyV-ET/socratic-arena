@@ -111,6 +111,22 @@ async def list_agents():
     return {"agents": _get_agents()}
 
 
+@router.get("/agents/{agent_name}/agents-md")
+async def get_agents_md(agent_name: str):
+    """Return the AGENTS.md content for an agent (both root and local)."""
+    agents_home = Path.home() / "agents"
+    root_md = agents_home / "AGENTS.md"
+    local_md = agents_home / agent_name / "AGENTS.md"
+
+    sections = []
+    if root_md.exists():
+        sections.append({"path": str(root_md), "content": root_md.read_text()})
+    if local_md.exists():
+        sections.append({"path": str(local_md), "content": local_md.read_text()})
+
+    return {"agent": agent_name, "files": sections}
+
+
 @router.get("/checkpoints/{agent_name}")
 async def list_checkpoints(agent_name: str):
     """List all checkpoints for an agent."""
@@ -505,7 +521,7 @@ async def get_replay_status(replay_id: str):
             "turns": [
                 {
                     "turn_index": t.turn_index,
-                    "user_message": t.user_message[:200],
+                    "user_message": t.user_message,
                     "agent_response": t.agent_response,
                     "tool_call_count": len(t.tool_calls),
                     "total_tokens": t.total_tokens,
