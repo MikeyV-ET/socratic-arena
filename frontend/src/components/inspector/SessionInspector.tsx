@@ -599,8 +599,8 @@ export function SessionInspector() {
       </div>
 
       <Group orientation="vertical" className="flex-1 min-h-0">
-        {/* Top panel: agent selector + checkpoint list */}
-        <Panel id="inspector-checkpoints" defaultSize={35} minSize={15}>
+        {/* Top panel: session browser (checkpoints + turns from selected checkpoint) */}
+        <Panel id="inspector-sessions" defaultSize={45} minSize={15}>
           <div className="h-full overflow-y-auto p-3 space-y-3">
             <AgentSelector
               agents={agents}
@@ -614,23 +614,28 @@ export function SessionInspector() {
               onSelect={setSelectedCheckpoint}
               loading={loadingCPs}
             />
+
+            {selectedCheckpoint && (
+              <>
+                <div className="border-t border-border" />
+                <TurnViewer
+                  turns={turns}
+                  selectedTurnIdx={selectedTurnIdx}
+                  onSelectTurn={setSelectedTurnIdx}
+                  inflectionOverride={inflectionOverride}
+                  onInflectionOverrideChange={setInflectionOverride}
+                  loading={loadingTurns}
+                />
+              </>
+            )}
           </div>
         </Panel>
 
         <Separator className="h-1.5 bg-border/50 hover:bg-accent/40 transition-colors cursor-row-resize" />
 
-        {/* Bottom panel: turns, patch editor, controls, replay results */}
-        <Panel id="inspector-replay" defaultSize={65} minSize={20}>
+        {/* Bottom panel: modification & replay results */}
+        <Panel id="inspector-replay" defaultSize={55} minSize={15}>
           <div className="h-full overflow-y-auto p-3 space-y-3">
-            <TurnViewer
-              turns={turns}
-              selectedTurnIdx={selectedTurnIdx}
-              onSelectTurn={setSelectedTurnIdx}
-              inflectionOverride={inflectionOverride}
-              onInflectionOverrideChange={setInflectionOverride}
-              loading={loadingTurns}
-            />
-
             <PatchEditor
               patch={fullPatch}
               onChange={setFullPatch}
