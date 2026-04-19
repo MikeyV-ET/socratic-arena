@@ -475,7 +475,7 @@ async def get_replay_status(replay_id: str):
                 "turns": [
                     {
                         "turn_index": t.turn_index,
-                        "user_message": t.user_message[:200],
+                        "user_message": t.user_message,
                         "agent_response": t.agent_response,
                         "tool_call_count": len(t.tool_calls),
                         "total_tokens": t.total_tokens,
