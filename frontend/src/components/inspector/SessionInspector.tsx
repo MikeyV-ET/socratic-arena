@@ -554,14 +554,6 @@ export function SessionInspector() {
       .catch(() => setCheckpoints([]))
       .finally(() => setLoadingCPs(false));
 
-    // Also fetch AGENTS.md files for this agent
-    fetch(`${API_BASE}/api/replay/agents/${selectedAgent}/agents-md`)
-      .then((r) => r.json())
-      .then((data) => {
-        setAgentsMdFiles(data.files || []);
-        setFullPatch("");
-      })
-      .catch(() => setAgentsMdFiles([]));
   }, [selectedAgent]);
 
   // Fetch turns when checkpoint changes
@@ -584,6 +576,17 @@ export function SessionInspector() {
       })
       .catch(() => setTurns([]))
       .finally(() => setLoadingTurns(false));
+
+    // Fetch AGENTS.md as it existed in this checkpoint's system prompt
+    fetch(
+      `${API_BASE}/api/replay/checkpoints/${selectedAgent}/${selectedCheckpoint.checkpoint_id}/agents-md`,
+    )
+      .then((r) => r.json())
+      .then((data) => {
+        setAgentsMdFiles(data.files || []);
+        setFullPatch("");
+      })
+      .catch(() => setAgentsMdFiles([]));
   }, [selectedCheckpoint, selectedAgent]);
 
   // Poll replay status

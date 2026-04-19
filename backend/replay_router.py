@@ -111,20 +111,34 @@ async def list_agents():
     return {"agents": _get_agents()}
 
 
-@router.get("/agents/{agent_name}/agents-md")
-async def get_agents_md(agent_name: str):
-    """Return the AGENTS.md content for an agent (both root and local)."""
-    agents_home = Path.home() / "agents"
-    root_md = agents_home / "AGENTS.md"
-    local_md = agents_home / agent_name / "AGENTS.md"
+@router.get("/checkpoints/{agent_name}/{checkpoint_id}/agents-md")
+async def get_checkpoint_agents_md(agent_name: str, checkpoint_id: str):
+    """Extract AGENTS.md content as it existed in the checkpoint's system prompt."""
+    import re
 
-    sections = []
-    if root_md.exists():
-        sections.append({"path": str(root_md), "content": root_md.read_text()})
-    if local_md.exists():
-        sections.append({"path": str(local_md), "content": local_md.read_text()})
+    replayer = _get_replayer()
+    path = replayer.find_checkpoint(agent_name, checkpoint_id)
+    if not path:
+        raise HTTPException(404, f"Checkpoint {checkpoint_id} not found")
 
-    return {"agent": agent_name, "files": sections}
+    cp = replayer.load_checkpoint(path)
+    system_prompt = cp.compacted_history[0].get("content", "") if cp.compacted_history else ""
+
+    # Extract the AGENTS.md block from between <system-reminder> tags
+    pattern = r'<system-reminder>\s*(?:As you answer.*?context.*?:\s*\n)(## From:.*?)</system-reminder>'
+    match = re.search(pattern, system_prompt, re.DOTALL)
+
+    if match:
+        agents_md_block = match.group(1)
+        # Split into individual files by "## From:" headers
+        file_pattern = r'## From: (.+?)\n(.*?)(?=\n## From: |\Z)'
+        files = [
+            {"path": m.group(1).strip(), "content": m.group(2).strip()}
+            for m in re.finditer(file_pattern, agents_md_block, re.DOTALL)
+        ]
+        return {"checkpoint_id": checkpoint_id, "files": files, "raw": agents_md_block}
+    else:
+        return {"checkpoint_id": checkpoint_id, "files": [], "raw": ""}
 
 
 @router.get("/checkpoints/{agent_name}")
