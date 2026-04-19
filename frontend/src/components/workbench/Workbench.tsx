@@ -7,6 +7,7 @@ import { PromptTestPane } from "@/components/prompt/PromptTestPane";
 import { ArtifactPane } from "@/components/layout/ArtifactPane";
 import { ConversationPane } from "@/components/conversation/ConversationPane";
 import { MomentsPane } from "@/components/workbench/MomentsPane";
+import { SessionInspector } from "@/components/inspector/SessionInspector";
 import { FontSizeControl } from "@/components/common/FontSizeControl";
 
 export const WORKBENCH_TABS = [
@@ -15,6 +16,7 @@ export const WORKBENCH_TABS = [
   { id: "notebook", label: "Notebook" },
   { id: "prompt-dev", label: "Prompt Dev" },
   { id: "prompt-test", label: "Prompt Test" },
+  { id: "inspector", label: "Inspector" },
   { id: "artifact", label: "Artifact" },
 ] as const;
 
@@ -36,6 +38,9 @@ function TabContent({ tabId }: { tabId: string }) {
       break;
     case "prompt-test":
       content = <PromptTestPane />;
+      break;
+    case "inspector":
+      content = <SessionInspector />;
       break;
     case "artifact":
       content = <ArtifactPane />;

@@ -152,3 +152,41 @@ export interface StateSnapshot {
   prompts: TrainingPrompt[];
   artifacts: Artifact[];
 }
+
+// Checkpoint replay types (Session Inspector)
+
+export interface CheckpointInfo {
+  checkpoint_id: string;
+  session_id: string;
+  created_at: string;
+  history_entries: number;
+  size_bytes: number;
+  path?: string;
+}
+
+export interface CheckpointTurn {
+  index: number;
+  content: string;
+  is_synthetic: boolean;
+}
+
+export interface ReplayTurnResult {
+  turn_index: number;
+  user_message: string;
+  agent_response: string;
+  tool_call_count: number;
+  total_tokens: number;
+}
+
+export interface ReplayStatus {
+  replay_id: string;
+  status: "running" | "completed" | "failed" | "partial";
+  checkpoint_id: string;
+  agents_md_patched?: boolean;
+  turns_completed: number;
+  stop_at_turn: number;
+  error: string;
+  turns: ReplayTurnResult[];
+  n_parallel?: number;
+  results?: ReplayStatus[];
+}
