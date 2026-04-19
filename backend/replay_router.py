@@ -141,37 +141,88 @@ async def get_checkpoint(agent_name: str, checkpoint_id: str):
     }
 
 
+def _extract_turns_from_updates(updates_path: str, checkpoint_id: str) -> list[dict]:
+    """Extract assembled user messages from updates.jsonl between two compaction checkpoints.
+
+    Reads user_message_chunk entries after the target checkpoint and before the next one,
+    assembling chunks into complete messages (delimited by user_message_completed).
+    """
+    import json as _json
+
+    # First pass: find line range for target checkpoint
+    target_line = None
+    next_cp_line = None
+
+    with open(updates_path) as f:
+        for i, line in enumerate(f):
+            d = _json.loads(line)
+            update = d.get("params", {}).get("update", {})
+            su = update.get("sessionUpdate", "")
+            if su == "compaction_checkpoint" and update.get("checkpoint_id") == checkpoint_id:
+                target_line = i
+            elif su == "compaction_checkpoint" and target_line is not None:
+                next_cp_line = i
+                break
+
+    if target_line is None:
+        return []
+
+    # Second pass: each user_message_chunk is a complete user turn
+    turns = []
+
+    with open(updates_path) as f:
+        for i, line in enumerate(f):
+            if i <= target_line:
+                continue
+            if next_cp_line is not None and i >= next_cp_line:
+                break
+            d = _json.loads(line)
+            update = d.get("params", {}).get("update", {})
+            su = update.get("sessionUpdate", "")
+
+            if su == "user_message_chunk":
+                content = update.get("content", {})
+                text = ""
+                if isinstance(content, dict) and content.get("type") == "text":
+                    text = content.get("text", "")
+                elif isinstance(content, str):
+                    text = content
+                if text.strip():
+                    turns.append({
+                        "index": len(turns),
+                        "content": text,
+                        "is_synthetic": False,
+                    })
+
+    return turns
+
+
 @router.get("/checkpoints/{agent_name}/{checkpoint_id}/turns")
 async def get_post_checkpoint_turns(
     agent_name: str,
     checkpoint_id: str,
     include_synthetic: bool = False,
 ):
-    """Extract user messages from chat_history.jsonl after a checkpoint."""
+    """Extract user messages from updates.jsonl between this checkpoint and the next."""
     replayer = _get_replayer()
 
-    # Find the session this checkpoint belongs to
     path = replayer.find_checkpoint(agent_name, checkpoint_id)
     if not path:
         raise HTTPException(404, f"Checkpoint {checkpoint_id} not found")
 
-    # Get session_id from the checkpoint's path
-    # Path format: .../sessions/<encoded_cwd>/<session_id>/compaction_checkpoints/<id>.json
     session_id = Path(path).parent.parent.name
 
-    chat_history = get_chat_history_path(agent_name, session_id)
-    if not chat_history:
-        raise HTTPException(404, f"chat_history.jsonl not found for session {session_id}")
+    # Use updates.jsonl (append-only) instead of chat_history.jsonl (overwritten by each compaction)
+    updates_path = Path(path).parent.parent / "updates.jsonl"
+    if not updates_path.exists():
+        raise HTTPException(404, f"updates.jsonl not found for session {session_id}")
 
-    turns = replayer.extract_user_turns(chat_history, include_synthetic=include_synthetic)
+    turns = _extract_turns_from_updates(str(updates_path), checkpoint_id)
     return {
         "agent": agent_name,
         "checkpoint_id": checkpoint_id,
         "session_id": session_id,
-        "turns": [
-            {"index": t.index, "content": t.content if isinstance(t.content, str) else str(t.content), "is_synthetic": t.is_synthetic}
-            for t in turns
-        ],
+        "turns": turns,
     }
 
 
