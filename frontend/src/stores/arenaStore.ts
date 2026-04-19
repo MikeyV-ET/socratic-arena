@@ -524,11 +524,15 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
           newNodes[parentId] = { ...parent, children: [...parent.children, node.id] };
         }
       }
+      // Only advance activeNodeId if this node extends the current path
+      // (its parent is the current active node). This prevents live-tailed
+      // nodes from drifting the view to a sibling branch.
+      const shouldAdvance = !state.tree.activeNodeId || parentId === state.tree.activeNodeId;
       return {
         tree: {
           ...state.tree,
           nodes: newNodes,
-          activeNodeId: node.id,
+          activeNodeId: shouldAdvance ? node.id : state.tree.activeNodeId,
           rootNodeId: state.tree.rootNodeId || node.id,
         },
       };
