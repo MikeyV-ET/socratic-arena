@@ -269,6 +269,103 @@ On 2026-04-18, during a live walkthrough of the arena, two moments were captured
 
 The compaction checkpoint preceding these moments is `e6572ec4` (2026-04-18 07:08, 170KB). This checkpoint is the seed for testing whether adding "reproduce at the level the user experiences the problem" to AGENTS.md changes the agent's behavior at these moments.
 
+## Future: Application Hosting & Panel Architecture
+
+### Vision
+
+SA panels can host arbitrary desktop applications -- browsers, document editors,
+terminals, any X11 program. The human and agent interact with the same running
+application through different channels optimized for their respective strengths.
+
+This extends SA from a conversation-plus-notebook tool to a universal
+collaborative workspace. The conversation panel is one pane among many; the
+others can be live applications that both parties control.
+
+### Hosting Mechanism: Xpra
+
+Xpra forwards individual application windows (not the whole desktop) to an HTML5
+client that embeds in an iframe. Each application gets its own Xpra session and
+its own SA panel.
+
+```
+SA in Browser
++-- ConversationPane (existing)
++-- Panel: Xpra -> chrome --app=docs.google.com
++-- Panel: Xpra -> libreoffice --writer
++-- Panel: Xpra -> terminal
++-- Panel: Xpra -> any X11 application
+```
+
+Chrome's `--app=URL` mode strips browser chrome (no address bar, no tabs),
+making web apps look like standalone applications in their panels.
+
+Server-side: Xpra starts a virtual display, launches the application on it,
+and serves the HTML5 client on a local port. The SA backend proxies or
+embeds the Xpra client URL in the panel iframe.
+
+### Asymmetric Interaction Model
+
+The human and agent control the same application through different interfaces:
+
+| Party | Interface | Mechanism |
+|-------|-----------|-----------|
+| Human | Visual (pixels + mouse/keyboard) | Xpra HTML5 client in panel |
+| Agent | Programmatic (structured API) | Selenium, UNO, AT-SPI, shell |
+
+This asymmetry is deliberate. Humans are good at visual interaction; agents
+are good at API-level control. Both act on the same application instance.
+
+**Agent control channels by application type:**
+
+| Application | Agent API | Notes |
+|-------------|-----------|-------|
+| Chrome/Firefox | Selenium/CDP | DOM access, element selection, form interaction |
+| LibreOffice | UNO API (Python) | Document model: paragraphs, cells, formatting |
+| GTK/Qt apps | AT-SPI | Accessibility tree: buttons, menus, text fields |
+| Terminal | Shell | Direct command execution |
+| Arbitrary | Screenshots + vision + xdotool | Fallback for apps without structured APIs |
+
+### Panel Detachment
+
+Any SA panel can be popped out into its own browser window via `window.open()`.
+The detached window loads a standalone route (e.g., `/panel/{type}?session={id}`)
+and connects to the same WebSocket backend. Both windows share session state.
+
+This allows multi-monitor workflows: conversation on one screen, a hosted
+application on another. Reattach by closing the detached window.
+
+The existing react-resizable-panels layout supports this without architectural
+changes. The detached window renders the same panel component in isolation.
+
+### Integration with Existing Architecture
+
+- **LiveTailer** continues to stream `updates.jsonl` for the conversation pane
+- **Arena adapter** continues to bridge user messages to the agent
+- Xpra panels are additive -- new panel types alongside ConversationPane,
+  NotebookPane, MomentsPane, etc.
+- WebSocket protocol extends with `panel.host` (C->S, launch app) and
+  `panel.detach`/`panel.reattach` messages
+
+### Prerequisites
+
+Server-side packages (all in Ubuntu repos):
+- `xpra` -- application forwarding with HTML5 client
+- Xvfb (if no physical display) -- virtual X display
+
+Already available on current infrastructure:
+- Google Chrome, LibreOffice Writer, xdotool
+- Selenium 4.41, AT-SPI (Q's launch_arena_browser.sh)
+- X display at :0
+
+### Product Identity Note
+
+This capability shifts SA from a developer/research tool to a general-purpose
+collaborative workspace platform. The research layer (moments, corrections,
+fork-and-replay, GRPO export) remains, but the base layer -- agent and human
+sharing applications with equal control -- serves any workflow: office tasks,
+document editing, web research, data analysis. The research apparatus is what
+makes the interactions improvable; the workspace is what makes them possible.
+
 ## Open Questions
 
 1. **Seeding mechanism**: How to feed a checkpoint to `grok agent stdio` to start a parallel session. No CLI flag exists. Options: session directory manipulation, direct xAI API with conversation prefix, feature request.
