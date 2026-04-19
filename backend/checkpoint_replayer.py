@@ -32,6 +32,13 @@ from urllib.parse import quote as url_quote
 
 log = logging.getLogger(__name__)
 
+REPLAY_PREAMBLE = (
+    "[REPLAY NOTICE: This is a behavioral replay of a prior session. "
+    "Your full conversation context is already loaded — you do not need to "
+    "orient or re-read files. Tools are disabled. Please respond to the "
+    "following message based on your loaded context.]\n\n"
+)
+
 # Grok session directory base
 GROK_SESSIONS_BASE = Path.home() / ".grok" / "sessions"
 DOPPELGANGERS_BASE = Path.home() / "agents" / "doppelgangers"
@@ -379,10 +386,11 @@ class CheckpointReplayer:
 
                 if inflection_text:
                     # Single-shot mode: all context already loaded, send ONE prompt
+                    prompt_text = REPLAY_PREAMBLE + inflection_text
                     log.info("Replay %s: single-shot prompt (%d chars)",
-                             replay_id[:8], len(inflection_text))
+                             replay_id[:8], len(prompt_text))
                     turn_result = await self._send_turn(
-                        proc, session_id, inflection_text, 0
+                        proc, session_id, prompt_text, 0
                     )
                     result.turns.append(turn_result)
                     if on_turn:
