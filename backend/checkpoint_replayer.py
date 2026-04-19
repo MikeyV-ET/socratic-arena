@@ -581,17 +581,6 @@ class CheckpointReplayer:
         if "error" in resp:
             raise RuntimeError(f"session/load failed: {resp['error']}")
 
-        # 6. Enable yolo mode for tool auto-approval
-        await self._send_json(proc, {
-            "jsonrpc": "2.0", "id": 4,
-            "method": "session/prompt",
-            "params": {
-                "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/yolo on"}],
-            },
-        })
-        await self._read_result(proc, 4, timeout=30)
-
         return session_id, session_dir
 
     async def _send_turn(
@@ -624,7 +613,19 @@ class CheckpointReplayer:
             if frame is None:
                 break
 
-            method = frame.get("method", "")
+            # Auto-deny any server-to-client requests (tool permissions).
+            # A request has both "method" and "id"; a notification has
+            # "method" but no "id"; a response has "id" and "result"/"error".
+            frame_id = frame.get("id")
+            frame_method = frame.get("method", "")
+            if frame_id is not None and frame_method and frame_id != rpc_id:
+                log.info("Replay: auto-denying %s (id=%s)", frame_method, frame_id)
+                await self._send_json(proc, {
+                    "jsonrpc": "2.0", "id": frame_id,
+                    "result": {"allowed": False},
+                })
+                continue
+
             params = frame.get("params", {})
             update = params.get("update", {})
 
@@ -640,7 +641,7 @@ class CheckpointReplayer:
                     tool_calls.append(content)
 
             # Final result
-            if frame.get("id") == rpc_id and "result" in frame:
+            if frame_id == rpc_id and "result" in frame:
                 meta = frame["result"].get("_meta", {})
                 total_tokens = meta.get("totalTokens", 0)
                 break
