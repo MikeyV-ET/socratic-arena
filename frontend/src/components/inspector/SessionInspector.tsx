@@ -65,11 +65,23 @@ function CheckpointList({
   selectedId,
   onSelect,
   loading,
+  turns,
+  turnsLoading,
+  selectedTurnIdx,
+  onSelectTurn,
+  inflectionOverride,
+  onInflectionOverrideChange,
 }: {
   checkpoints: CheckpointInfo[];
   selectedId: string | null;
   onSelect: (cp: CheckpointInfo) => void;
   loading: boolean;
+  turns: CheckpointTurn[];
+  turnsLoading: boolean;
+  selectedTurnIdx: number | null;
+  onSelectTurn: (idx: number) => void;
+  inflectionOverride: string;
+  onInflectionOverrideChange: (v: string) => void;
 }) {
   if (loading) {
     return (
@@ -91,30 +103,46 @@ function CheckpointList({
         Compaction Checkpoints ({checkpoints.length})
       </label>
       <div className="space-y-1">
-        {checkpoints.map((cp) => (
-          <button
-            key={cp.checkpoint_id}
-            onClick={() => onSelect(cp)}
-            className={`w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors ${
-              selectedId === cp.checkpoint_id
-                ? "bg-primary/20 border border-primary/40 text-foreground"
-                : "bg-muted/30 border border-transparent hover:bg-muted/50 text-muted-foreground"
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <span className="font-mono text-[10px]">
-                {cp.checkpoint_id.slice(0, 8)}
-              </span>
-              <span className="text-[10px]">{formatDate(cp.created_at)}</span>
+        {checkpoints.map((cp) => {
+          const isSelected = selectedId === cp.checkpoint_id;
+          return (
+            <div key={cp.checkpoint_id}>
+              <button
+                onClick={() => onSelect(cp)}
+                className={`w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors ${
+                  isSelected
+                    ? "bg-primary/20 border border-primary/40 text-foreground"
+                    : "bg-muted/30 border border-transparent hover:bg-muted/50 text-muted-foreground"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-[10px]">
+                    {isSelected ? "\u25BC" : "\u25B6"} {cp.checkpoint_id.slice(0, 8)}
+                  </span>
+                  <span className="text-[10px]">{formatDate(cp.created_at)}</span>
+                </div>
+                <div className="flex items-center justify-between mt-0.5">
+                  <span className="text-[10px]">
+                    {cp.history_entries} entries
+                  </span>
+                  <span className="text-[10px]">{formatBytes(cp.size_bytes)}</span>
+                </div>
+              </button>
+              {isSelected && (
+                <div className="ml-3 mt-1 mb-2 pl-2 border-l-2 border-primary/30">
+                  <TurnViewer
+                    turns={turns}
+                    selectedTurnIdx={selectedTurnIdx}
+                    onSelectTurn={onSelectTurn}
+                    inflectionOverride={inflectionOverride}
+                    onInflectionOverrideChange={onInflectionOverrideChange}
+                    loading={turnsLoading}
+                  />
+                </div>
+              )}
             </div>
-            <div className="flex items-center justify-between mt-0.5">
-              <span className="text-[10px]">
-                {cp.history_entries} entries
-              </span>
-              <span className="text-[10px]">{formatBytes(cp.size_bytes)}</span>
-            </div>
-          </button>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -613,21 +641,13 @@ export function SessionInspector() {
               selectedId={selectedCheckpoint?.checkpoint_id ?? null}
               onSelect={setSelectedCheckpoint}
               loading={loadingCPs}
+              turns={turns}
+              turnsLoading={loadingTurns}
+              selectedTurnIdx={selectedTurnIdx}
+              onSelectTurn={setSelectedTurnIdx}
+              inflectionOverride={inflectionOverride}
+              onInflectionOverrideChange={setInflectionOverride}
             />
-
-            {selectedCheckpoint && (
-              <>
-                <div className="border-t border-border" />
-                <TurnViewer
-                  turns={turns}
-                  selectedTurnIdx={selectedTurnIdx}
-                  onSelectTurn={setSelectedTurnIdx}
-                  inflectionOverride={inflectionOverride}
-                  onInflectionOverrideChange={setInflectionOverride}
-                  loading={loadingTurns}
-                />
-              </>
-            )}
           </div>
         </Panel>
 
