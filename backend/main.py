@@ -16,6 +16,7 @@ from models import (
 from mock_data import build_mock_state
 from demo_dataset import build_demo_state
 from live_tailer import LiveTailer
+from replay_router import router as replay_router, init_replayer
 from urllib.parse import quote as _url_quote
 
 AGENTS_HOME = Path.home() / "agents"
@@ -102,6 +103,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Checkpoint replayer
+app.include_router(replay_router)
+init_replayer()
 
 # In-memory state
 def _build_default_state() -> StateSnapshot:
