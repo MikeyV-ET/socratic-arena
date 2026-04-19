@@ -408,7 +408,7 @@ function ReplayTurnCard({
             <div className="text-[9px] uppercase tracking-wider text-muted-foreground mb-0.5">
               User
             </div>
-            <div className="text-[11px] text-foreground whitespace-pre-wrap max-h-24 overflow-y-auto font-mono leading-relaxed bg-background/50 rounded p-1.5">
+            <div className="text-[11px] text-foreground whitespace-pre-wrap max-h-48 overflow-y-auto font-mono leading-relaxed bg-background/50 rounded p-1.5">
               {turn.user_message}
             </div>
           </div>
@@ -610,6 +610,8 @@ export function SessionInspector() {
           onSelect={setSelectedCheckpoint}
           loading={loadingCPs}
         />
+
+        {selectedCheckpoint && <div className="border-t border-border" />}
 
         <TurnViewer
           turns={turns}
