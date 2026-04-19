@@ -123,11 +123,15 @@ function TurnViewer({
   turns,
   selectedTurnIdx,
   onSelectTurn,
+  inflectionOverride,
+  onInflectionOverrideChange,
   loading,
 }: {
   turns: CheckpointTurn[];
   selectedTurnIdx: number | null;
   onSelectTurn: (idx: number) => void;
+  inflectionOverride: string;
+  onInflectionOverrideChange: (v: string) => void;
   loading: boolean;
 }) {
   if (loading) {
@@ -151,32 +155,59 @@ function TurnViewer({
         point
       </label>
       <div className="max-h-60 overflow-y-auto space-y-1">
-        {turns.map((t, i) => (
-          <button
-            key={t.index}
-            onClick={() => onSelectTurn(i + 1)}
-            className={`w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors ${
-              selectedTurnIdx === i + 1
-                ? "bg-warning/20 border border-warning/40"
-                : "bg-muted/30 border border-transparent hover:bg-muted/50"
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-[10px] text-muted-foreground w-6 shrink-0">
-                #{i + 1}
-              </span>
-              <span className="truncate text-foreground">
-                {t.content.slice(0, 120)}
-                {t.content.length > 120 ? "..." : ""}
-              </span>
+        {turns.map((t, i) => {
+          const isSelected = selectedTurnIdx === i + 1;
+          return (
+            <div key={t.index}>
+              <button
+                onClick={() => {
+                  onSelectTurn(i + 1);
+                  onInflectionOverrideChange(t.content);
+                }}
+                className={`w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors ${
+                  isSelected
+                    ? "bg-warning/20 border border-warning/40"
+                    : "bg-muted/30 border border-transparent hover:bg-muted/50"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[10px] text-muted-foreground w-6 shrink-0">
+                    #{i + 1}
+                  </span>
+                  <span className="truncate text-foreground">
+                    {t.content.slice(0, 120)}
+                    {t.content.length > 120 ? "..." : ""}
+                  </span>
+                </div>
+                {isSelected && (
+                  <div className="mt-1 text-[10px] text-warning font-medium">
+                    Inflection point - edit below, then run replay
+                  </div>
+                )}
+              </button>
+              {isSelected && (
+                <div className="mt-1 ml-8">
+                  <textarea
+                    value={inflectionOverride}
+                    onChange={(e) => onInflectionOverrideChange(e.target.value)}
+                    className="w-full bg-muted text-foreground text-[11px] px-2 py-1.5 rounded-md border border-warning/40 font-mono h-24 resize-y focus:outline-none focus:ring-1 focus:ring-warning"
+                  />
+                  {inflectionOverride !== t.content && (
+                    <div className="flex items-center justify-between mt-0.5">
+                      <span className="text-[9px] text-warning">Modified</span>
+                      <button
+                        onClick={() => onInflectionOverrideChange(t.content)}
+                        className="text-[9px] text-muted-foreground hover:text-foreground"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-            {selectedTurnIdx === i + 1 && (
-              <div className="mt-1 text-[10px] text-warning font-medium">
-                Inflection point - replay stops here, agent responds
-              </div>
-            )}
-          </button>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -406,6 +437,7 @@ export function SessionInspector() {
     useState<CheckpointInfo | null>(null);
   const [turns, setTurns] = useState<CheckpointTurn[]>([]);
   const [selectedTurnIdx, setSelectedTurnIdx] = useState<number | null>(null);
+  const [inflectionOverride, setInflectionOverride] = useState("");
   const [nParallel, setNParallel] = useState(1);
 
   // Patch state
@@ -470,6 +502,7 @@ export function SessionInspector() {
         // Default: select last turn as inflection point
         if (data.turns?.length) {
           setSelectedTurnIdx(data.turns.length);
+          setInflectionOverride(data.turns[data.turns.length - 1].content);
         }
       })
       .catch(() => setTurns([]))
@@ -524,6 +557,12 @@ export function SessionInspector() {
       body.find_replace = [[findReplace.find, findReplace.replace]];
     }
 
+    // Send modified inflection text if user edited it
+    const originalTurn = turns[selectedTurnIdx - 1];
+    if (originalTurn && inflectionOverride !== originalTurn.content) {
+      body.inflection_override = inflectionOverride;
+    }
+
     fetch(`${API_BASE}/api/replay/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -576,6 +615,8 @@ export function SessionInspector() {
           turns={turns}
           selectedTurnIdx={selectedTurnIdx}
           onSelectTurn={setSelectedTurnIdx}
+          inflectionOverride={inflectionOverride}
+          onInflectionOverrideChange={setInflectionOverride}
           loading={loadingTurns}
         />
 

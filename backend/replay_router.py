@@ -89,6 +89,7 @@ class ReplayRequest(BaseModel):
     find_replace: list[list[str]] | None = None
     stop_at_turn: int | None = None
     n_parallel: int = 1
+    inflection_override: str | None = None
 
 
 class ReplayStatusResponse(BaseModel):
@@ -203,6 +204,17 @@ async def start_replay(req: ReplayRequest):
     user_turns = replayer.extract_user_turns(chat_history)
     if not user_turns:
         raise HTTPException(400, "No user turns found to replay")
+
+    # Override the inflection turn's content if requested
+    if req.inflection_override and req.stop_at_turn and req.stop_at_turn <= len(user_turns):
+        from checkpoint_replayer import UserTurn
+        idx = req.stop_at_turn - 1
+        original = user_turns[idx]
+        user_turns[idx] = UserTurn(
+            index=original.index,
+            content=req.inflection_override,
+            is_synthetic=original.is_synthetic,
+        )
 
     # Start replay in background
     replay_id = None
