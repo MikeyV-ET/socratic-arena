@@ -592,6 +592,7 @@ async def handle_conversation_send(ws: WebSocket, payload: dict):
             "action": "add",
             "node": user_node.model_dump(),
             "parentId": user_node.parent_id,
+            "advance": True,
         },
     })
     await broadcast({
@@ -600,6 +601,7 @@ async def handle_conversation_send(ws: WebSocket, payload: dict):
             "action": "add",
             "node": assistant_node.model_dump(),
             "parentId": assistant_node.parent_id,
+            "advance": True,
         },
     })
 

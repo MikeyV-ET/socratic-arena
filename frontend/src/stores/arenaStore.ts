@@ -132,7 +132,7 @@ interface ArenaState {
   appendStreamChunk: (nodeId: string, content: string) => void;
   appendThinkingChunk: (nodeId: string, content: string) => void;
   finalizeStream: (nodeId: string) => void;
-  addLiveNode: (node: ConversationNode, parentId: string | null) => void;
+  addLiveNode: (node: ConversationNode, parentId: string | null, advance?: boolean) => void;
   updateLiveNode: (nodeId: string, content: string, thinking?: string | null) => void;
 }
 
@@ -514,7 +514,7 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
       };
     }),
 
-  addLiveNode: (node, parentId) =>
+  addLiveNode: (node, parentId, advance) =>
     set((state) => {
       const newNodes = { ...state.tree.nodes, [node.id]: node };
       // Wire parent -> child
@@ -524,10 +524,11 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
           newNodes[parentId] = { ...parent, children: [...parent.children, node.id] };
         }
       }
-      // Only advance activeNodeId if this node extends the current path
-      // (its parent is the current active node). This prevents live-tailed
-      // nodes from drifting the view to a sibling branch.
-      const shouldAdvance = !state.tree.activeNodeId || parentId === state.tree.activeNodeId;
+      // Advance activeNodeId if: explicitly requested (arena conversation nodes),
+      // or if this node extends the current path (parent is active node).
+      // Live-tailed nodes (advance=false) only advance if they extend the path,
+      // preventing drift to sibling branches.
+      const shouldAdvance = advance || !state.tree.activeNodeId || parentId === state.tree.activeNodeId;
       return {
         tree: {
           ...state.tree,

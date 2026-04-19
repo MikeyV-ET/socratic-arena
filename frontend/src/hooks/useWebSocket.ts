@@ -97,7 +97,7 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
     case "tree.live_node": {
       const liveAction = msg.payload.action as string;
       if (liveAction === "add") {
-        store.addLiveNode(msg.payload.node as never, (msg.payload.parentId as string) || null);
+        store.addLiveNode(msg.payload.node as never, (msg.payload.parentId as string) || null, !!msg.payload.advance);
         store.triggerScrollToBottom();
       } else if (liveAction === "update" || liveAction === "finalize") {
         store.updateLiveNode(
