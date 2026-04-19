@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { Panel, Group, Separator } from "react-resizable-panels";
 import type {
   CheckpointInfo,
   CheckpointTurn,
@@ -89,7 +90,7 @@ function CheckpointList({
       <label className="text-[10px] text-muted-foreground uppercase tracking-wider">
         Compaction Checkpoints ({checkpoints.length})
       </label>
-      <div className="max-h-40 overflow-y-auto space-y-1">
+      <div className="space-y-1">
         {checkpoints.map((cp) => (
           <button
             key={cp.checkpoint_id}
@@ -154,7 +155,7 @@ function TurnViewer({
         Post-Compaction User Turns ({turns.length}) - click to set inflection
         point
       </label>
-      <div className="max-h-60 overflow-y-auto space-y-1">
+      <div className="space-y-1">
         {turns.map((t, i) => {
           const isSelected = selectedTurnIdx === i + 1;
           return (
@@ -597,77 +598,87 @@ export function SessionInspector() {
         </h2>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
-        <AgentSelector
-          agents={agents}
-          selected={selectedAgent}
-          onSelect={setSelectedAgent}
-        />
-
-        <CheckpointList
-          checkpoints={checkpoints}
-          selectedId={selectedCheckpoint?.checkpoint_id ?? null}
-          onSelect={setSelectedCheckpoint}
-          loading={loadingCPs}
-        />
-
-        {selectedCheckpoint && <div className="border-t border-border" />}
-
-        <TurnViewer
-          turns={turns}
-          selectedTurnIdx={selectedTurnIdx}
-          onSelectTurn={setSelectedTurnIdx}
-          inflectionOverride={inflectionOverride}
-          onInflectionOverrideChange={setInflectionOverride}
-          loading={loadingTurns}
-        />
-
-        <PatchEditor
-          patch={fullPatch}
-          onChange={setFullPatch}
-          mode={patchMode}
-          onModeChange={setPatchMode}
-          findReplace={findReplace}
-          onFindReplaceChange={setFindReplace}
-        />
-
-        {/* Controls */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <label className="text-[10px] text-muted-foreground">n =</label>
-            <input
-              type="range"
-              min={1}
-              max={5}
-              value={nParallel}
-              onChange={(e) => setNParallel(Number(e.target.value))}
-              className="w-16 accent-primary"
+      <Group orientation="vertical" className="flex-1 min-h-0">
+        {/* Top panel: agent selector + checkpoint list */}
+        <Panel id="inspector-checkpoints" defaultSize={35} minSize={15}>
+          <div className="h-full overflow-y-auto p-3 space-y-3">
+            <AgentSelector
+              agents={agents}
+              selected={selectedAgent}
+              onSelect={setSelectedAgent}
             />
-            <span className="text-xs text-foreground font-mono w-4">
-              {nParallel}
-            </span>
-          </div>
-          <button
-            onClick={handleRunReplay}
-            disabled={!canRun}
-            className="text-xs px-3 py-1 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            {isReplaying ? "Replaying..." : "Run Replay"}
-          </button>
-        </div>
 
-        <ReplayResults status={replayStatus} loading={isReplaying} />
-
-        {!selectedCheckpoint && !replayStatus && (
-          <div className="text-xs text-muted-foreground text-center py-8">
-            Select an agent and checkpoint to inspect a session.
-            <br />
-            Choose an inflection point and optionally patch AGENTS.md,
-            <br />
-            then run a replay to test whether the agent behaves differently.
+            <CheckpointList
+              checkpoints={checkpoints}
+              selectedId={selectedCheckpoint?.checkpoint_id ?? null}
+              onSelect={setSelectedCheckpoint}
+              loading={loadingCPs}
+            />
           </div>
-        )}
-      </div>
+        </Panel>
+
+        <Separator className="h-1.5 bg-border/50 hover:bg-accent/40 transition-colors cursor-row-resize" />
+
+        {/* Bottom panel: turns, patch editor, controls, replay results */}
+        <Panel id="inspector-replay" defaultSize={65} minSize={20}>
+          <div className="h-full overflow-y-auto p-3 space-y-3">
+            <TurnViewer
+              turns={turns}
+              selectedTurnIdx={selectedTurnIdx}
+              onSelectTurn={setSelectedTurnIdx}
+              inflectionOverride={inflectionOverride}
+              onInflectionOverrideChange={setInflectionOverride}
+              loading={loadingTurns}
+            />
+
+            <PatchEditor
+              patch={fullPatch}
+              onChange={setFullPatch}
+              mode={patchMode}
+              onModeChange={setPatchMode}
+              findReplace={findReplace}
+              onFindReplaceChange={setFindReplace}
+            />
+
+            {/* Controls */}
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] text-muted-foreground">n =</label>
+                <input
+                  type="range"
+                  min={1}
+                  max={5}
+                  value={nParallel}
+                  onChange={(e) => setNParallel(Number(e.target.value))}
+                  className="w-16 accent-primary"
+                />
+                <span className="text-xs text-foreground font-mono w-4">
+                  {nParallel}
+                </span>
+              </div>
+              <button
+                onClick={handleRunReplay}
+                disabled={!canRun}
+                className="text-xs px-3 py-1 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {isReplaying ? "Replaying..." : "Run Replay"}
+              </button>
+            </div>
+
+            <ReplayResults status={replayStatus} loading={isReplaying} />
+
+            {!selectedCheckpoint && !replayStatus && (
+              <div className="text-xs text-muted-foreground text-center py-8">
+                Select an agent and checkpoint to inspect a session.
+                <br />
+                Choose an inflection point and optionally patch AGENTS.md,
+                <br />
+                then run a replay to test whether the agent behaves differently.
+              </div>
+            )}
+          </div>
+        </Panel>
+      </Group>
     </div>
   );
 }
