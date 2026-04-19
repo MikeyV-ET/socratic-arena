@@ -690,7 +690,11 @@ export function SessionInspector() {
             <CheckpointList
               checkpoints={checkpoints}
               selectedId={selectedCheckpoint?.checkpoint_id ?? null}
-              onSelect={setSelectedCheckpoint}
+              onSelect={(cp) =>
+                setSelectedCheckpoint((prev) =>
+                  prev?.checkpoint_id === cp.checkpoint_id ? null : cp
+                )
+              }
               loading={loadingCPs}
               turns={turns}
               turnsLoading={loadingTurns}
