@@ -316,7 +316,10 @@ async def _live_tail_loop():
                     # Add to in-memory state tree (node_data uses camelCase aliases)
                     node = ConversationNode.model_validate(node_data)
                     state.tree.nodes[node_id] = node
-                    state.tree.active_node_id = node_id
+                    # Only advance activeNodeId if we're not in an arena conversation.
+                    # Arena conversation nodes (_arena_node_ids) take priority.
+                    if state.tree.active_node_id not in _arena_node_ids:
+                        state.tree.active_node_id = node_id
 
                     # Wire parent -> child
                     if parent_id and parent_id in state.tree.nodes:
