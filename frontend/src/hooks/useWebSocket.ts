@@ -66,6 +66,9 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       const updContent = msg.payload.content as string;
       const updThinking = msg.payload.thinking as string | undefined;
       store.updateLiveNode(updNodeId, updContent, updThinking);
+      // Force activeNodeId to this node so the branch walk reaches it,
+      // even if live-tailed nodes have drifted the pointer elsewhere.
+      store.setTree({ ...store.tree, activeNodeId: updNodeId });
       store.setAwaitingResponse(false);
       store.triggerScrollToBottom();
       break;
