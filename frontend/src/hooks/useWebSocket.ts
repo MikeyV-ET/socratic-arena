@@ -29,13 +29,15 @@ function clearStreamingTimeout() {
 function handleMessage(msg: { type: string; payload: Record<string, unknown> }) {
   const store = useArenaStore.getState();
   switch (msg.type) {
-    case "state.snapshot":
-      if (msg.payload.tree) store.setTree(msg.payload.tree as never);
+    case "state.snapshot": {
+      const snapTree = msg.payload.tree as Record<string, unknown> | undefined;
+      if (snapTree) store.setTree(snapTree as never);
       if (msg.payload.notebook) store.setNotebook(msg.payload.notebook as never);
       if (msg.payload.prompts) store.setPrompts(msg.payload.prompts as never);
       if (msg.payload.artifacts) store.setArtifacts(msg.payload.artifacts as never);
       store.triggerScrollToBottom();
       break;
+    }
 
     case "conversation.chunk":
       store.setAwaitingResponse(false);
@@ -65,12 +67,17 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       const updNodeId = msg.payload.nodeId as string;
       const updContent = msg.payload.content as string;
       const updThinking = msg.payload.thinking as string | undefined;
+      const existed = !!store.tree.nodes[updNodeId];
       store.updateLiveNode(updNodeId, updContent, updThinking);
       // Force activeNodeId to this node so the branch walk reaches it,
       // even if live-tailed nodes have drifted the pointer elsewhere.
       // Must re-read state after updateLiveNode to avoid overwriting the content update.
       const fresh = useArenaStore.getState();
       fresh.setTree({ ...fresh.tree, activeNodeId: updNodeId });
+      const ok = !!useArenaStore.getState().tree.nodes[updNodeId]?.content;
+      console.log("[ws] node_update", updNodeId.slice(0, 12),
+        "existed=" + existed, "contentOk=" + ok,
+        "len=" + (updContent?.length ?? 0));
       store.setAwaitingResponse(false);
       store.triggerScrollToBottom();
       break;
