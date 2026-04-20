@@ -8,6 +8,7 @@ import type {
   Artifact,
   Flag,
   ClientMessage,
+  PromptTestResult,
 } from "@/types";
 
 const emptyTree: ConversationTree = {
@@ -134,6 +135,16 @@ interface ArenaState {
   finalizeStream: (nodeId: string) => void;
   addLiveNode: (node: ConversationNode, parentId: string | null, advance?: boolean) => void;
   updateLiveNode: (nodeId: string, content: string, thinking?: string | null) => void;
+
+  // Prompt test (shared via main WebSocket, no duplicate connection)
+  promptTestResults: PromptTestResult[];
+  promptTestProgress: { completed: number; total: number };
+  promptTestRunning: boolean;
+  promptTestModel: string;
+  addPromptTestResult: (result: PromptTestResult, progress: { completed: number; total: number }) => void;
+  completePromptTest: () => void;
+  startPromptTest: () => void;
+  clearPromptTestResults: () => void;
 }
 
 const _viewportTimers: Record<string, ReturnType<typeof setTimeout>> = {};
@@ -557,4 +568,19 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
         },
       };
     }),
+
+    // Prompt test state
+    promptTestResults: [],
+    promptTestProgress: { completed: 0, total: 0 },
+    promptTestRunning: false,
+    promptTestModel: "",
+    addPromptTestResult: (result, progress) =>
+      set((state) => ({
+        promptTestResults: [...state.promptTestResults, result],
+        promptTestProgress: progress,
+        promptTestRunning: progress.completed < progress.total,
+      })),
+    completePromptTest: () => set({ promptTestRunning: false }),
+    startPromptTest: () => set({ promptTestRunning: true, promptTestResults: [], promptTestProgress: { completed: 0, total: 0 } }),
+    clearPromptTestResults: () => set({ promptTestResults: [], promptTestProgress: { completed: 0, total: 0 } }),
 }))

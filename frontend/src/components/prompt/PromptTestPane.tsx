@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useArenaStore } from "@/stores/arenaStore";
 import type { PromptTestResult, TrainingPrompt } from "@/types";
 
@@ -197,13 +197,31 @@ export function PromptTestPane() {
   const [n, setN] = useState(5);
   const [model, setModel] = useState(DEFAULT_MODEL);
   const [models, setModels] = useState<string[]>([]);
-  const [isRunning, setIsRunning] = useState(false);
-  const [results, setResults] = useState<PromptTestResult[]>([]);
-  const [progress, setProgress] = useState({ completed: 0, total: 0 });
   const [history, setHistory] = useState<RunHistory[]>([]);
-  const wsRef = useRef<WebSocket | null>(null);
+  const sendWs = useArenaStore((s) => s.sendWs);
+  const results = useArenaStore((s) => s.promptTestResults);
+  const progress = useArenaStore((s) => s.promptTestProgress);
+  const isRunning = useArenaStore((s) => s.promptTestRunning);
 
   const prompt = prompts.find((p) => p.id === selectedPromptId) || prompts[prompts.length - 1];
+
+  // Archive completed runs to history
+  const prevRunning = useRef(false);
+  useEffect(() => {
+    if (prevRunning.current && !isRunning && results.length > 0) {
+      const caught = results.filter((r) => r.caught).length;
+      const run: RunHistory = {
+        id: `run_${Date.now()}`,
+        model,
+        n: results.length,
+        results,
+        varianceScore: results.length > 0 ? caught / results.length : 0,
+        timestamp: Date.now(),
+      };
+      setHistory((h) => [run, ...h]);
+    }
+    prevRunning.current = isRunning;
+  }, [isRunning, results, model]);
 
   useEffect(() => {
     const base = window.location.pathname.replace(/\/+$/, "");
@@ -235,57 +253,14 @@ export function PromptTestPane() {
       .catch(() => {});
   }, []);
 
-  const handleWsMessage = useCallback((event: MessageEvent) => {
-    try {
-      const msg = JSON.parse(event.data);
-      if (msg.type === "prompt_test.result") {
-        const result = { ...msg.payload.result, label: msg.payload.label };
-        setResults((prev) => [...prev, result]);
-        setProgress(msg.payload.progress);
-        // Fallback: if progress says we're done, treat as complete
-        if (msg.payload.progress?.completed >= msg.payload.progress?.total && msg.payload.progress?.total > 0) {
-          setIsRunning(false);
-        }
-      } else if (msg.type === "prompt_test.complete") {
-        setIsRunning(false);
-        setResults((prev) => {
-          const caught = prev.filter((r) => r.caught).length;
-          const run: RunHistory = {
-            id: `run_${Date.now()}`,
-            model,
-            n: prev.length,
-            results: prev,
-            varianceScore: prev.length > 0 ? caught / prev.length : 0,
-            timestamp: Date.now(),
-          };
-          setHistory((h) => [run, ...h]);
-          return prev;
-        });
-      }
-    } catch {}
-  }, [model]);
-
-  useEffect(() => {
-    const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsBase = window.location.pathname.replace(/\/+$/, "");
-    const wsUrl = `${wsProto}//${window.location.host}${wsBase}/ws`;
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-    ws.onmessage = handleWsMessage;
-    ws.onclose = () => { wsRef.current = null; };
-    return () => { ws.close(); };
-  }, [handleWsMessage]);
-
   const handleRun = () => {
-    if (!prompt || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    setIsRunning(true);
-    setResults([]);
-    setProgress({ completed: 0, total: n });
+    if (!prompt || !sendWs) return;
+    useArenaStore.getState().startPromptTest();
 
-    wsRef.current.send(JSON.stringify({
+    sendWs({
       type: "prompt_test.run",
       payload: { promptId: prompt.id, n, model },
-    }));
+    });
   };
 
   return (

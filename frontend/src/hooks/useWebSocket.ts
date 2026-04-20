@@ -60,7 +60,16 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       break;
 
     case "conversation.turn_start":
-      // Agent spawned and processing — indicator already visible via awaitingResponse
+      break;
+
+    case "prompt_test.result": {
+      const result = { ...msg.payload.result, label: msg.payload.label } as never;
+      store.addPromptTestResult(result, msg.payload.progress as { completed: number; total: number });
+      break;
+    }
+
+    case "prompt_test.complete":
+      store.completePromptTest();
       break;
 
     case "conversation.node_update": {
