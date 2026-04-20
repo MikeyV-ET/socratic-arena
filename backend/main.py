@@ -222,27 +222,22 @@ def _trim_state_payload(payload: dict) -> dict:
     # Walk from root following ancestors, then continue on active branch
     kept: dict[str, dict] = {}
 
-    def _walk_from(start_id: str):
-        cur = start_id
-        while cur and cur in all_nodes and cur not in kept:
-            kept[cur] = all_nodes[cur]
-            children = all_nodes[cur].get("children", [])
-            # Follow ALL children that are ancestors (handles forks)
-            followed_any = False
+    stack = [root_id]
+    while stack:
+        cur = stack.pop()
+        if not cur or cur not in all_nodes or cur in kept:
+            continue
+        kept[cur] = all_nodes[cur]
+        children = all_nodes[cur].get("children", [])
+        ancestor_children = [cid for cid in children if cid in ancestors]
+        if ancestor_children:
+            stack.extend(ancestor_children)
+        else:
             for cid in children:
-                if cid in ancestors:
-                    _walk_from(cid)
-                    followed_any = True
-            if not followed_any:
-                # No ancestor children; follow the active branch
-                for cid in children:
-                    node = all_nodes.get(cid, {})
-                    if node.get("branchId") == active_branch:
-                        _walk_from(cid)
-                        break
-            break  # only process this node once
-
-    _walk_from(root_id)
+                node = all_nodes.get(cid, {})
+                if node.get("branchId") == active_branch:
+                    stack.append(cid)
+                    break
 
     trimmed_tree = {**tree, "nodes": kept}
     return {**payload, "tree": trimmed_tree}

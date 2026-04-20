@@ -33,7 +33,7 @@ stop_all() {
 start_backend() {
     echo "Starting backend on :${BACKEND_PORT}..."
     cd "${SA_DIR}/backend"
-    nohup uvicorn main:app --host 0.0.0.0 --port "${BACKEND_PORT}" > "${BACKEND_LOG}" 2>&1 &
+    nohup uvicorn main:app --host 0.0.0.0 --port "${BACKEND_PORT}" --ws-max-size 20971520 > "${BACKEND_LOG}" 2>&1 &
     echo $! > "$BACKEND_PID"
     echo "  Backend PID: $! (log: ${BACKEND_LOG})"
 }
