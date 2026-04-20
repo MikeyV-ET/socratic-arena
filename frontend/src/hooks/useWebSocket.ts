@@ -68,6 +68,11 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       const updContent = msg.payload.content as string;
       const updThinking = msg.payload.thinking as string | undefined;
       const existed = !!store.tree.nodes[updNodeId];
+      // Finalize any active stream on this node before applying final content
+      if (store.streamingNodeId === updNodeId) {
+        store.finalizeStream(updNodeId);
+      }
+      clearStreamingTimeout();
       store.updateLiveNode(updNodeId, updContent, updThinking);
       // Force activeNodeId to this node so the branch walk reaches it,
       // even if live-tailed nodes have drifted the pointer elsewhere.
