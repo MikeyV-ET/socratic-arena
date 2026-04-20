@@ -234,6 +234,17 @@ export function useWebSocket() {
         useArenaStore.getState().setSendWs(send);
         send({ type: "state.sync", payload: {} });
         send({ type: "viewport.tab_change", payload: { tab: useArenaStore.getState().activeTab } });
+        // Restore panel state on reconnect
+        const base = window.location.pathname.replace(/\/+$/, "");
+        fetch(`${base}/api/panel/list`)
+          .then((r) => r.json())
+          .then((data) => {
+            const panels = data.panels || [];
+            for (const p of panels) {
+              useArenaStore.getState().addPanel(p);
+            }
+          })
+          .catch(() => {});
       };
 
       ws.onclose = () => {

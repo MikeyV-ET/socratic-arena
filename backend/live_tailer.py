@@ -6,9 +6,62 @@ Groups consecutive chunks from the same turn, same as updates_parser.parse_updat
 
 import json
 import os
+import re
 import logging
 from pathlib import Path
 from models import ConversationNode, NodeMetadata, new_id
+
+# Patterns that identify system doorbells (not human messages)
+_SYSTEM_PREFIXES = (
+    "[continue ",
+    "[heartbeat ",
+    "[context ",
+    "[session:",
+    "[Compaction complete",
+    "[localmail ",
+    "[remind ",
+)
+
+def _is_human_message(text: str) -> bool:
+    """Return True if this user_message_chunk is an actual human message, not a system doorbell."""
+    stripped = text.strip()
+    if not stripped:
+        return False
+    # System doorbells always start with [ and a known prefix
+    for prefix in _SYSTEM_PREFIXES:
+        if stripped.startswith(prefix):
+            return False
+    # Background TUI messages contain human text
+    if stripped.startswith("[background]") and " in tui " in stripped:
+        return True
+    # Arena user messages
+    if stripped.startswith("<arena_user"):
+        return True
+    # Direct TUI messages
+    if re.match(r"^<\w+\s*\(via\s+tui\)>", stripped):
+        return True
+    # Bare user messages (from grok binary direct interaction)
+    if not stripped.startswith("["):
+        return True
+    return False
+
+
+def _extract_human_text(text: str) -> str:
+    """Extract the human-readable message from a formatted prompt line."""
+    stripped = text.strip()
+    # "<arena_user (via arena)> message" or "<arena_user (via arena) [sent during...]> message"
+    m = re.match(r"^<arena_user\s*\(via arena\)(?:\s*\[[^\]]*\])?>(.+)", stripped, re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    # "<eric (via tui)> message"
+    m = re.match(r"^<\w+\s*\(via tui\)>(.+)", stripped, re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    # "[background] eric in tui (reply_via=tui outbox): message"
+    m = re.match(r"^\[background\]\s*\w+\s+in\s+tui\s*\([^)]*\):\s*(.+)", stripped, re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    return stripped
 
 log = logging.getLogger(__name__)
 
@@ -128,6 +181,13 @@ class LiveTailer:
                 text = update.get("content", {}).get("text", "")
                 if not text.strip():
                     continue
+
+                # Filter: only show actual human messages, skip system doorbells
+                if not _is_human_message(text):
+                    continue
+
+                # Clean: extract the human-readable part
+                text = _extract_human_text(text)
 
                 node_id = event_id or new_id()
 

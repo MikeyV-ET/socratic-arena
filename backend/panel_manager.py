@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import shutil
 import signal
 import subprocess
 from dataclasses import dataclass, field
@@ -14,6 +15,24 @@ log = logging.getLogger("panel_manager")
 _PORT_BASE = 10001
 _PORT_MAX = 10099
 _DISPLAY_BASE = 11  # Xpra virtual displays start at :11 (PoC uses :10)
+
+
+def _detect_file_manager() -> str:
+    """Find the first available GUI file manager, fall back to xterm+mc."""
+    candidates = [
+        ("nautilus", "nautilus --new-window {url}"),
+        ("pcmanfm", "pcmanfm {url}"),
+        ("thunar", "thunar {url}"),
+        ("nemo", "nemo {url}"),
+        ("caja", "caja {url}"),
+    ]
+    for binary, cmd in candidates:
+        if shutil.which(binary):
+            return cmd
+    if shutil.which("mc"):
+        return "xterm -fa Monospace -fs 12 -e mc {url}"
+    return "xterm -fa Monospace -fs 12 -e ls -la {url}"
+
 
 # App presets — common launch commands
 APP_PRESETS: dict[str, dict] = {
@@ -28,7 +47,7 @@ APP_PRESETS: dict[str, dict] = {
     },
     "files": {
         "label": "File Manager",
-        "cmd": "nautilus --new-window {url}",
+        "cmd": _detect_file_manager(),
         "default_url": str(Path.home()),
     },
 }
