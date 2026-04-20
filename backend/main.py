@@ -1846,6 +1846,70 @@ async def adapter_chunk(body: dict):
     return {"status": "ok"}
 
 
+# --- Panel management endpoints (Xpra hosted applications) ---
+
+from panel_manager import panel_manager, APP_PRESETS
+
+
+@app.get("/api/panel/presets")
+async def panel_presets():
+    """Return available app presets for launching panels."""
+    return {k: {"label": v["label"]} for k, v in APP_PRESETS.items()}
+
+
+@app.post("/api/panel/launch")
+async def panel_launch(body: dict):
+    """Launch a new hosted application panel.
+
+    Body: {
+        "appType": "chrome",     // required: preset name
+        "url": "https://...",    // optional: URL for chrome
+        "label": "My App"       // optional: display label
+    }
+    """
+    app_type = body.get("appType", "chrome")
+    url = body.get("url")
+    label = body.get("label")
+
+    try:
+        session = await panel_manager.launch(app_type=app_type, url=url, label=label)
+    except (ValueError, RuntimeError) as e:
+        return {"status": "error", "message": str(e)}
+
+    await broadcast({
+        "type": "panel.launched",
+        "payload": session.to_dict(),
+    })
+
+    return {"status": "ok", "panel": session.to_dict()}
+
+
+@app.get("/api/panel/list")
+async def panel_list():
+    """List all active panels."""
+    return {"panels": panel_manager.list_panels()}
+
+
+@app.delete("/api/panel/{panel_id}")
+async def panel_stop(panel_id: str):
+    """Stop a panel and its Xpra session."""
+    session = panel_manager.get(panel_id)
+    if not session:
+        return {"status": "error", "message": f"panel {panel_id} not found"}
+
+    info = session.to_dict()
+    ok = await panel_manager.stop(panel_id)
+    if not ok:
+        return {"status": "error", "message": "failed to stop panel"}
+
+    await broadcast({
+        "type": "panel.stopped",
+        "payload": {"id": panel_id, **info},
+    })
+
+    return {"status": "ok"}
+
+
 @app.post("/api/agent/start")
 async def start_agent(body: dict = {}):
     """Agent lifecycle managed by asdaaas, not the arena."""

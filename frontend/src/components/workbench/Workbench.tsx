@@ -8,6 +8,7 @@ import { ArtifactPane } from "@/components/layout/ArtifactPane";
 import { ConversationPane } from "@/components/conversation/ConversationPane";
 import { MomentsPane } from "@/components/workbench/MomentsPane";
 import { SessionInspector } from "@/components/inspector/SessionInspector";
+import { HostedAppPane } from "@/components/layout/HostedAppPane";
 import { FontSizeControl } from "@/components/common/FontSizeControl";
 
 export const WORKBENCH_TABS = [
@@ -18,6 +19,7 @@ export const WORKBENCH_TABS = [
   { id: "prompt-test", label: "Prompt Test" },
   { id: "inspector", label: "Inspector" },
   { id: "artifact", label: "Artifact" },
+  { id: "apps", label: "Apps" },
 ] as const;
 
 function TabContent({ tabId }: { tabId: string }) {
@@ -45,6 +47,8 @@ function TabContent({ tabId }: { tabId: string }) {
     case "artifact":
       content = <ArtifactPane />;
       break;
+    case "apps":
+      return <HostedAppPane />;
     default:
       content = <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Unknown tab</div>;
   }

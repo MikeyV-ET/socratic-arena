@@ -11,6 +11,15 @@ import type {
   PromptTestResult,
 } from "@/types";
 
+export interface PanelInfo {
+  id: string;
+  appType: string;
+  label: string;
+  url: string;
+  appUrl?: string;
+  seleniumPort?: number;
+}
+
 const emptyTree: ConversationTree = {
   id: "",
   branches: {},
@@ -145,6 +154,13 @@ interface ArenaState {
   completePromptTest: () => void;
   startPromptTest: () => void;
   clearPromptTestResults: () => void;
+
+  // Hosted application panels (Xpra)
+  panels: PanelInfo[];
+  activePanelId: string | null;
+  addPanel: (panel: PanelInfo) => void;
+  removePanel: (panelId: string) => void;
+  setActivePanel: (panelId: string | null) => void;
 }
 
 const _viewportTimers: Record<string, ReturnType<typeof setTimeout>> = {};
@@ -583,4 +599,14 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
     completePromptTest: () => set({ promptTestRunning: false }),
     startPromptTest: () => set({ promptTestRunning: true, promptTestResults: [], promptTestProgress: { completed: 0, total: 0 } }),
     clearPromptTestResults: () => set({ promptTestResults: [], promptTestProgress: { completed: 0, total: 0 } }),
+
+    // Hosted application panels
+    panels: [],
+    activePanelId: null,
+    addPanel: (panel) => set((s) => ({ panels: [...s.panels, panel], activePanelId: panel.id })),
+    removePanel: (panelId) => set((s) => ({
+      panels: s.panels.filter((p) => p.id !== panelId),
+      activePanelId: s.activePanelId === panelId ? (s.panels.length > 1 ? s.panels.find((p) => p.id !== panelId)?.id ?? null : null) : s.activePanelId,
+    })),
+    setActivePanel: (panelId) => set({ activePanelId: panelId }),
 }))

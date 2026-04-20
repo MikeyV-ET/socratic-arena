@@ -72,6 +72,14 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       store.completePromptTest();
       break;
 
+    case "panel.launched":
+      store.addPanel(msg.payload as never);
+      break;
+
+    case "panel.stopped":
+      store.removePanel((msg.payload as { id: string }).id);
+      break;
+
     case "conversation.node_update": {
       const updNodeId = msg.payload.nodeId as string;
       const updContent = msg.payload.content as string;
