@@ -19,7 +19,7 @@ _DISPLAY_BASE = 11  # Xpra virtual displays start at :11 (PoC uses :10)
 APP_PRESETS: dict[str, dict] = {
     "chrome": {
         "label": "Chrome Browser",
-        "cmd": "google-chrome --app={url} --no-first-run --disable-default-apps --user-data-dir=/tmp/xpra-chrome-{display}",
+        "cmd": "google-chrome --app={url} --no-first-run --disable-default-apps --user-data-dir=/tmp/xpra-chrome-{display} --window-size=1024,768 --window-position=0,0",
         "default_url": "about:blank",
     },
     "terminal": {
@@ -124,6 +124,10 @@ class PanelManager:
             "xpra", "start", f":{display}",
             f"--bind-tcp=0.0.0.0:{port}",
             "--html=on",
+            "--clipboard=no",
+            "--notifications=no",
+            "--sharing=yes",
+            "--resize-display=1280x800",
             f"--start={app_cmd}",
         ]
 
