@@ -68,7 +68,9 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       store.updateLiveNode(updNodeId, updContent, updThinking);
       // Force activeNodeId to this node so the branch walk reaches it,
       // even if live-tailed nodes have drifted the pointer elsewhere.
-      store.setTree({ ...store.tree, activeNodeId: updNodeId });
+      // Must re-read state after updateLiveNode to avoid overwriting the content update.
+      const fresh = useArenaStore.getState();
+      fresh.setTree({ ...fresh.tree, activeNodeId: updNodeId });
       store.setAwaitingResponse(false);
       store.triggerScrollToBottom();
       break;
