@@ -158,7 +158,7 @@ def build_tree_from_updates(entries: list[dict], label: str = "Session", live_se
             role=e["role"],
             content=e["content"],
             thinking=e.get("thinking"),
-            timestamp=e["timestamp"],
+            timestamp=int(e["timestamp"]),
             children=[],
             flags=[],
             metadata=NodeMetadata(model_id=e.get("model")) if e.get("model") else None,

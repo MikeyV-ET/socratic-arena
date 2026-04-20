@@ -142,7 +142,7 @@ class LiveTailer:
                     branch_id="main",
                     role="user",
                     content=text,
-                    timestamp=ts * 1000,
+                    timestamp=int(ts * 1000),
                     children=[],
                     flags=[],
                 )
@@ -208,7 +208,7 @@ class LiveTailer:
                         role="assistant",
                         content=text,
                         thinking=self._current_agent.get("thinking"),
-                        timestamp=ts * 1000,
+                        timestamp=int(ts * 1000),
                         children=[],
                         flags=[],
                         metadata=NodeMetadata(model_id=model) if model else None,
@@ -243,7 +243,7 @@ class LiveTailer:
                     branch_id="main",
                     role="system",
                     content="[Compaction boundary]",
-                    timestamp=ts * 1000,
+                    timestamp=int(ts * 1000),
                     children=[],
                     flags=[],
                 )
