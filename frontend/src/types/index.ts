@@ -134,6 +134,17 @@ export interface Artifact {
   lastModified: number;
 }
 
+// Correction annotations
+export interface Correction {
+  id: string;
+  nodeId: string;
+  whatWasMissing: string;
+  whatShouldHaveHappened: string;
+  correctionText: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 // WebSocket message types
 
 export interface ClientMessage {

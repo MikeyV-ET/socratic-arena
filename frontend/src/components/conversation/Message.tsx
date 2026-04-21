@@ -5,6 +5,7 @@ import type { ConversationNode } from "@/types";
 import { useArenaStore } from "@/stores/arenaStore";
 import { FlagButton } from "./FlagButton";
 import { ForkButton } from "./ForkButton";
+import { CorrectionButton } from "./CorrectionButton";
 
 const proseClass = "text-sm text-foreground leading-relaxed prose prose-sm max-w-none prose-p:my-1.5 prose-li:my-0.5 prose-table:text-xs prose-th:text-left prose-td:px-2 prose-td:py-1 prose-th:px-2 prose-th:py-1";
 
@@ -18,6 +19,9 @@ export function Message({ node }: MessageProps) {
   const theme = useArenaStore((s) => s.theme);
   const streamingContent = useArenaStore((s) =>
     s.streamingNodeId === node.id ? s.streamingContent : null
+  );
+  const hasCorrection = useArenaStore((s) =>
+    s.corrections.some((c) => c.nodeId === node.id)
   );
   const displayContent = streamingContent ?? node.content;
 
@@ -42,7 +46,8 @@ export function Message({ node }: MessageProps) {
     <div
       className={`group px-4 py-3 ${
         isUser ? "bg-transparent" : "bg-card/50"
-      } hover:bg-muted/30 transition-colors`}
+      } hover:bg-muted/30 transition-colors ${hasCorrection ? "border-l-2 border-l-destructive/50" : ""}`}
+      data-testid={hasCorrection ? `corrected-node-${node.id}` : undefined}
     >
       <div className="max-w-3xl mx-auto">
         {/* Header */}
@@ -71,6 +76,7 @@ export function Message({ node }: MessageProps) {
             node.flags.length > 0 ? "opacity-100" : "opacity-0 group-hover:opacity-100"
           }`}>
             <ForkButton node={node} />
+            <CorrectionButton node={node} />
             <FlagButton node={node} />
           </div>
         </div>

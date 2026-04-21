@@ -2004,6 +2004,77 @@ async def get_compaction_boundary(checkpoint_id: str, agent: str = ""):
     return {"checkpointId": checkpoint_id, "summary": summary}
 
 
+# --- Corrections (training annotations) ---
+
+import corrections as corrections_store
+
+
+@app.get("/api/corrections")
+async def list_corrections(nodeId: str = ""):
+    """List all corrections, optionally filtered by node ID."""
+    if nodeId:
+        return {"corrections": corrections_store.get_corrections_for_node(nodeId)}
+    return {"corrections": corrections_store.list_corrections()}
+
+
+@app.post("/api/corrections")
+async def create_correction(body: dict):
+    """Create a new correction annotation."""
+    node_id = body.get("nodeId", "")
+    if not node_id:
+        return {"status": "error", "message": "nodeId is required"}
+
+    correction = corrections_store.create_correction(
+        node_id=node_id,
+        what_was_missing=body.get("whatWasMissing", ""),
+        what_should_have_happened=body.get("whatShouldHaveHappened", ""),
+        correction_text=body.get("correctionText", ""),
+    )
+
+    await broadcast({
+        "type": "correction.created",
+        "payload": correction,
+    })
+    return {"status": "ok", "correction": correction}
+
+
+@app.get("/api/corrections/{correction_id}")
+async def get_correction(correction_id: str):
+    """Get a specific correction."""
+    c = corrections_store.get_correction(correction_id)
+    if not c:
+        return {"status": "error", "message": "not found"}
+    return {"correction": c}
+
+
+@app.put("/api/corrections/{correction_id}")
+async def update_correction(correction_id: str, body: dict):
+    """Update a correction."""
+    c = corrections_store.update_correction(correction_id, body)
+    if not c:
+        return {"status": "error", "message": "not found"}
+
+    await broadcast({
+        "type": "correction.updated",
+        "payload": c,
+    })
+    return {"status": "ok", "correction": c}
+
+
+@app.delete("/api/corrections/{correction_id}")
+async def delete_correction(correction_id: str):
+    """Delete a correction."""
+    ok = corrections_store.delete_correction(correction_id)
+    if not ok:
+        return {"status": "error", "message": "not found"}
+
+    await broadcast({
+        "type": "correction.deleted",
+        "payload": {"id": correction_id},
+    })
+    return {"status": "ok"}
+
+
 @app.post("/api/agent/start")
 async def start_agent(body: dict = {}):
     """Agent lifecycle managed by asdaaas, not the arena."""

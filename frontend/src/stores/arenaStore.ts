@@ -9,6 +9,7 @@ import type {
   Flag,
   ClientMessage,
   PromptTestResult,
+  Correction,
 } from "@/types";
 
 export interface PanelInfo {
@@ -167,6 +168,16 @@ interface ArenaState {
   setAgentPanelClaimed: (panelId: string, agent: string) => void;
   setAgentPanelReleased: (panelId: string) => void;
   setAgentPanelStatus: (panelId: string, status: string) => void;
+
+  // Corrections (training annotations)
+  corrections: Correction[];
+  editingCorrectionNodeId: string | null;
+  setCorrections: (corrections: Correction[]) => void;
+  addCorrection: (correction: Correction) => void;
+  updateCorrection: (correction: Correction) => void;
+  removeCorrection: (correctionId: string) => void;
+  setEditingCorrectionNodeId: (nodeId: string | null) => void;
+  getCorrectionsForNode: (nodeId: string) => Correction[];
 }
 
 const _viewportTimers: Record<string, ReturnType<typeof setTimeout>> = {};
@@ -631,4 +642,20 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
       if (!existing) return s;
       return { agentPanels: { ...s.agentPanels, [panelId]: { ...existing, status } } };
     }),
+
+    // Corrections
+    corrections: [],
+    editingCorrectionNodeId: null,
+    setCorrections: (corrections) => set({ corrections }),
+    addCorrection: (correction) => set((s) => ({
+      corrections: [...s.corrections, correction],
+    })),
+    updateCorrection: (correction) => set((s) => ({
+      corrections: s.corrections.map((c) => c.id === correction.id ? correction : c),
+    })),
+    removeCorrection: (correctionId) => set((s) => ({
+      corrections: s.corrections.filter((c) => c.id !== correctionId),
+    })),
+    setEditingCorrectionNodeId: (nodeId) => set({ editingCorrectionNodeId: nodeId }),
+    getCorrectionsForNode: (nodeId) => get().corrections.filter((c) => c.nodeId === nodeId),
 }))

@@ -98,6 +98,18 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       );
       break;
 
+    case "correction.created":
+      store.addCorrection(msg.payload as any);
+      break;
+
+    case "correction.updated":
+      store.updateCorrection(msg.payload as any);
+      break;
+
+    case "correction.deleted":
+      store.removeCorrection((msg.payload as { id: string }).id);
+      break;
+
     case "conversation.node_update": {
       const updNodeId = msg.payload.nodeId as string;
       const updContent = msg.payload.content as string;
@@ -268,6 +280,14 @@ export function useWebSocket() {
                 }
               }
             }
+          })
+          .catch(() => {});
+
+        // Load corrections on connect
+        fetch(`${base}/api/corrections`)
+          .then((r) => r.json())
+          .then((data) => {
+            useArenaStore.getState().setCorrections(data.corrections || []);
           })
           .catch(() => {});
       };
