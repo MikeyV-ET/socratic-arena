@@ -161,6 +161,12 @@ interface ArenaState {
   addPanel: (panel: PanelInfo) => void;
   removePanel: (panelId: string) => void;
   setActivePanel: (panelId: string | null) => void;
+
+  // Agent panel control state
+  agentPanels: Record<string, { agent: string; status: string }>;
+  setAgentPanelClaimed: (panelId: string, agent: string) => void;
+  setAgentPanelReleased: (panelId: string) => void;
+  setAgentPanelStatus: (panelId: string, status: string) => void;
 }
 
 const _viewportTimers: Record<string, ReturnType<typeof setTimeout>> = {};
@@ -609,4 +615,20 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
       activePanelId: s.activePanelId === panelId ? (s.panels.length > 1 ? s.panels.find((p) => p.id !== panelId)?.id ?? null : null) : s.activePanelId,
     })),
     setActivePanel: (panelId) => set({ activePanelId: panelId }),
+
+    // Agent panel control
+    agentPanels: {},
+    setAgentPanelClaimed: (panelId, agent) => set((s) => ({
+      agentPanels: { ...s.agentPanels, [panelId]: { agent, status: "Connected" } },
+    })),
+    setAgentPanelReleased: (panelId) => set((s) => {
+      const next = { ...s.agentPanels };
+      delete next[panelId];
+      return { agentPanels: next };
+    }),
+    setAgentPanelStatus: (panelId, status) => set((s) => {
+      const existing = s.agentPanels[panelId];
+      if (!existing) return s;
+      return { agentPanels: { ...s.agentPanels, [panelId]: { ...existing, status } } };
+    }),
 }))

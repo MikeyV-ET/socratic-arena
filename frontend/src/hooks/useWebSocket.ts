@@ -80,6 +80,24 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       store.removePanel((msg.payload as { id: string }).id);
       break;
 
+    case "panel.agent_claimed":
+      store.setAgentPanelClaimed(
+        msg.payload.panelId as string,
+        msg.payload.agent as string,
+      );
+      break;
+
+    case "panel.agent_released":
+      store.setAgentPanelReleased(msg.payload.panelId as string);
+      break;
+
+    case "panel.agent_status":
+      store.setAgentPanelStatus(
+        msg.payload.panelId as string,
+        msg.payload.status as string,
+      );
+      break;
+
     case "conversation.node_update": {
       const updNodeId = msg.payload.nodeId as string;
       const updContent = msg.payload.content as string;
@@ -240,8 +258,15 @@ export function useWebSocket() {
           .then((r) => r.json())
           .then((data) => {
             const panels = data.panels || [];
+            const store2 = useArenaStore.getState();
             for (const p of panels) {
-              useArenaStore.getState().addPanel(p);
+              store2.addPanel(p);
+              if (p.agentControlled) {
+                store2.setAgentPanelClaimed(p.id, p.agentName || "Agent");
+                if (p.agentStatus) {
+                  store2.setAgentPanelStatus(p.id, p.agentStatus);
+                }
+              }
             }
           })
           .catch(() => {});

@@ -8,11 +8,12 @@ const APP_PRESETS = [
   { id: "files", label: "File Manager", icon: "folder" },
 ] as const;
 
-function PanelTab({ panel, isActive, onSelect, onClose }: {
+function PanelTab({ panel, isActive, onSelect, onClose, agentControlled }: {
   panel: PanelInfo;
   isActive: boolean;
   onSelect: () => void;
   onClose: () => void;
+  agentControlled?: boolean;
 }) {
   return (
     <div
@@ -23,6 +24,9 @@ function PanelTab({ panel, isActive, onSelect, onClose }: {
       }`}
       onClick={onSelect}
     >
+      {agentControlled && (
+        <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary animate-pulse" title="Agent controlled" />
+      )}
       <span className="truncate max-w-[120px]">{panel.label}</span>
       <button
         onClick={(e) => { e.stopPropagation(); onClose(); }}
@@ -115,10 +119,12 @@ export function HostedAppPane() {
   const activePanelId = useArenaStore((s) => s.activePanelId);
   const setActivePanel = useArenaStore((s) => s.setActivePanel);
   const removePanel = useArenaStore((s) => s.removePanel);
+  const agentPanels = useArenaStore((s) => s.agentPanels);
   const [showLauncher, setShowLauncher] = useState(false);
   const [launching, setLaunching] = useState(false);
 
   const activePanel = panels.find((p) => p.id === activePanelId);
+  const activeAgentState = activePanelId ? agentPanels[activePanelId] : undefined;
 
   const handleLaunch = async (appType: string, url?: string, label?: string) => {
     setLaunching(true);
@@ -192,6 +198,7 @@ export function HostedAppPane() {
             isActive={p.id === activePanelId}
             onSelect={() => setActivePanel(p.id)}
             onClose={() => handleClose(p.id)}
+            agentControlled={!!agentPanels[p.id]}
           />
         ))}
         <button
@@ -213,6 +220,17 @@ export function HostedAppPane() {
           </button>
         )}
       </div>
+
+      {/* Agent control indicator */}
+      {activeAgentState && (
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 border-b border-primary/20 text-xs" data-testid="agent-control-bar">
+          <span className="inline-block w-2 h-2 rounded-full bg-primary animate-pulse" />
+          <span className="text-primary font-medium">{activeAgentState.agent} is controlling this panel</span>
+          {activeAgentState.status && (
+            <span className="text-muted-foreground ml-1" data-testid="agent-status-text">{activeAgentState.status}</span>
+          )}
+        </div>
+      )}
 
       {/* Active panel iframe */}
       {activePanel && (

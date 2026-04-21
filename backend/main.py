@@ -1886,8 +1886,15 @@ async def panel_launch(body: dict):
 
 @app.get("/api/panel/list")
 async def panel_list():
-    """List all active panels."""
-    return {"panels": panel_manager.list_panels()}
+    """List all active panels, including agent control state."""
+    panels = panel_manager.list_panels()
+    for p in panels:
+        agent_info = _agent_panel_state.get(p["id"])
+        if agent_info:
+            p["agentControlled"] = True
+            p["agentName"] = agent_info["agent"]
+            p["agentStatus"] = agent_info["status"]
+    return {"panels": panels}
 
 
 @app.delete("/api/panel/{panel_id}")
@@ -1902,12 +1909,73 @@ async def panel_stop(panel_id: str):
     if not ok:
         return {"status": "error", "message": "failed to stop panel"}
 
+    # Clean up agent control state if panel was agent-controlled
+    _agent_panel_state.pop(panel_id, None)
+
     await broadcast({
         "type": "panel.stopped",
         "payload": {"id": panel_id, **info},
     })
 
     return {"status": "ok"}
+
+
+# --- Agent panel control (agent claims/releases panel, broadcasts status) ---
+
+# Tracks which panels are agent-controlled: panel_id -> {agent, status}
+_agent_panel_state: dict[str, dict] = {}
+
+
+@app.post("/api/panel/{panel_id}/agent-claim")
+async def panel_agent_claim(panel_id: str, body: dict):
+    """Agent claims control of a panel. Broadcasts to all clients."""
+    session = panel_manager.get(panel_id)
+    if not session:
+        return {"status": "error", "message": f"panel {panel_id} not found"}
+
+    agent = body.get("agent", _current_agent)
+    _agent_panel_state[panel_id] = {"agent": agent, "status": "Connected"}
+
+    await broadcast({
+        "type": "panel.agent_claimed",
+        "payload": {"panelId": panel_id, "agent": agent},
+    })
+    return {"status": "ok", "panelId": panel_id, "agent": agent}
+
+
+@app.post("/api/panel/{panel_id}/agent-release")
+async def panel_agent_release(panel_id: str, body: dict = {}):
+    """Agent releases control of a panel."""
+    _agent_panel_state.pop(panel_id, None)
+
+    await broadcast({
+        "type": "panel.agent_released",
+        "payload": {"panelId": panel_id},
+    })
+    return {"status": "ok", "panelId": panel_id}
+
+
+@app.post("/api/panel/{panel_id}/agent-status")
+async def panel_agent_status(panel_id: str, body: dict):
+    """Agent broadcasts a status update for a panel it controls."""
+    status_text = body.get("status", "")
+    if panel_id in _agent_panel_state:
+        _agent_panel_state[panel_id]["status"] = status_text
+
+    await broadcast({
+        "type": "panel.agent_status",
+        "payload": {"panelId": panel_id, "status": status_text},
+    })
+    return {"status": "ok"}
+
+
+@app.get("/api/panel/{panel_id}/agent-state")
+async def panel_agent_state(panel_id: str):
+    """Check if a panel is currently agent-controlled."""
+    info = _agent_panel_state.get(panel_id)
+    if info:
+        return {"controlled": True, **info}
+    return {"controlled": False}
 
 
 @app.post("/api/agent/start")
