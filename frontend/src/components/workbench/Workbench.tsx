@@ -9,6 +9,7 @@ import { ConversationPane } from "@/components/conversation/ConversationPane";
 import { MomentsPane } from "@/components/workbench/MomentsPane";
 import { SessionInspector } from "@/components/inspector/SessionInspector";
 import { HostedAppPane } from "@/components/layout/HostedAppPane";
+import { BoundariesPane } from "@/components/workbench/BoundariesPane";
 import { FontSizeControl } from "@/components/common/FontSizeControl";
 
 export const WORKBENCH_TABS = [
@@ -20,6 +21,7 @@ export const WORKBENCH_TABS = [
   { id: "inspector", label: "Inspector" },
   { id: "artifact", label: "Artifact" },
   { id: "apps", label: "Apps" },
+  { id: "boundaries", label: "Boundaries" },
 ] as const;
 
 function TabContent({ tabId }: { tabId: string }) {
@@ -49,6 +51,9 @@ function TabContent({ tabId }: { tabId: string }) {
       break;
     case "apps":
       return <HostedAppPane />;
+    case "boundaries":
+      content = <BoundariesPane />;
+      break;
     default:
       content = <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Unknown tab</div>;
   }

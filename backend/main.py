@@ -1978,6 +1978,32 @@ async def panel_agent_state(panel_id: str):
     return {"controlled": False}
 
 
+# --- Compaction boundary browser ---
+
+from compaction_parser import parse_boundaries, get_boundary_summary
+
+_boundaries_cache: dict[str, list[dict]] = {}
+
+
+@app.get("/api/compaction-boundaries")
+async def list_compaction_boundaries(agent: str = ""):
+    """List compaction boundaries for an agent."""
+    agent_name = agent or _current_agent
+    if agent_name not in _boundaries_cache:
+        _boundaries_cache[agent_name] = parse_boundaries(agent_name)
+    return {"agent": agent_name, "boundaries": _boundaries_cache[agent_name]}
+
+
+@app.get("/api/compaction-boundaries/{checkpoint_id}")
+async def get_compaction_boundary(checkpoint_id: str, agent: str = ""):
+    """Get the full summary for a specific compaction boundary."""
+    agent_name = agent or _current_agent
+    summary = get_boundary_summary(agent_name, checkpoint_id)
+    if summary is None:
+        return {"status": "error", "message": "boundary not found"}
+    return {"checkpointId": checkpoint_id, "summary": summary}
+
+
 @app.post("/api/agent/start")
 async def start_agent(body: dict = {}):
     """Agent lifecycle managed by asdaaas, not the arena."""
