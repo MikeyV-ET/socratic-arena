@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -20,11 +21,11 @@ _DISPLAY_BASE = 11  # Xpra virtual displays start at :11 (PoC uses :10)
 def _detect_file_manager() -> str:
     """Find the first available GUI file manager, fall back to xterm+mc."""
     candidates = [
-        ("nautilus", "nautilus --new-window {url}"),
-        ("pcmanfm", "pcmanfm {url}"),
         ("thunar", "thunar {url}"),
+        ("nautilus", "nautilus --new-window {url}"),
         ("nemo", "nemo {url}"),
         ("caja", "caja {url}"),
+        ("pcmanfm", "pcmanfm {url}"),
     ]
     for binary, cmd in candidates:
         if shutil.which(binary):
@@ -138,8 +139,8 @@ class PanelManager:
         if app_type == "chrome" and cdp_port:
             app_cmd += f" --remote-debugging-port={cdp_port} --remote-debugging-address=127.0.0.1"
 
-        # Launch Xpra
-        xpra_cmd = [
+        # Launch Xpra (use shell=True so --start-child value stays as one arg)
+        xpra_parts = [
             "xpra", "start", f":{display}",
             f"--bind-tcp=0.0.0.0:{port}",
             "--html=on",
@@ -147,14 +148,16 @@ class PanelManager:
             "--notifications=no",
             "--sharing=yes",
             "--resize-display=1280x800",
-            f"--start={app_cmd}",
+            f"--start-child={app_cmd}",
+            "--exit-with-children=no",
         ]
+        xpra_shell = " ".join(shlex.quote(p) for p in xpra_parts)
 
         log.info("Launching panel %s: %s (display :%d, port %d)", panel_id, app_label, display, port)
-        log.info("Xpra cmd: %s", " ".join(xpra_cmd))
+        log.info("Xpra cmd: %s", xpra_shell)
 
-        proc = await asyncio.create_subprocess_exec(
-            *xpra_cmd,
+        proc = await asyncio.create_subprocess_shell(
+            xpra_shell,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
