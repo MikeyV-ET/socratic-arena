@@ -49,17 +49,47 @@ Two things in one:
 
 ---
 
-## In Progress
+### 8. Xpra Stability Fixes
+**What the user sees:** File Manager launches without "Xsession" error. Thunar opens cleanly.
+**Tested:** Manual verification. `--start-child` + thunar preference.
 
-### 8. Xpra Stability Fixes (uncommitted)
+### 9. Agent Controls a Panel While User Watches
+**What the user sees:** Agent claims/releases panel control. Pulsing indicator shows "Agent is controlling this panel" with live status text. Tab shows dot when agent-controlled.
+**Tested:** 9 tests (5 API, 3 WebSocket, 1 browser DOM). Commit c107a8a.
+
+### 10. Compaction Boundary Browser
+**What the user sees:** Boundaries tab in workbench. Scrollable list of 40+ compaction boundaries with index, date, turn count, preview. Click to expand full summary. Filter input.
+**Tested:** 11 tests (8 API, 3 browser). Commit 79c7b38.
+
+### 11. Correction Authoring UI
+**What the user sees:** Pencil icon on each message opens Corrections tab. Three structured fields (what was missing, what should have happened, correction text). Corrected nodes get red left border. CRUD with list/detail view.
+**Tested:** 14 tests (10 API, 2 WebSocket, 2 browser). Commit cb63105.
+
+### 12. Parallel Episode Runner
+**What the user sees:** Episodes tab. Boundary selector, model picker, N slider. Run N parallel completions. Results as expandable cards with 0-4 score buttons.
+**Tested:** 6 tests (3 API, 3 browser). Commit d71bd4f.
+
+### 13. Scoring and Training Data Export
+**What the user sees:** Export JSONL button in Corrections pane. Downloads GRPO-format JSONL with corrections (reward=0) and episode scores (normalized 0-1).
+**Tested:** 7 tests (6 API, 1 browser). Commit f108a4d.
+
+### 14. Dockable/Closeable Tabs
+**What the user sees:** Close tabs with X. Reopen from + menu. Drag to reorder. Layout persists in localStorage across refreshes.
+**Tested:** 4 browser tests. Commit 5346658.
+
+---
+
+## All Features Complete
+
+## Previously In Progress
+
+### 8-legacy. Xpra Stability Fixes (uncommitted)
 **What the user sees:** File Manager launches without "Xsession" error dialog. Thunar opens cleanly.
 **What was wrong:** `--start` triggered full X session wrapper; pcmanfm crashes on Xpra.
 **Fix:** `--start-child` + prefer thunar over pcmanfm.
 **Test plan:** Update browser test to include file manager launch verification. Manual verification done.
 
 ---
-
-## Not Yet Implemented (in priority order)
 
 ### 9. Agent Controls a Panel While User Watches
 **What the user sees:** Agent launches a Chrome panel, navigates to a page, clicks elements, fills forms — user watches in real-time via the Xpra iframe. Agent actions appear as conversation messages ("I'm navigating to X...").
@@ -126,4 +156,10 @@ Current test counts:
 - 14 arena e2e tests
 - 8 arena roundtrip tests
 - 1 browser e2e closed-loop test
+- 9 agent panel control tests (item 9)
+- 11 compaction boundary tests (item 10)
+- 14 correction authoring tests (item 11)
+- 6 episode runner tests (item 12)
+- 7 training data export tests (item 13)
+- 4 dockable tabs tests (item 14)
 - Various other test files (checkpoint replayer, navigation)
