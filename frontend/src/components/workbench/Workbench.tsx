@@ -84,21 +84,100 @@ function TabBar({ activeTab, onSelect, splitControls }: {
     onUnsplit: () => void;
   };
 }) {
+  const openTabIds = useArenaStore((s) => s.openTabIds);
+  const closeTab = useArenaStore((s) => s.closeTab);
+  const openTab = useArenaStore((s) => s.openTab);
+  const reorderTabs = useArenaStore((s) => s.reorderTabs);
+  const [showMenu, setShowMenu] = useState(false);
+  const [dragOver, setDragOver] = useState<string | null>(null);
+
+  const openTabs = WORKBENCH_TABS.filter((t) => openTabIds.includes(t.id));
+  const closedTabs = WORKBENCH_TABS.filter((t) => !openTabIds.includes(t.id));
+
+  const handleDragStart = (e: React.DragEvent, tabId: string) => {
+    e.dataTransfer.setData("text/plain", tabId);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e: React.DragEvent, tabId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOver(tabId);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    setDragOver(null);
+    const sourceId = e.dataTransfer.getData("text/plain");
+    if (sourceId === targetId) return;
+    const ids = [...openTabIds];
+    const srcIdx = ids.indexOf(sourceId);
+    const tgtIdx = ids.indexOf(targetId);
+    if (srcIdx < 0 || tgtIdx < 0) return;
+    ids.splice(srcIdx, 1);
+    ids.splice(tgtIdx, 0, sourceId);
+    reorderTabs(ids);
+  };
+
   return (
     <div className="flex items-center border-b border-border bg-card px-1">
-      {WORKBENCH_TABS.map((tab) => (
-        <button
+      {openTabs.map((tab) => (
+        <div
           key={tab.id}
-          onClick={() => onSelect(tab.id)}
-          className={`px-3 py-1.5 text-xs font-medium transition-colors border-b-2 ${
+          draggable
+          onDragStart={(e) => handleDragStart(e, tab.id)}
+          onDragOver={(e) => handleDragOver(e, tab.id)}
+          onDrop={(e) => handleDrop(e, tab.id)}
+          onDragLeave={() => setDragOver(null)}
+          className={`group flex items-center gap-0.5 px-2 py-1.5 text-xs font-medium transition-colors border-b-2 cursor-pointer ${
             activeTab === tab.id
               ? "border-b-primary text-foreground"
               : "border-b-transparent text-muted-foreground hover:text-foreground"
-          }`}
+          } ${dragOver === tab.id ? "bg-primary/10" : ""}`}
+          onClick={() => onSelect(tab.id)}
+          data-testid={`workbench-tab-${tab.id}`}
         >
-          {tab.label}
-        </button>
+          <span>{tab.label}</span>
+          {openTabIds.length > 1 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
+              className="ml-0.5 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground text-[10px] transition-opacity"
+              title="Close tab"
+              data-testid={`close-tab-${tab.id}`}
+            >
+              &times;
+            </button>
+          )}
+        </div>
       ))}
+
+      {closedTabs.length > 0 && (
+        <div className="relative">
+          <button
+            onClick={() => setShowMenu(!showMenu)}
+            className="px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            title="Open tab"
+            data-testid="open-tab-menu"
+          >
+            +
+          </button>
+          {showMenu && (
+            <div className="absolute top-full left-0 z-50 bg-card border border-border rounded-md shadow-lg py-1 min-w-[120px]">
+              {closedTabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => { openTab(tab.id); setShowMenu(false); }}
+                  className="block w-full text-left px-3 py-1 text-xs hover:bg-muted transition-colors"
+                  data-testid={`reopen-tab-${tab.id}`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="flex-1" />
       <FontSizeControl paneId={activeTab} />
       {splitControls.isSplit ? (
@@ -147,10 +226,12 @@ export function Workbench() {
   const setSplitTab = useArenaStore((s) => s.setSplitTab);
   const [splitOrientation, setSplitOrientation] = useState<SplitOrientation>("vertical");
 
+  const openTabIds = useArenaStore((s) => s.openTabIds);
+
   const startSplit = (orientation: SplitOrientation) => {
     if (!splitTab) {
-      const other = WORKBENCH_TABS.find((t) => t.id !== activeTab);
-      setSplitTab(other?.id || "notebook");
+      const other = openTabIds.find((id) => id !== activeTab);
+      setSplitTab(other || "notebook");
     }
     setSplitOrientation(orientation);
   };
@@ -197,8 +278,8 @@ export function Workbench() {
     <div className="flex flex-col h-full">
       <TabBar activeTab={activeTab} onSelect={setActiveTab} splitControls={splitControls} />
       <div className="flex-1 overflow-hidden relative">
-        {/* Keep all tabs mounted to preserve scroll position across tab switches */}
-        {WORKBENCH_TABS.map((tab) => (
+        {/* Keep open tabs mounted to preserve scroll position across tab switches */}
+        {WORKBENCH_TABS.filter((t) => openTabIds.includes(t.id)).map((tab) => (
           <div key={tab.id} className={`absolute inset-0 ${activeTab === tab.id ? "" : "invisible"}`}>
             <TabContent tabId={tab.id} />
           </div>

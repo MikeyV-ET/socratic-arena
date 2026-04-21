@@ -56,8 +56,12 @@ interface ArenaState {
   // Workbench tabs (right pane)
   activeTab: string;
   splitTab: string | null; // second tab when split view is active
+  openTabIds: string[]; // ordered list of visible tab IDs
   setActiveTab: (tab: string) => void;
   setSplitTab: (tab: string | null) => void;
+  closeTab: (tabId: string) => void;
+  openTab: (tabId: string) => void;
+  reorderTabs: (tabIds: string[]) => void;
 
   // Prompt draft (editable state for prompt dev editor)
   promptDraft: {
@@ -217,11 +221,37 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
   expandedBranches: new Set<string>(),
   activeTab: "history",
   splitTab: null,
+  openTabIds: (() => {
+    try {
+      const saved = localStorage.getItem("sa-open-tabs");
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return ["history", "moments", "notebook", "prompt-dev", "prompt-test", "inspector", "artifact", "apps", "boundaries", "corrections", "episodes"];
+  })(),
   setActiveTab: (tab) => {
     set({ activeTab: tab });
     get().sendWs?.({ type: "viewport.tab_change", payload: { tab } });
   },
   setSplitTab: (tab) => set({ splitTab: tab }),
+  closeTab: (tabId) => set((s) => {
+    const next = s.openTabIds.filter((id) => id !== tabId);
+    if (next.length === 0) return s;
+    localStorage.setItem("sa-open-tabs", JSON.stringify(next));
+    const updates: Partial<ArenaState> = { openTabIds: next };
+    if (s.activeTab === tabId) updates.activeTab = next[0];
+    if (s.splitTab === tabId) updates.splitTab = null;
+    return updates as any;
+  }),
+  openTab: (tabId) => set((s) => {
+    if (s.openTabIds.includes(tabId)) return { activeTab: tabId };
+    const next = [...s.openTabIds, tabId];
+    localStorage.setItem("sa-open-tabs", JSON.stringify(next));
+    return { openTabIds: next, activeTab: tabId };
+  }),
+  reorderTabs: (tabIds) => {
+    localStorage.setItem("sa-open-tabs", JSON.stringify(tabIds));
+    set({ openTabIds: tabIds });
+  },
 
   paneFontSizes: {},
   adjustPaneFont: (paneId, delta) =>
