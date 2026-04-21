@@ -1,11 +1,1 @@
-[
-  {
-    "id": "7f92eded",
-    "nodeId": "test-node-1",
-    "whatWasMissing": "Browser test correction",
-    "whatShouldHaveHappened": "Should have done X",
-    "correctionText": "Do X instead of Y",
-    "createdAt": 1776750137.9391167,
-    "updatedAt": 1776750137.9391167
-  }
-]
+[]

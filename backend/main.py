@@ -2099,6 +2099,30 @@ async def list_episode_scores():
     return {"scores": _episode_scores}
 
 
+# --- Training data export ---
+
+from training_export import export_all_jsonl
+from fastapi.responses import PlainTextResponse
+
+
+@app.get("/api/export/training-data")
+async def export_training_data(format: str = "jsonl"):
+    """Export corrections + episode scores as GRPO-format JSONL."""
+    tree_nodes = {nid: n.model_dump() for nid, n in state.tree.nodes.items()} if state.tree.nodes else None
+    jsonl = export_all_jsonl(tree_nodes=tree_nodes, episode_scores=_episode_scores)
+
+    if format == "json":
+        import json
+        entries = [json.loads(line) for line in jsonl.strip().split("\n") if line.strip()]
+        return {"entries": entries, "count": len(entries)}
+
+    return PlainTextResponse(
+        content=jsonl,
+        media_type="application/x-ndjson",
+        headers={"Content-Disposition": "attachment; filename=training_data.jsonl"},
+    )
+
+
 @app.post("/api/agent/start")
 async def start_agent(body: dict = {}):
     """Agent lifecycle managed by asdaaas, not the arena."""

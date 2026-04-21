@@ -203,7 +203,19 @@ export function CorrectionsPane() {
         <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
           Corrections
         </h2>
-        <span className="text-xs text-muted-foreground">{corrections.length} total</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">{corrections.length} total</span>
+          {corrections.length > 0 && (
+            <a
+              href={`${window.location.pathname.replace(/\/+$/, "")}/api/export/training-data`}
+              download="training_data.jsonl"
+              className="text-[10px] px-2 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+              data-testid="export-button"
+            >
+              Export JSONL
+            </a>
+          )}
+        </div>
       </div>
 
       {activeNodeId ? (
