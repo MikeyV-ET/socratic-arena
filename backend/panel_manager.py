@@ -20,7 +20,17 @@ _DISPLAY_BASE = 11  # Xpra virtual displays start at :11 (PoC uses :10)
 
 def _detect_file_manager() -> str:
     """Find the first available file manager that works inside Xpra."""
-    # TUI file managers (work reliably in xterm on Xpra)
+    # GUI file managers (best UX when Xpra display is available)
+    gui_candidates = [
+        ("thunar", "dbus-launch thunar {url}"),
+        ("pcmanfm", "pcmanfm {url}"),
+        ("nautilus", "nautilus {url}"),
+        ("nemo", "nemo {url}"),
+    ]
+    for binary, cmd in gui_candidates:
+        if shutil.which(binary):
+            return cmd
+    # TUI file managers (fallback for minimal installs)
     tui_candidates = [
         ("mc", "xterm -fa Monospace -fs 12 -geometry 120x35 -e mc {url}"),
         ("ranger", "xterm -fa Monospace -fs 12 -geometry 120x35 -e ranger {url}"),
