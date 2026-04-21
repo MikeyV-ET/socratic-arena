@@ -2075,6 +2075,30 @@ async def delete_correction(correction_id: str):
     return {"status": "ok"}
 
 
+# --- Episode scores (scoring parallel completions) ---
+
+_episode_scores: list[dict] = []
+
+
+@app.post("/api/episode-scores")
+async def save_episode_scores(body: dict):
+    """Save scores for parallel episode runs."""
+    entry = {
+        "replayId": body.get("replayId"),
+        "checkpointId": body.get("checkpointId"),
+        "scores": body.get("scores", []),
+        "timestamp": __import__("time").time(),
+    }
+    _episode_scores.append(entry)
+    return {"status": "ok", "count": len(_episode_scores)}
+
+
+@app.get("/api/episode-scores")
+async def list_episode_scores():
+    """List all episode score entries."""
+    return {"scores": _episode_scores}
+
+
 @app.post("/api/agent/start")
 async def start_agent(body: dict = {}):
     """Agent lifecycle managed by asdaaas, not the arena."""
