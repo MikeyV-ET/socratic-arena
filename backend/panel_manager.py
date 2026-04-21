@@ -19,20 +19,19 @@ _DISPLAY_BASE = 11  # Xpra virtual displays start at :11 (PoC uses :10)
 
 
 def _detect_file_manager() -> str:
-    """Find the first available GUI file manager, fall back to xterm+mc."""
-    candidates = [
-        ("thunar", "thunar {url}"),
-        ("nautilus", "nautilus --new-window {url}"),
-        ("nemo", "nemo {url}"),
-        ("caja", "caja {url}"),
-        ("pcmanfm", "pcmanfm {url}"),
+    """Find the first available file manager that works inside Xpra."""
+    # TUI file managers (work reliably in xterm on Xpra)
+    tui_candidates = [
+        ("mc", "xterm -fa Monospace -fs 12 -geometry 120x35 -e mc {url}"),
+        ("ranger", "xterm -fa Monospace -fs 12 -geometry 120x35 -e ranger {url}"),
+        ("nnn", "xterm -fa Monospace -fs 12 -geometry 120x35 -e nnn {url}"),
+        ("vifm", "xterm -fa Monospace -fs 12 -geometry 120x35 -e vifm {url}"),
     ]
-    for binary, cmd in candidates:
+    for binary, cmd in tui_candidates:
         if shutil.which(binary):
             return cmd
-    if shutil.which("mc"):
-        return "xterm -fa Monospace -fs 12 -e mc {url}"
-    return "xterm -fa Monospace -fs 12 -e ls -la {url}"
+    # Fallback: interactive shell starting in the target directory
+    return "xterm -fa Monospace -fs 12 -geometry 120x35 -e bash -c 'cd {url} && ls -la --color && exec bash'"
 
 
 # App presets — common launch commands
@@ -170,6 +169,10 @@ class PanelManager:
             stderr = await proc.stderr.read()
             raise RuntimeError(f"Xpra failed to start: {stderr.decode()}")
 
+        # Resize app windows to fill the Xpra display (some apps start tiny)
+        if app_type != "chrome":  # Chrome handles its own --window-size
+            asyncio.create_task(self._resize_windows(display))
+
         client_url = f"http://localhost:{port}"
 
         session = PanelSession(
@@ -187,6 +190,37 @@ class PanelManager:
         self._sessions[panel_id] = session
         log.info("Panel %s launched: %s at %s", panel_id, app_label, client_url)
         return session
+
+    @staticmethod
+    async def _resize_windows(display: int):
+        """Wait for app windows to appear, then resize them to fill the display."""
+        env = {**os.environ, "DISPLAY": f":{display}"}
+        for attempt in range(5):
+            await asyncio.sleep(2)
+            try:
+                # Find all visible windows and resize each to 1024x768 at origin
+                result = await asyncio.create_subprocess_exec(
+                    "xdotool", "search", "--onlyvisible", "--name", "",
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    env=env,
+                )
+                stdout, _ = await result.communicate()
+                wids = [w.strip() for w in stdout.decode().splitlines() if w.strip()]
+                if not wids:
+                    continue
+                for wid in wids:
+                    await asyncio.create_subprocess_exec(
+                        "xdotool", "windowsize", wid, "1024", "768",
+                        env=env,
+                    )
+                    await asyncio.create_subprocess_exec(
+                        "xdotool", "windowmove", wid, "0", "0",
+                        env=env,
+                    )
+                log.info("Resized %d windows on display :%d", len(wids), display)
+                return
+            except Exception as e:
+                log.warning("Window resize attempt %d failed: %s", attempt + 1, e)
 
     async def stop(self, panel_id: str) -> bool:
         session = self._sessions.get(panel_id)
