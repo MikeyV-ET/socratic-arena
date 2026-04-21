@@ -23,7 +23,7 @@ export function Message({ node }: MessageProps) {
   const hasCorrection = useArenaStore((s) =>
     s.corrections.some((c) => c.nodeId === node.id)
   );
-  const displayContent = streamingContent ?? node.content;
+  const rawContent = streamingContent ?? node.content;
 
   if (node.role === "system") {
     return (
@@ -37,6 +37,10 @@ export function Message({ node }: MessageProps) {
   }
 
   const isUser = node.role === "user";
+  // Strip asdaaas metadata tags from user messages (e.g. "[Context left 97k ...]")
+  const displayContent = isUser
+    ? rawContent.replace(/\s*\[Context left [^\]]*\]\s*/g, "").trim()
+    : rawContent;
   const hasBranches = node.children.length > 1;
   const branchCount = node.children.filter(
     (cid) => tree.nodes[cid]?.branchId !== node.branchId
