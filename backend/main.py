@@ -1978,6 +1978,96 @@ async def panel_agent_state(panel_id: str):
     return {"controlled": False}
 
 
+# --- Panel proxy (same-origin Xpra access) ---
+
+import httpx as _httpx
+import websockets as _ws_lib
+from starlette.requests import Request
+from starlette.responses import StreamingResponse
+
+
+@app.api_route("/api/panel/{panel_id}/proxy/{path:path}", methods=["GET", "HEAD"])
+async def panel_proxy_http(panel_id: str, path: str, request: Request):
+    """Reverse proxy HTTP requests to an Xpra panel's web server."""
+    session = panel_manager.get(panel_id)
+    if not session:
+        return {"status": "error", "message": f"panel {panel_id} not found"}
+
+    target = f"http://localhost:{session.port}/{path}"
+    if request.url.query:
+        target += f"?{request.url.query}"
+
+    async with _httpx.AsyncClient() as client:
+        fwd_headers = {}
+        for k in ("accept", "accept-encoding", "accept-language"):
+            if k in request.headers:
+                fwd_headers[k] = request.headers[k]
+        resp = await client.get(target, headers=fwd_headers, follow_redirects=True)
+        resp_headers = dict(resp.headers)
+        resp_headers.pop("transfer-encoding", None)
+        return StreamingResponse(
+            content=resp.aiter_bytes(),
+            status_code=resp.status_code,
+            headers=resp_headers,
+        )
+
+
+@app.api_route("/api/panel/{panel_id}/proxy", methods=["GET"])
+async def panel_proxy_root(panel_id: str, request: Request):
+    """Proxy root path (no trailing slash) to Xpra."""
+    return await panel_proxy_http(panel_id, "", request)
+
+
+@app.websocket("/api/panel/{panel_id}/proxy")
+async def panel_proxy_ws(websocket: WebSocket, panel_id: str):
+    """Reverse proxy WebSocket to Xpra panel."""
+    session = panel_manager.get(panel_id)
+    if not session:
+        await websocket.close(code=4004)
+        return
+
+    target = f"ws://localhost:{session.port}/"
+    await websocket.accept()
+
+    try:
+        async with _ws_lib.connect(target, max_size=20 * 1024 * 1024) as xpra_ws:
+            async def client_to_xpra():
+                try:
+                    while True:
+                        data = await websocket.receive()
+                        if "bytes" in data and data["bytes"]:
+                            await xpra_ws.send(data["bytes"])
+                        elif "text" in data and data["text"]:
+                            await xpra_ws.send(data["text"])
+                except WebSocketDisconnect:
+                    pass
+
+            async def xpra_to_client():
+                try:
+                    async for msg in xpra_ws:
+                        if isinstance(msg, bytes):
+                            await websocket.send_bytes(msg)
+                        else:
+                            await websocket.send_text(msg)
+                except Exception:
+                    pass
+
+            done, pending = await asyncio.wait(
+                [asyncio.ensure_future(client_to_xpra()),
+                 asyncio.ensure_future(xpra_to_client())],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for t in pending:
+                t.cancel()
+    except Exception as e:
+        log.warning("Panel proxy WS error for %s: %s", panel_id, e)
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
 # --- Compaction boundary browser ---
 
 from compaction_parser import parse_boundaries, get_boundary_summary

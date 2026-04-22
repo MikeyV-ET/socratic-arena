@@ -184,7 +184,9 @@ class PanelManager:
         if app_type != "chrome":  # Chrome handles its own --window-size
             asyncio.create_task(self._resize_windows(display))
 
-        client_url = f"http://localhost:{port}/?clipboard=no&floating_menu=no&toolbar=no&keyboard=yes"
+        # Proxied URL: frontend iframe stays same-origin via /api/panel/{id}/proxy
+        # The 'path' param tells Xpra HTML5 client where to connect its WebSocket
+        client_url = f"/api/panel/{panel_id}/proxy/?path=api/panel/{panel_id}/proxy&clipboard=no&floating_menu=no&toolbar=no&keyboard=yes"
 
         session = PanelSession(
             id=panel_id,
