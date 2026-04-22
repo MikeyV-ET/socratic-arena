@@ -22,8 +22,8 @@ def _detect_file_manager() -> str:
     """Find the first available file manager that works inside Xpra."""
     # GUI file managers (best UX when Xpra display is available)
     gui_candidates = [
-        ("thunar", "dbus-launch thunar {url}"),
         ("pcmanfm", "pcmanfm {url}"),
+        ("thunar", "dbus-launch thunar {url}"),
         ("nautilus", "nautilus {url}"),
         ("nemo", "nemo {url}"),
     ]
@@ -156,6 +156,7 @@ class PanelManager:
             "--clipboard=no",
             "--notifications=no",
             "--sharing=yes",
+            "--encoding=png",
             "--resize-display=1280x800",
             f"--start-child={app_cmd}",
             "--exit-with-children=no",
@@ -183,7 +184,7 @@ class PanelManager:
         if app_type != "chrome":  # Chrome handles its own --window-size
             asyncio.create_task(self._resize_windows(display))
 
-        client_url = f"http://localhost:{port}"
+        client_url = f"http://localhost:{port}/?clipboard=no&floating_menu=no&toolbar=no&keyboard=yes"
 
         session = PanelSession(
             id=panel_id,
