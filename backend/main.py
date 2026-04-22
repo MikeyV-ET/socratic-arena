@@ -1997,19 +1997,32 @@ async def panel_proxy_http(panel_id: str, path: str, request: Request):
     if request.url.query:
         target += f"?{request.url.query}"
 
-    async with _httpx.AsyncClient() as client:
-        fwd_headers = {}
-        for k in ("accept", "accept-encoding", "accept-language"):
-            if k in request.headers:
-                fwd_headers[k] = request.headers[k]
-        resp = await client.get(target, headers=fwd_headers, follow_redirects=True)
-        resp_headers = dict(resp.headers)
-        resp_headers.pop("transfer-encoding", None)
-        return StreamingResponse(
-            content=resp.aiter_bytes(),
-            status_code=resp.status_code,
-            headers=resp_headers,
-        )
+    fwd_headers = {}
+    for k in ("accept", "accept-encoding", "accept-language"):
+        if k in request.headers:
+            fwd_headers[k] = request.headers[k]
+
+    # Retry up to 5 times (Xpra web server may not be ready immediately after launch)
+    for attempt in range(5):
+        try:
+            async with _httpx.AsyncClient() as client:
+                resp = await client.get(target, headers=fwd_headers, follow_redirects=True, timeout=5)
+                resp_headers = dict(resp.headers)
+                resp_headers.pop("transfer-encoding", None)
+                return StreamingResponse(
+                    content=resp.aiter_bytes(),
+                    status_code=resp.status_code,
+                    headers=resp_headers,
+                )
+        except (_httpx.ConnectError, _httpx.ConnectTimeout):
+            if attempt < 4:
+                await asyncio.sleep(1)
+            else:
+                from starlette.responses import HTMLResponse
+                return HTMLResponse(
+                    "<html><body><p>Panel starting up... <script>setTimeout(()=>location.reload(),2000)</script></p></body></html>",
+                    status_code=503,
+                )
 
 
 @app.api_route("/api/panel/{panel_id}/proxy", methods=["GET"])
