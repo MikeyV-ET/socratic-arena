@@ -1983,7 +1983,7 @@ async def panel_agent_state(panel_id: str):
 import httpx as _httpx
 import websockets as _ws_lib
 from starlette.requests import Request
-from starlette.responses import StreamingResponse
+from starlette.responses import StreamingResponse, Response
 
 
 @app.api_route("/api/panel/{panel_id}/proxy/{path:path}", methods=["GET", "HEAD"])
@@ -2009,8 +2009,11 @@ async def panel_proxy_http(panel_id: str, path: str, request: Request):
                 resp = await client.get(target, headers=fwd_headers, follow_redirects=True, timeout=5)
                 resp_headers = dict(resp.headers)
                 resp_headers.pop("transfer-encoding", None)
-                return StreamingResponse(
-                    content=resp.aiter_bytes(),
+                resp_headers.pop("content-length", None)
+                resp_headers.pop("content-encoding", None)
+                body = resp.content
+                return Response(
+                    content=body,
                     status_code=resp.status_code,
                     headers=resp_headers,
                 )

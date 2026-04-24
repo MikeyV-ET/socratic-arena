@@ -22,8 +22,8 @@ def _detect_file_manager() -> str:
     """Find the first available file manager that works inside Xpra."""
     # GUI file managers (best UX when Xpra display is available)
     gui_candidates = [
+        ("thunar", "thunar {url}"),
         ("pcmanfm", "pcmanfm {url}"),
-        ("thunar", "dbus-launch thunar {url}"),
         ("nautilus", "nautilus {url}"),
         ("nemo", "nemo {url}"),
     ]
