@@ -2036,48 +2036,74 @@ async def panel_proxy_root(panel_id: str, request: Request):
 
 @app.websocket("/api/panel/{panel_id}/proxy")
 async def panel_proxy_ws(websocket: WebSocket, panel_id: str):
-    """Reverse proxy WebSocket to Xpra panel."""
+    """Reverse proxy WebSocket to Xpra panel.
+
+    Xpra requires subprotocol negotiation (binary/base64). We read the
+    browser's requested subprotocols, connect upstream with them, then
+    accept the browser connection with the Xpra-selected subprotocol.
+    """
     session = panel_manager.get(panel_id)
     if not session:
         await websocket.close(code=4004)
         return
 
     target = f"ws://localhost:{session.port}/"
-    await websocket.accept()
+    browser_subprotocols = websocket.scope.get("subprotocols", [])
+    # Xpra needs at least binary/base64; provide defaults if browser sent none
+    upstream_subprotocols = browser_subprotocols or ["binary", "base64"]
 
     try:
-        async with _ws_lib.connect(target, max_size=20 * 1024 * 1024) as xpra_ws:
-            async def client_to_xpra():
-                try:
-                    while True:
-                        data = await websocket.receive()
-                        if "bytes" in data and data["bytes"]:
-                            await xpra_ws.send(data["bytes"])
-                        elif "text" in data and data["text"]:
-                            await xpra_ws.send(data["text"])
-                except WebSocketDisconnect:
-                    pass
+        xpra_ws = await _ws_lib.connect(
+            target,
+            subprotocols=upstream_subprotocols,
+            max_size=20 * 1024 * 1024,
+            open_timeout=10,
+        )
+    except Exception as e:
+        log.warning("Panel proxy WS: cannot connect to Xpra %s: %s", panel_id, e)
+        await websocket.close(code=4002)
+        return
 
-            async def xpra_to_client():
-                try:
-                    async for msg in xpra_ws:
-                        if isinstance(msg, bytes):
-                            await websocket.send_bytes(msg)
-                        else:
-                            await websocket.send_text(msg)
-                except Exception:
-                    pass
+    # Accept browser WS with the subprotocol Xpra selected
+    selected = getattr(xpra_ws, "subprotocol", None)
+    await websocket.accept(subprotocol=selected)
 
-            done, pending = await asyncio.wait(
-                [asyncio.ensure_future(client_to_xpra()),
-                 asyncio.ensure_future(xpra_to_client())],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for t in pending:
-                t.cancel()
+    try:
+        async def client_to_xpra():
+            try:
+                while True:
+                    data = await websocket.receive()
+                    if "bytes" in data and data["bytes"]:
+                        await xpra_ws.send(data["bytes"])
+                    elif "text" in data and data["text"]:
+                        await xpra_ws.send(data["text"])
+            except WebSocketDisconnect:
+                pass
+
+        async def xpra_to_client():
+            try:
+                async for msg in xpra_ws:
+                    if isinstance(msg, bytes):
+                        await websocket.send_bytes(msg)
+                    else:
+                        await websocket.send_text(msg)
+            except Exception:
+                pass
+
+        done, pending = await asyncio.wait(
+            [asyncio.ensure_future(client_to_xpra()),
+             asyncio.ensure_future(xpra_to_client())],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for t in pending:
+            t.cancel()
     except Exception as e:
         log.warning("Panel proxy WS error for %s: %s", panel_id, e)
     finally:
+        try:
+            await xpra_ws.close()
+        except Exception:
+            pass
         try:
             await websocket.close()
         except Exception:
