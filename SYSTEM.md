@@ -1,7 +1,14 @@
 # Socratic Arena — System Documentation
 
-**Last updated:** 2026-04-12
+**Last updated:** 2026-04-12 (hackathon era)
 **Authors:** Bishop (frontend), Rook (backend)
+
+> **Note (2026-04-23):** This document is from the original hackathon build and
+> references agents (Bishop, Rook, Knight-bio) and infrastructure (hackathon
+> container, preview URLs) that no longer exist. It is preserved for historical
+> context. For current documentation, see:
+> - [README.md](README.md) -- quick start, architecture, API reference
+> - [DESIGN.md](DESIGN.md) -- design document, concepts, data flows
 
 ---
 

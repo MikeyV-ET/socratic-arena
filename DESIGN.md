@@ -269,11 +269,9 @@ On 2026-04-18, during a live walkthrough of the arena, two moments were captured
 
 The compaction checkpoint preceding these moments is `e6572ec4` (2026-04-18 07:08, 170KB). This checkpoint is the seed for testing whether adding "reproduce at the level the user experiences the problem" to AGENTS.md changes the agent's behavior at these moments.
 
-## Future: Application Hosting & Panel Architecture
+## Application Hosting & Panel Architecture
 
-### Vision
-
-SA panels can host arbitrary desktop applications -- browsers, document editors,
+SA panels host desktop applications -- browsers, document editors,
 terminals, any X11 program. The human and agent interact with the same running
 application through different channels optimized for their respective strengths.
 
@@ -300,8 +298,24 @@ Chrome's `--app=URL` mode strips browser chrome (no address bar, no tabs),
 making web apps look like standalone applications in their panels.
 
 Server-side: Xpra starts a virtual display, launches the application on it,
-and serves the HTML5 client on a local port. The SA backend proxies or
-embeds the Xpra client URL in the panel iframe.
+and serves the HTML5 client on a local port. The SA backend reverse-proxies
+Xpra (both HTTP and WebSocket) through `/api/panel/{id}/proxy/` so all
+panel traffic is same-origin -- no CORS issues.
+
+### Panel Manager (backend/panel_manager.py)
+
+Manages Xpra panel lifecycle:
+- Three presets: Chrome (`--app=URL`), Terminal (xterm), File Manager (pcmanfm)
+- Per-panel port and X display allocation (ports 10000+, displays :10+)
+- Xpra flags: `--encodings=png,rgb,jpeg --video-encoders=none --pulseaudio=no`
+- CDP port allocation for agent Selenium access
+- Panel URLs use same-origin proxy: `/api/panel/{id}/proxy/?path=...`
+
+### Xpra Reverse Proxy (backend/main.py)
+
+- HTTP: `GET /api/panel/{id}/proxy/{path}` -- proxies to Xpra's web server with retry logic (5 attempts, 1s backoff)
+- WebSocket: `WS /api/panel/{id}/proxy` -- bidirectional WebSocket proxy
+- Auto-refresh fallback HTML on connection failure (handles Xpra startup race)
 
 ### Asymmetric Interaction Model
 
@@ -380,7 +394,7 @@ makes the interactions improvable; the workspace is what makes them possible.
 
 ## Development Status
 
-### Built
+### Built (all 14 roadmap items complete)
 - Live workspace (conversation, notebook, history panes)
 - Real-time session streaming (LiveTailer)
 - Two-way communication (user <-> agent via arena adapter)
@@ -388,17 +402,23 @@ makes the interactions improvable; the workspace is what makes them possible.
 - Workspace navigation (scroll to any node)
 - Prompt testing (N completions, variance measurement)
 - Moment flagging and correction authoring
+- Hosted application panels (Xpra + same-origin proxy)
+- Agent panel control (claim/release with UI indicators, Selenium/CDP toolkit)
+- Compaction boundary browser (40+ boundaries, expandable summaries, filter)
+- Correction authoring UI (structured 3-field annotations, CRUD)
+- Parallel episode runner (boundary selector, model picker, N slider, scoring)
+- Training data export (GRPO JSONL with corrections and episode scores)
+- Dockable/closeable tabs (close, reopen from menu, drag to reorder, localStorage persistence)
+- Streaming unification (LiveTailer chunks redirect to arena placeholder nodes)
+- Workbench split view (horizontal or vertical)
+- Response rendering fix (activeNodeId drift resolved -- live tailer no longer overrides arena activeNodeId)
+- Panel refresh survival (frontend fetches /api/panel/list on WebSocket connect)
+- Xpra reverse proxy (HTTP+WS, same-origin, retry logic for startup race)
+- Agent-side Selenium (agent_panel.py CDP toolkit)
 
-### In Progress
-- Compaction boundary browser
-- Parallel session spawning
-- Response rendering fix (activeNodeId drift)
-
-### Planned
-- Checkpoint seeding mechanism
-- Message replay extraction
-- Scoring pipeline
-- Training data export (GRPO format)
+### Not yet built
+- Checkpoint seeding mechanism (feeding checkpoint to `grok agent stdio` for parallel sessions)
+- Automated message replay extraction
 - AGENTS.md diff visualization
 
 ## Prior Art

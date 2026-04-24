@@ -6,7 +6,7 @@ A collaborative workspace where AI agents and human mentors work together, with 
 
 Socratic Arena is two things in one:
 
-1. **A collaborative workspace** -- agents and mentors share a conversation, notebook, and artifacts. The daily driver for actual work.
+1. **A collaborative workspace** -- agents and mentors share a conversation, notebook, hosted applications, and artifacts. The daily driver for actual work.
 2. **An inspection and training layer** -- the workspace interactions are captured data. Moments can be flagged, corrections authored, and parallel sessions run from compaction boundaries to validate principle changes and generate GRPO training signal.
 
 The workspace produces the data. The inspection tools mine it. Same tool, two modes.
@@ -44,15 +44,20 @@ bash backend/launch_arena.sh --stop
 ## Architecture
 
 ```
-Browser (React)
+Browser (React/Vite, port 5173)
   |
   |-- WebSocket (/ws) -- live conversation, streaming, live tailer
-  |-- REST (/api/*) -- agents, notebooks, moments, prompts, artifacts
+  |-- REST (/api/*) -- agents, notebooks, moments, corrections, panels, export
+  |-- Xpra proxy (/api/panel/{id}/proxy/*) -- same-origin hosted app access
   |
-FastAPI Backend (backend/main.py)
-  |-- In-memory state (conversation tree, notebook, prompts)
+FastAPI Backend (backend/main.py, port 8000)
+  |-- In-memory state (conversation tree, notebook, prompts, corrections)
   |-- LiveTailer (streams agent session updates to arena)
+  |-- PanelManager (Xpra lifecycle, hosted application panels)
   |-- Prompt test engine (GRPO parallel episode runner)
+  |-- Compaction boundary browser (checkpoint catalog)
+  |-- Training data export (GRPO JSONL)
+  |-- HTTP+WS reverse proxy for Xpra panels
   |
 Arena Adapter (backend/arena_adapter.py)
   |-- Polls backend for pending user messages
@@ -70,33 +75,54 @@ asdaaas (agent runtime, separate process)
 ```
 socratic-arena/
   backend/
-    main.py              # FastAPI app, WebSocket, all endpoints
-    arena_adapter.py     # Bridges arena <-> asdaaas agents
+    main.py              # FastAPI app, WebSocket, all REST endpoints, Xpra proxy
+    arena_adapter.py     # Bridges arena <-> asdaaas agents (polls pending, relays responses)
     live_tailer.py       # Streams updates.jsonl to arena in real-time
+    panel_manager.py     # Xpra lifecycle management (launch, stop, port/display allocation)
+    agent_panel.py       # Agent-side panel interaction (Selenium CDP toolkit)
     models.py            # Pydantic models (CamelCase serialization)
     updates_parser.py    # Parses grok session updates.jsonl into tree
     notebook_parser.py   # Parses markdown lab notebooks
     session_parser.py    # Parses legacy session formats
+    compaction_parser.py # Extracts compaction boundaries from session data
+    checkpoint_replayer.py # Replays from compaction checkpoints
+    corrections.py       # Correction CRUD and storage
+    training_export.py   # GRPO training data export (JSONL)
     moment_scanner.py    # Scans sessions for candidate Socratic moments
     artifact_renderer.py # Renders markdown slides to HTML
-    launch_arena.sh      # Launches all components (detached)
+    replay_router.py     # Routes replayed messages
+    agent_stdio.py       # AsyncIO wrapper for grok agent stdio subprocess
+    demo_panel_agent.py  # Demo: agent controls a panel via Selenium
+    launch_arena.sh      # Launches all components (backend + frontend + adapter, detached)
     requirements.txt     # Python dependencies
-    test_arena_e2e.py    # E2E tests (adapter routing, WS round-trip)
-    test_arena_roundtrip.py  # Hop-by-hop pipeline tests
   frontend/
     src/
-      App.tsx            # Root layout
-      stores/arenaStore.ts  # Zustand state management
-      hooks/useWebSocket.ts # WebSocket connection + message routing
+      App.tsx              # Root layout
+      stores/arenaStore.ts # Zustand state management
+      hooks/useWebSocket.ts # WebSocket connection + message routing + panel restore
+      types/index.ts       # TypeScript interfaces
       components/
-        conversation/    # ConversationPane, Message, InputBar
-        notebook/        # NotebookPane (lab notebook viewer)
-        prompt/          # PromptTestPane, PromptDevPane
-        workbench/       # MomentsPane, Workbench (tabbed right panel)
-        layout/          # Header, PanelLayout, ArtifactPane
-        tree/            # TreeView (branch visualization)
+        conversation/      # ConversationPane, Message, InputBar, CorrectionButton, FlagButton, ForkButton
+        notebook/          # NotebookPane (lab notebook viewer)
+        prompt/            # PromptTestPane, PromptDevPane
+        workbench/         # Workbench (tabbed right panel), MomentsPane, CorrectionsPane,
+                           # BoundariesPane, EpisodeRunnerPane
+        layout/            # Header, PanelLayout, ArtifactPane, HostedAppPane (Xpra panels)
+        inspector/         # SessionInspector
+        tree/              # TreeView (branch visualization)
+        common/            # FontSizeControl, PaneAgentSelector
+    vite.config.ts         # Proxies /api (HTTP+WS) and /ws to backend
     package.json
-    vite.config.ts       # Proxies /api and /ws to backend
+  tests/                   # Cross-cutting browser-level tests
+    test_roundtrip_e2e.py
+    test_browser_rendering.py
+    test_browser_with_delay.py
+    test_livetailer_interference.py
+    test_ws_sequence.py
+  DESIGN.md              # System design document
+  ROADMAP.md             # Feature roadmap and test plan
+  SYSTEM.md              # Historical hackathon-era system doc
+  launch.sh              # Legacy launcher
   _backup_mvp/           # Archived Phase 1/2 code (fork engine, etc.)
 ```
 
@@ -107,10 +133,119 @@ socratic-arena/
 - **Compaction Boundaries**: The only points where agent state is cleanly captured and reproducible. Agent state mid-session is the entire context window (not portable). At a compaction boundary, state collapses to a compact text artifact (the compaction summary). These are the fork points for parallel sessions.
 - **Parallel Sessions**: Instead of "forking" (wrong metaphor -- there's no persistent state to fork), you start N independent sessions from the same compaction checkpoint with modified instructions. Each session is a sample of what the agent would do differently.
 - **Compaction Checkpoints**: The grok binary stores checkpoints at each compaction boundary (`~/.grok/sessions/.../compaction_checkpoints/`). Each checkpoint contains the full conversation state (system prompt, compacted history, user info, file paths) -- everything needed to seed a parallel session.
-- **Prompts**: Training prompt configurations derived from flagged moments. Include system prompt, context, probe, and expected/failure behaviors.
-- **Prompt Testing**: Run N completions from the same prompt to measure catch rate variance. Good variance (30-70% catch rate) = good GRPO training signal. The parallel session architecture scales this from isolated prompts to full conversation replays.
+- **Corrections**: Structured annotations on conversation nodes. Three fields: what was missing, what should have happened, correction text. These become training signal.
+- **Hosted Panels**: Desktop applications (Chrome, terminal, file manager) hosted via Xpra and embedded as iframes. Human sees pixels via Xpra HTML5 client; agent controls via Selenium/CDP. Same application, different interfaces.
+- **Training Data Export**: GRPO-format JSONL export combining corrections (reward=0) and episode scores (normalized 0-1).
 - **Live Tailer**: Streams the agent's real-time session activity into the arena tree.
 - **Arena Adapter**: Bridges arena UI messages to asdaaas agents via the standard inbox/outbox filesystem protocol.
+
+## REST API
+
+### Conversation and State
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/health` | Health check |
+| GET | `/api/tree` | Full conversation tree |
+| GET | `/api/tree/node/{id}` | Single node |
+| GET | `/api/flags` | All flags |
+| GET | `/api/notebook` | Notebook entries |
+| GET | `/api/viewport` | Current viewport state |
+| POST | `/api/agent/action` | Programmatic agent control |
+
+### Agents
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/agents` | Discover available agents |
+| POST | `/api/agent/switch` | Switch active agent |
+| GET | `/api/agent/{name}/notebook` | Agent's lab notebook |
+| GET | `/api/agent/{name}/history` | Agent's session history |
+| GET | `/api/agent/context` | Agent context info |
+| GET | `/api/agent/status` | Agent process status |
+| POST | `/api/agent/start` | Start grok agent stdio |
+| POST | `/api/agent/stop` | Stop agent |
+| POST | `/api/agent/compact` | Trigger agent compaction |
+
+### Arena Adapter
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/adapter/pending` | Poll for pending user messages (destructive read) |
+| POST | `/api/adapter/response` | Deliver agent response |
+| POST | `/api/adapter/chunk` | Deliver streaming chunk |
+
+### Hosted Panels (Xpra)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/panel/presets` | Available panel presets (Chrome, Terminal, File Manager) |
+| POST | `/api/panel/launch` | Launch a new panel |
+| GET | `/api/panel/list` | List active panels |
+| DELETE | `/api/panel/{id}` | Stop and remove a panel |
+| POST | `/api/panel/{id}/agent-claim` | Agent claims control of panel |
+| POST | `/api/panel/{id}/agent-release` | Agent releases control |
+| POST | `/api/panel/{id}/agent-status` | Update agent status text |
+| GET | `/api/panel/{id}/agent-state` | Get agent control state |
+| GET | `/api/panel/{id}/proxy/{path}` | HTTP proxy to Xpra (with retry) |
+| WS | `/api/panel/{id}/proxy` | WebSocket proxy to Xpra |
+
+### Inspection and Training
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/moments` | List flagged moments |
+| GET | `/api/moments/{index}` | Single moment |
+| DELETE | `/api/moments/{index}` | Delete a moment |
+| POST | `/api/moments/ab-test` | A/B test a moment |
+| GET | `/api/compaction-boundaries` | List compaction boundaries |
+| GET | `/api/compaction-boundaries/{id}` | Single boundary detail |
+| GET | `/api/corrections` | List all corrections |
+| POST | `/api/corrections` | Create a correction |
+| GET | `/api/corrections/{id}` | Single correction |
+| PUT | `/api/corrections/{id}` | Update a correction |
+| DELETE | `/api/corrections/{id}` | Delete a correction |
+| POST | `/api/episode-scores` | Submit episode scores |
+| GET | `/api/episode-scores` | List episode scores |
+| GET | `/api/export/training-data` | Export GRPO training JSONL |
+
+### Prompts and Testing
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/prompts` | All training prompts |
+| GET | `/api/prompts/{id}` | Single prompt |
+| GET | `/api/prompts/{id}/test-runs` | Test runs for a prompt |
+| GET | `/api/test-runs` | All test runs |
+| GET | `/api/models` | Available xAI models |
+
+### Artifacts and Sessions
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/artifacts` | Artifact list |
+| POST | `/api/artifacts` | Create artifact |
+| GET | `/api/artifacts/{id}/content` | Serve artifact content |
+| GET | `/api/artifacts/presentation` | Serve reveal.js presentation |
+| POST | `/api/artifacts/slides` | Create/update slides |
+| GET | `/api/artifacts/slides` | Get slides |
+| DELETE | `/api/artifacts/slides` | Delete slides |
+| GET | `/api/session/segments` | Session segment metadata |
+| POST | `/api/session/load-segment` | Load a specific segment |
+| POST | `/api/session/load` | Load from JSONL with filters |
+| POST | `/api/session/load-updates` | Load from updates.jsonl |
+
+## WebSocket Protocol (/ws)
+
+| Type | Direction | Purpose |
+|------|-----------|---------|
+| `state.snapshot` | S->C | Full tree on connect |
+| `conversation.send` | C->S | User message |
+| `conversation.node_update` | S->C | Agent response content |
+| `conversation.chunk` | S->C | Streaming chunk |
+| `conversation.turn_start` | S->C | Agent turn begun (includes nodeId) |
+| `conversation.turn_complete` | S->C | Agent turn finished |
+| `tree.live_node` | S->C | Live-tailed node from agent session |
+| `workspace.navigate` | S->C | Scroll/tab control |
+| `viewport.focus` | C->S | User scrolled (agent awareness) |
+| `panel.launched` | S->C | Panel created |
+| `panel.stopped` | S->C | Panel removed |
+| `prompt_test.run` | C->S | Start test |
+| `prompt_test.result` | S->C | Individual result |
+| `prompt_test.complete` | S->C | All tests done |
 
 ## Parallel Sessions -- The Training Loop
 
@@ -169,29 +304,45 @@ Each checkpoint file (`compaction_checkpoints/<uuid>.json`) contains:
 
 ## Logs
 
-All logs are written to `/tmp/`:
+When launched via `launch_arena.sh`:
 - `/tmp/arena_backend.log` -- FastAPI/uvicorn backend
 - `/tmp/arena_frontend.log` -- Vite dev server
 - `/tmp/arena_adapter.log` -- Arena adapter
+- PIDs tracked in `/tmp/arena_pids.txt`
 
 ## Tests
 
 ```bash
 cd backend
 
-# Unit + integration tests
+# Arena round-trip tests (hop-by-hop pipeline)
 python -m pytest test_arena_roundtrip.py -v
 
-# E2E tests (requires asdaaas routing functions)
+# Arena E2E tests (adapter routing, WS delivery)
 python -m pytest test_arena_e2e.py -v
+python -m pytest tests/test_arena_e2e.py -v
 
-# All backend tests
+# Browser-level tests (Selenium, require running backend+frontend)
+python -m pytest test_browser_e2e.py -v
+python -m pytest test_panel_browser.py -v
+python -m pytest test_compaction_browser.py -v
+python -m pytest test_dockable_tabs.py -v
+
+# Component-specific tests
+python -m pytest test_corrections.py -v
+python -m pytest test_training_export.py -v
+python -m pytest test_episode_runner.py -v
+python -m pytest test_agent_panel.py -v
+python -m pytest test_livetailer_filtering.py -v
+
+# Cross-cutting tests (from repo root)
+cd ..
 python -m pytest tests/ -v
 ```
 
 ## Status
 
-Active development. Private repo -- will be made public once verified clean of sensitive data.
+Active development. Private repo (MikeyV-ET/socratic-arena).
 
 ---
 

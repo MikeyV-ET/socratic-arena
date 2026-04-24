@@ -81,18 +81,19 @@ Two things in one:
 
 ## All Features Complete
 
-## Previously In Progress
-
-### 8-legacy. Xpra Stability Fixes (uncommitted)
-**What the user sees:** File Manager launches without "Xsession" error dialog. Thunar opens cleanly.
-**What was wrong:** `--start` triggered full X session wrapper; pcmanfm crashes on Xpra.
-**Fix:** `--start-child` + prefer thunar over pcmanfm.
-**Test plan:** Update browser test to include file manager launch verification. Manual verification done.
-
 ---
 
+## Historical: Original Planning Notes
+
+The items below were the original planning descriptions for items 8-14, preserved for reference.
+All items are now complete -- see the Completed Features section above for final state.
+
+### 8-legacy. Xpra Stability Fixes
+**Original issue:** `--start` triggered full X session wrapper; pcmanfm crashes on Xpra.
+**Resolution:** `--start-child` + prefer pcmanfm (no D-Bus needed). Xpra encoding flags tuned.
+
 ### 9. Agent Controls a Panel While User Watches
-**What the user sees:** Agent launches a Chrome panel, navigates to a page, clicks elements, fills forms — user watches in real-time via the Xpra iframe. Agent actions appear as conversation messages ("I'm navigating to X...").
+**Original plan:** Agent launches a Chrome panel, navigates to a page, clicks elements, fills forms — user watches in real-time via the Xpra iframe. Agent actions appear as conversation messages ("I'm navigating to X...").
 **Implementation:** Demo script exists (`demo_panel_agent.py`). Needs: integration with arena adapter so agent can request panel launch and get CDP port in response. UI indicator showing "agent is controlling this panel."
 **Test plan:**
 - API test: agent sends panel launch request via arena, receives CDP port
