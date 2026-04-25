@@ -232,6 +232,13 @@ class UpdatesTailer:
         self._after_tool = False
         return result
 
+    def mark_delivered(self):
+        """Mark the current turn as delivered so stale content isn't re-flushed."""
+        self._buffer = ""
+        self._thinking = ""
+        self._in_agent_turn = False
+        self._after_tool = False
+
     def close(self):
         self._fh.close()
 
@@ -379,8 +386,11 @@ class ArenaAdapter:
             # Also flush if agent has been silent for a while with pending content
             if not responses and (now - self._last_agent_activity) > self._flush_interval:
                 flushed = tailer.flush_if_pending()
-                if flushed:
+                if flushed and flushed.get("text", "").strip():
                     responses = [flushed]
+                    # Periodic flush delivered -- reset turn state so stale content
+                    # doesn't re-flush when the next user message arrives
+                    tailer.mark_delivered()
 
             for resp in responses:
                 self._last_agent_activity = now
