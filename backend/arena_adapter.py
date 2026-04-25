@@ -152,17 +152,19 @@ class UpdatesTailer:
         log.info("UpdatesTailer: tailing %s (seeked to end)", path)
 
     def poll(self) -> list[dict]:
-        """Read new lines and return completed agent responses.
+        """Read new lines and return completed or intermediate agent responses.
 
-        Returns list of dicts with keys: text, thinking (optional).
-        A response is flushed when a user_message_chunk arrives after
-        agent content, or when a tool_call starts after agent content.
+        Returns list of dicts with keys: text, thinking (optional), final (bool).
+        Content accumulates across the entire turn (text -> tool call -> more text).
+        A "final" flush happens on user_message_chunk; intermediate flushes
+        send the full accumulated text so far (so replacements are correct).
         """
         new_data = self._fh.read()
         if not new_data:
             return []
 
         results = []
+        had_new_content = False
         for line in new_data.strip().split("\n"):
             if not line.strip():
                 continue
@@ -180,6 +182,7 @@ class UpdatesTailer:
                 if text:
                     self._buffer += text
                     self._in_agent_turn = True
+                    had_new_content = True
 
             elif su == "agent_thought_chunk":
                 text = update.get("content", {}).get("text", "")
@@ -188,22 +191,34 @@ class UpdatesTailer:
 
             elif su == "user_message_chunk" and self._in_agent_turn:
                 # New user message = previous agent turn is done
-                results.append(self._flush())
+                results.append(self._flush(final=True))
 
             elif su == "tool_call":
                 # Tool calls are part of the agent turn, don't flush
                 pass
+
+        # If we got new content but no turn boundary, emit an intermediate update
+        if had_new_content and not results:
+            results.append(self._snapshot())
 
         return results
 
     def flush_if_pending(self) -> dict | None:
         """Flush any accumulated content (for periodic delivery)."""
         if self._buffer:
-            return self._flush()
+            return self._snapshot()
         return None
 
-    def _flush(self) -> dict:
-        result = {"text": self._buffer}
+    def _snapshot(self) -> dict:
+        """Return current accumulated content without resetting (intermediate)."""
+        result = {"text": self._buffer, "final": False}
+        if self._thinking:
+            result["thinking"] = self._thinking
+        return result
+
+    def _flush(self, final: bool = True) -> dict:
+        """Return accumulated content and reset for next turn."""
+        result = {"text": self._buffer, "final": final}
         if self._thinking:
             result["thinking"] = self._thinking
         self._buffer = ""
