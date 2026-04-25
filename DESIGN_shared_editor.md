@@ -168,6 +168,16 @@ Trip launches headed Chrome pointed at SA. Q connects to backend WS as the agent
 
 ### Test Scenarios
 
+#### T0: Own Notebook First, Then Sibling's
+1. Q loads its own notebook entries into SA notebook viewer (known content, easy to verify)
+2. Q navigates to a specific entry
+3. Trip verifies: entry visible, content matches Q's actual notebook
+4. Q clears and loads Jr's notebook entries instead
+5. Trip verifies: Jr's content visible, distinct from Q's
+6. Q navigates to Jr's experiment entry
+
+**Pass criteria:** Both notebooks load correctly, navigation works, content is accurate. This validates the notebook loading pipeline before using it in the full workflow.
+
 #### T1: Notebook Review Flow
 1. Q loads Jr's notebook entries into SA notebook viewer
 2. Q navigates to a specific entry (`workspace.navigate`)
