@@ -232,10 +232,10 @@ Trip's Selenium code and Q's agent code run in the same pytest process using `as
 
 ## Implementation Order
 
-1. **data-testid additions** (small, unblocks Trip's Selenium work)
-2. **Shared doc backend** (CRUD + Yjs sync hub)
-3. **Shared editor frontend** (CodeMirror + Yjs + workbench tab)
-4. **Agent-side Yjs client** (Python, connect to shared doc)
-5. **Notebook loading from external source** (agent pushes Jr's entries)
+1. ~~**data-testid additions**~~ DONE (commit 6b4bd3a)
+2. ~~**Shared doc backend**~~ DONE (commit 9472a0d) -- CRUD + pycrdt Yjs sync hub
+3. ~~**Shared editor frontend**~~ DONE (commits bfe50f2, b8095ab) -- CodeMirror 6 + custom Yjs WS provider
+4. **Agent-side Yjs client** (Python, connect to shared doc) -- REST API sufficient for MVP
+5. **Notebook loading from external source** (agent pushes Jr's entries) -- existing API works
 6. **E2E test scaffolding** (pytest + Selenium + agent WS)
-7. **Test scenarios T1-T4**
+7. **Test scenarios T0-T4**
