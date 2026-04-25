@@ -212,7 +212,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
           <FontSizeControl paneId={paneId} />
         </div>
       )}
-      <div ref={parentRef} onScroll={handleScroll} className="flex-1 overflow-y-auto" style={{ zoom }}>
+      <div ref={parentRef} onScroll={handleScroll} className="flex-1 overflow-y-auto" style={{ zoom }} data-testid="conversation-messages">
         <div style={{ height: virtualizer.getTotalSize(), width: "100%", position: "relative" }}>
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const node = nodes[virtualRow.index];

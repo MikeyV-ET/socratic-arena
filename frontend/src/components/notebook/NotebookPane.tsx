@@ -54,7 +54,7 @@ export function NotebookPane() {
   }, [notebookScrollTargetId, clearNotebookScrollTarget, reportWorkbenchFocus, entries]);
 
   return (
-    <div className="flex flex-col h-full bg-card">
+    <div className="flex flex-col h-full bg-card" data-testid="notebook-pane">
       <div className="px-3 py-2 border-b border-border flex items-center justify-between">
         <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
           Lab Notebook
@@ -73,6 +73,7 @@ export function NotebookPane() {
           <div
             key={entry.id}
             ref={(el) => { entryRefs.current[entry.id] = el; if (active) (activeEntryRef as React.MutableRefObject<HTMLDivElement | null>).current = el; }}
+            data-testid={`notebook-entry-${entry.id}`}
             className={`p-3 rounded-md border space-y-2 transition-colors cursor-pointer hover:border-accent/40 ${
               active
                 ? "border-accent/60 bg-accent/10"

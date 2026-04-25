@@ -121,11 +121,13 @@ export function InputBar() {
           rows={1}
           className="flex-1 bg-muted text-foreground text-sm px-3 py-2 rounded-md border border-border focus:outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground resize-none overflow-y-auto"
           style={{ maxHeight: 200 }}
+          data-testid="conversation-input"
         />
         <button
           type="submit"
           disabled={!message.trim() && files.length === 0}
           className="px-4 py-2 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
+          data-testid="conversation-send"
         >
           Send
         </button>
