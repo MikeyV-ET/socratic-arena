@@ -172,32 +172,6 @@ export function SharedEditorPane() {
   const [newTitle, setNewTitle] = useState("");
   const [showCreate, setShowCreate] = useState(false);
 
-  // Fetch doc list
-  const refreshDocs = useCallback(async () => {
-    try {
-      const resp = await fetch(`${basePath}/api/docs`);
-      const data = await resp.json();
-      setDocs(data);
-    } catch { /* ignore */ }
-  }, []);
-
-  useEffect(() => {
-    refreshDocs();
-    // Listen for doc list changes from WS events
-    const onDocsChanged = () => refreshDocs();
-    window.addEventListener("sa-docs-changed", onDocsChanged);
-    // Listen for workspace.navigate with docId
-    const onOpenDoc = (e: Event) => {
-      const docId = (e as CustomEvent).detail?.docId;
-      if (docId) openDoc(docId);
-    };
-    window.addEventListener("sa-open-doc", onOpenDoc);
-    return () => {
-      window.removeEventListener("sa-docs-changed", onDocsChanged);
-      window.removeEventListener("sa-open-doc", onOpenDoc);
-    };
-  }, [refreshDocs, openDoc]);
-
   // Clean up editor + provider when switching or unmounting
   const cleanup = useCallback(() => {
     editorViewRef.current?.destroy();
@@ -252,6 +226,30 @@ export function SharedEditorPane() {
       editorViewRef.current = view;
     });
   }, [cleanup, theme]);
+
+  // Fetch doc list
+  const refreshDocs = useCallback(async () => {
+    try {
+      const resp = await fetch(`${basePath}/api/docs`);
+      const data = await resp.json();
+      setDocs(data);
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    refreshDocs();
+    const onDocsChanged = () => refreshDocs();
+    window.addEventListener("sa-docs-changed", onDocsChanged);
+    const onOpenDoc = (e: Event) => {
+      const docId = (e as CustomEvent).detail?.docId;
+      if (docId) openDoc(docId);
+    };
+    window.addEventListener("sa-open-doc", onOpenDoc);
+    return () => {
+      window.removeEventListener("sa-docs-changed", onDocsChanged);
+      window.removeEventListener("sa-open-doc", onOpenDoc);
+    };
+  }, [refreshDocs, openDoc]);
 
   // Create a new doc
   const createDoc = async () => {
