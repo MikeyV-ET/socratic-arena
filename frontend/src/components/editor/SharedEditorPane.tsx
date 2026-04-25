@@ -1,12 +1,60 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EditorView, basicSetup } from "codemirror";
-import { EditorState } from "@codemirror/state";
+import { EditorState, StateEffect, StateField } from "@codemirror/state";
+import { Decoration, type DecorationSet } from "@codemirror/view";
 import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { oneDark } from "@codemirror/theme-one-dark";
 import * as Y from "yjs";
 import { yCollab } from "y-codemirror.next";
 import { useArenaStore } from "@/stores/arenaStore";
+
+// ---------------------------------------------------------------------------
+// Highlight decorations (agent-initiated line highlighting)
+// ---------------------------------------------------------------------------
+
+interface HighlightRange { from: number; to: number }
+interface HighlightPayload { ranges: HighlightRange[]; color: string }
+
+const setHighlightsEffect = StateEffect.define<HighlightPayload>();
+const clearHighlightsEffect = StateEffect.define<null>();
+
+const highlightField = StateField.define<DecorationSet>({
+  create() { return Decoration.none; },
+  update(decos, tr) {
+    for (const e of tr.effects) {
+      if (e.is(setHighlightsEffect)) {
+        const marks: ReturnType<typeof Decoration.line>[] = [];
+        const doc = tr.state.doc;
+        for (const r of e.value.ranges) {
+          const lo = Math.max(1, r.from);
+          const hi = Math.min(doc.lines, r.to);
+          for (let line = lo; line <= hi; line++) {
+            marks.push(
+              Decoration.line({ class: `cm-sa-highlight cm-sa-hl-${e.value.color}` })
+                .range(doc.line(line).from),
+            );
+          }
+        }
+        return Decoration.set(marks, true);
+      }
+      if (e.is(clearHighlightsEffect)) {
+        return Decoration.none;
+      }
+    }
+    return decos.map(tr.changes);
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+const highlightTheme = EditorView.baseTheme({
+  ".cm-sa-highlight": { transition: "background-color 0.2s ease" },
+  ".cm-sa-hl-yellow": { backgroundColor: "rgba(255, 230, 0, 0.25)" },
+  ".cm-sa-hl-blue":   { backgroundColor: "rgba(66, 135, 245, 0.22)" },
+  ".cm-sa-hl-green":  { backgroundColor: "rgba(34, 197, 94, 0.22)" },
+  ".cm-sa-hl-red":    { backgroundColor: "rgba(239, 68, 68, 0.22)" },
+  ".cm-sa-hl-purple": { backgroundColor: "rgba(168, 85, 247, 0.22)" },
+});
 
 interface DocMeta {
   id: string;
@@ -209,6 +257,8 @@ export function SharedEditorPane() {
         markdown({ codeLanguages: languages }),
         yCollab(ytext),
         EditorView.lineWrapping,
+        highlightField,
+        highlightTheme,
       ];
       if (theme === "dark") {
         extensions.push(oneDark);
@@ -250,6 +300,30 @@ export function SharedEditorPane() {
       window.removeEventListener("sa-open-doc", onOpenDoc);
     };
   }, [refreshDocs, openDoc]);
+
+  // Listen for highlight events from the main WS (agent-initiated)
+  useEffect(() => {
+    const onHighlight = (e: Event) => {
+      const { docId, ranges, color } = (e as CustomEvent).detail ?? {};
+      if (docId !== activeDocId || !editorViewRef.current) return;
+      editorViewRef.current.dispatch({
+        effects: setHighlightsEffect.of({ ranges: ranges ?? [], color: color ?? "yellow" }),
+      });
+    };
+    const onClearHighlight = (e: Event) => {
+      const { docId } = (e as CustomEvent).detail ?? {};
+      if (docId !== activeDocId || !editorViewRef.current) return;
+      editorViewRef.current.dispatch({
+        effects: clearHighlightsEffect.of(null),
+      });
+    };
+    window.addEventListener("sa-doc-highlight", onHighlight);
+    window.addEventListener("sa-doc-clear-highlight", onClearHighlight);
+    return () => {
+      window.removeEventListener("sa-doc-highlight", onHighlight);
+      window.removeEventListener("sa-doc-clear-highlight", onClearHighlight);
+    };
+  }, [activeDocId]);
 
   // Create a new doc
   const createDoc = async () => {

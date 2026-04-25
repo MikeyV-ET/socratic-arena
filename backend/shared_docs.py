@@ -204,6 +204,36 @@ async def put_doc_content(doc_id: str, body: dict):
     return {"id": doc_id, "content": str(live.text)}
 
 
+@router.post("/{doc_id}/highlight")
+async def highlight_lines(doc_id: str, body: dict):
+    """Highlight line ranges in a document (agent-initiated).
+
+    Body: {"ranges": [{"from": 1, "to": 3}, ...], "color": "yellow"}
+    Line numbers are 1-based. Color is optional (default: yellow).
+    """
+    live = _docs.get(doc_id)
+    if not live:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    ranges = body.get("ranges", [])
+    color = body.get("color", "yellow")
+    await _notify("doc.highlight", {
+        "docId": doc_id,
+        "ranges": ranges,
+        "color": color,
+    })
+    return {"status": "ok", "docId": doc_id, "ranges": ranges, "color": color}
+
+
+@router.delete("/{doc_id}/highlight")
+async def clear_highlights(doc_id: str):
+    """Clear all highlights from a document."""
+    live = _docs.get(doc_id)
+    if not live:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    await _notify("doc.clearHighlight", {"docId": doc_id})
+    return {"status": "ok", "docId": doc_id}
+
+
 @router.delete("/{doc_id}")
 async def delete_doc(doc_id: str):
     """Delete a shared document."""

@@ -222,6 +222,22 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       window.dispatchEvent(new CustomEvent("sa-docs-changed"));
       break;
 
+    case "doc.highlight":
+      window.dispatchEvent(new CustomEvent("sa-doc-highlight", {
+        detail: {
+          docId: msg.payload.docId as string,
+          ranges: msg.payload.ranges as { from: number; to: number }[],
+          color: (msg.payload.color as string) || "yellow",
+        },
+      }));
+      break;
+
+    case "doc.clearHighlight":
+      window.dispatchEvent(new CustomEvent("sa-doc-clear-highlight", {
+        detail: { docId: msg.payload.docId as string },
+      }));
+      break;
+
     case "layout.update": {
       const panels = msg.payload.panels as Record<string, number> | undefined;
       if (panels) {
