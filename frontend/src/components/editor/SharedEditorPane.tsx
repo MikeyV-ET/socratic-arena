@@ -286,6 +286,18 @@ export function SharedEditorPane() {
     } catch { /* ignore */ }
   }, []);
 
+  // Refresh doc list on mount, WS reconnect, doc changes, and open-doc events
+  const wsConnected = useArenaStore((s) => s.connected);
+  const prevConnected = useRef(false);
+
+  useEffect(() => {
+    // Refresh on initial mount and WS reconnect
+    if (wsConnected && !prevConnected.current) {
+      refreshDocs();
+    }
+    prevConnected.current = wsConnected;
+  }, [wsConnected, refreshDocs]);
+
   useEffect(() => {
     refreshDocs();
     const onDocsChanged = () => refreshDocs();
