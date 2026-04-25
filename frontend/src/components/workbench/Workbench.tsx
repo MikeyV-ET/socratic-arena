@@ -12,6 +12,7 @@ import { HostedAppPane } from "@/components/layout/HostedAppPane";
 import { BoundariesPane } from "@/components/workbench/BoundariesPane";
 import { CorrectionsPane } from "@/components/workbench/CorrectionsPane";
 import { EpisodeRunnerPane } from "@/components/workbench/EpisodeRunnerPane";
+import { SharedEditorPane } from "@/components/editor/SharedEditorPane";
 import { FontSizeControl } from "@/components/common/FontSizeControl";
 
 export const WORKBENCH_TABS = [
@@ -26,6 +27,7 @@ export const WORKBENCH_TABS = [
   { id: "boundaries", label: "Boundaries" },
   { id: "corrections", label: "Corrections" },
   { id: "episodes", label: "Episodes" },
+  { id: "editor", label: "Editor" },
 ] as const;
 
 function TabContent({ tabId }: { tabId: string }) {
@@ -64,6 +66,8 @@ function TabContent({ tabId }: { tabId: string }) {
     case "episodes":
       content = <EpisodeRunnerPane />;
       break;
+    case "editor":
+      return <SharedEditorPane />;
     default:
       content = <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Unknown tab</div>;
   }

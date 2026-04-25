@@ -197,6 +197,7 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       const scrollTo = msg.payload.scrollTo as string | undefined;
       const populate = msg.payload.populate as Record<string, string> | undefined;
       const moments = msg.payload.moments as { filter?: string; highlight?: number } | undefined;
+      const docId = msg.payload.docId as string | undefined;
       if (tab) store.setActiveTab(tab);
       if (scrollTo) {
         if (tab === "notebook") {
@@ -210,8 +211,16 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
         if (moments.filter) store.setMomentFilter(moments.filter as "all" | "verified" | "untested");
         if (moments.highlight != null) store.setHighlightedMoment(moments.highlight);
       }
+      if (docId) {
+        window.dispatchEvent(new CustomEvent("sa-open-doc", { detail: { docId } }));
+      }
       break;
     }
+
+    case "doc.created":
+    case "doc.deleted":
+      window.dispatchEvent(new CustomEvent("sa-docs-changed"));
+      break;
 
     case "layout.update": {
       const panels = msg.payload.panels as Record<string, number> | undefined;
