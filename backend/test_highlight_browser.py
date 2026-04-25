@@ -237,6 +237,76 @@ def test_h3_multiple_colors():
         cleanup_doc(doc_id)
 
 
+def test_h4_markdown_preview():
+    """H4: Toggle to preview mode renders markdown."""
+    global _passed, _failed
+    print("\n--- H4: Markdown preview toggle ---")
+    content = "# Hello World\n\nThis is **bold** and *italic*.\n\n- Item one\n- Item two"
+    resp = httpx.post(
+        f"{BACKEND_URL}/api/docs",
+        json={"title": "H4 - Preview Test", "content": content, "contentType": "markdown"},
+        timeout=5,
+    )
+    doc_id = resp.json()["id"]
+    driver = make_driver()
+    try:
+        open_doc_in_browser(driver, doc_id)
+        log("H4", "Doc open in browser (edit mode)")
+
+        # Verify we're in edit mode (CodeMirror visible, no preview)
+        editors = driver.find_elements(By.CSS_SELECTOR, ".cm-editor")
+        assert len(editors) > 0, "CodeMirror not found in edit mode"
+        previews = driver.find_elements(By.CSS_SELECTOR, '[data-testid="shared-editor-preview"]')
+        assert len(previews) == 0, "Preview should not be visible in edit mode"
+
+        # Click preview button
+        preview_btn = driver.find_element(
+            By.XPATH, '//div[@data-testid="view-mode-toggle"]//button[text()="Preview"]'
+        )
+        preview_btn.click()
+        time.sleep(1)
+
+        # Verify preview pane appeared
+        preview = driver.find_element(By.CSS_SELECTOR, '[data-testid="shared-editor-preview"]')
+        assert preview.is_displayed(), "Preview pane not visible"
+        log("H4", "Preview pane visible")
+
+        # Check rendered HTML elements
+        h1s = preview.find_elements(By.TAG_NAME, "h1")
+        assert len(h1s) > 0, "No <h1> rendered in preview"
+        assert "Hello World" in h1s[0].text, f"Expected 'Hello World', got '{h1s[0].text}'"
+        log("H4", f"H1 rendered: '{h1s[0].text}'")
+
+        strongs = preview.find_elements(By.TAG_NAME, "strong")
+        assert len(strongs) > 0, "No <strong> rendered"
+        log("H4", f"Bold text found: '{strongs[0].text}'")
+
+        lis = preview.find_elements(By.TAG_NAME, "li")
+        assert len(lis) >= 2, f"Expected 2+ list items, got {len(lis)}"
+        log("H4", f"List items: {len(lis)}")
+
+        # Switch back to edit mode
+        edit_btn = driver.find_element(
+            By.XPATH, '//div[@data-testid="view-mode-toggle"]//button[text()="Edit"]'
+        )
+        edit_btn.click()
+        time.sleep(0.5)
+
+        # CodeMirror should be visible again
+        editor_container = driver.find_element(By.CSS_SELECTOR, '[data-testid="shared-editor-content"]')
+        assert editor_container.is_displayed(), "Editor not visible after switching back"
+        log("H4", "Back in edit mode, CodeMirror visible")
+
+        print("  PASS: H4")
+        _passed += 1
+    except Exception as e:
+        print(f"  FAIL: H4 -- {e}")
+        _failed += 1
+    finally:
+        driver.quit()
+        cleanup_doc(doc_id)
+
+
 if __name__ == "__main__":
     print(f"Backend: {BACKEND_URL}")
     print(f"Frontend: {FRONTEND_URL}")
@@ -244,9 +314,10 @@ if __name__ == "__main__":
     test_h1_agent_highlights_lines()
     test_h2_agent_clears_highlights()
     test_h3_multiple_colors()
+    test_h4_markdown_preview()
 
     print(f"\n{'='*40}")
     print(f"Results: {_passed} passed, {_failed} failed out of {_passed + _failed}")
     if _failed:
         sys.exit(1)
-    print("All highlight tests passed!")
+    print("All tests passed!")

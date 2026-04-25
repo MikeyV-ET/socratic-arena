@@ -7,6 +7,8 @@ import { languages } from "@codemirror/language-data";
 import { oneDark } from "@codemirror/theme-one-dark";
 import * as Y from "yjs";
 import { yCollab } from "y-codemirror.next";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useArenaStore } from "@/stores/arenaStore";
 
 // ---------------------------------------------------------------------------
@@ -219,6 +221,8 @@ export function SharedEditorPane() {
   const [connected, setConnected] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [viewMode, setViewMode] = useState<"edit" | "preview">("edit");
+  const [previewText, setPreviewText] = useState("");
 
   // Clean up editor + provider when switching or unmounting
   const cleanup = useCallback(() => {
@@ -247,6 +251,12 @@ export function SharedEditorPane() {
     const provider = new SimpleYjsProvider(wsUrl, ydoc);
     provider.onStatusChange = setConnected;
     providerRef.current = provider;
+
+    // Track text for markdown preview
+    const updatePreview = () => setPreviewText(ytext.toString());
+    ytext.observe(updatePreview);
+    // Initial sync takes a moment; update once synced
+    ydoc.on("update", updatePreview);
 
     // Wait for container to be ready
     requestAnimationFrame(() => {
@@ -384,8 +394,28 @@ export function SharedEditorPane() {
         </div>
         <div className="flex items-center gap-1.5">
           {activeDocId && (
-            <span className={`w-2 h-2 rounded-full ${connected ? "bg-green-500" : "bg-red-500"}`}
-              title={connected ? "Connected" : "Disconnected"} />
+            <>
+              <div className="flex rounded border border-border overflow-hidden" data-testid="view-mode-toggle">
+                <button
+                  onClick={() => setViewMode("edit")}
+                  className={`px-2 py-0.5 text-[10px] transition-colors ${
+                    viewMode === "edit" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => setViewMode("preview")}
+                  className={`px-2 py-0.5 text-[10px] transition-colors ${
+                    viewMode === "preview" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Preview
+                </button>
+              </div>
+              <span className={`w-2 h-2 rounded-full ${connected ? "bg-green-500" : "bg-red-500"}`}
+                title={connected ? "Connected" : "Disconnected"} />
+            </>
           )}
           <button
             onClick={() => setShowCreate(!showCreate)}
@@ -457,14 +487,25 @@ export function SharedEditorPane() {
           ))}
         </div>
 
-        {/* Editor area */}
+        {/* Editor / Preview area */}
         <div className="flex-1 overflow-hidden">
           {activeDocId ? (
-            <div
-              ref={editorContainerRef}
-              className="h-full overflow-auto [&_.cm-editor]:h-full [&_.cm-scroller]:!overflow-auto"
-              data-testid="shared-editor-content"
-            />
+            <>
+              <div
+                ref={editorContainerRef}
+                className="h-full overflow-auto [&_.cm-editor]:h-full [&_.cm-scroller]:!overflow-auto"
+                data-testid="shared-editor-content"
+                style={{ display: viewMode === "edit" ? undefined : "none" }}
+              />
+              {viewMode === "preview" && (
+                <div
+                  className={`h-full overflow-auto p-4 prose prose-sm max-w-none prose-p:my-2 prose-li:my-0 prose-table:text-xs prose-th:text-left prose-td:px-2 prose-td:py-1 prose-th:px-2 prose-th:py-1${theme === "dark" ? " prose-invert" : ""}`}
+                  data-testid="shared-editor-preview"
+                >
+                  <Markdown remarkPlugins={[remarkGfm]}>{previewText}</Markdown>
+                </div>
+              )}
+            </>
           ) : (
             <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
               Select or create a document to start editing
