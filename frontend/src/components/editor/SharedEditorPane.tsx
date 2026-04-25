@@ -10,6 +10,8 @@ import { yCollab } from "y-codemirror.next";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useArenaStore } from "@/stores/arenaStore";
+import { wysiwygPlugin, wysiwygTheme } from "./wysiwygMarkdown";
+import { authorColorPlugin, authorColorTheme, authorColorConfig } from "./authorColors";
 
 // ---------------------------------------------------------------------------
 // Highlight decorations (agent-initiated line highlighting)
@@ -223,6 +225,7 @@ export function SharedEditorPane() {
   const [showCreate, setShowCreate] = useState(false);
   const [viewMode, setViewMode] = useState<"edit" | "preview">("edit");
   const [previewText, setPreviewText] = useState("");
+  const [showAuthors, setShowAuthors] = useState(true);
 
   // Clean up editor + provider when switching or unmounting
   const cleanup = useCallback(() => {
@@ -269,6 +272,15 @@ export function SharedEditorPane() {
         EditorView.lineWrapping,
         highlightField,
         highlightTheme,
+        wysiwygPlugin,
+        wysiwygTheme,
+        authorColorConfig.of({
+          ytext,
+          localClientId: ydoc.clientID,
+          enabled: true,
+        }),
+        authorColorPlugin,
+        authorColorTheme,
       ];
       if (theme === "dark") {
         extensions.push(oneDark);

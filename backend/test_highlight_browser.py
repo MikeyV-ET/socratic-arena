@@ -307,6 +307,86 @@ def test_h4_markdown_preview():
         cleanup_doc(doc_id)
 
 
+def test_h5_wysiwyg_rendering():
+    """H5: Soft WYSIWYG renders bold/italic inline, hides syntax markers."""
+    global _passed, _failed
+    print("\n--- H5: Soft WYSIWYG markdown rendering ---")
+    content = "# Big Heading\n\nThis is **bold text** and *italic text* here.\n\n~~struck~~ and `code` too."
+    resp = httpx.post(
+        f"{BACKEND_URL}/api/docs",
+        json={"title": "H5 - WYSIWYG Test", "content": content, "contentType": "markdown"},
+        timeout=5,
+    )
+    doc_id = resp.json()["id"]
+    driver = make_driver()
+    try:
+        open_doc_in_browser(driver, doc_id)
+        log("H5", "Doc open in browser")
+
+        # Check WYSIWYG classes are applied
+        bolds = driver.find_elements(By.CSS_SELECTOR, ".cm-md-bold")
+        log("H5", f"Bold elements: {len(bolds)}")
+        assert len(bolds) > 0, "No .cm-md-bold elements found"
+
+        italics = driver.find_elements(By.CSS_SELECTOR, ".cm-md-italic")
+        log("H5", f"Italic elements: {len(italics)}")
+        assert len(italics) > 0, "No .cm-md-italic elements found"
+
+        headings = driver.find_elements(By.CSS_SELECTOR, ".cm-md-h1")
+        log("H5", f"H1 elements: {len(headings)}")
+        assert len(headings) > 0, "No .cm-md-h1 elements found"
+
+        codes = driver.find_elements(By.CSS_SELECTOR, ".cm-md-code")
+        log("H5", f"Code elements: {len(codes)}")
+        assert len(codes) > 0, "No .cm-md-code elements found"
+
+        print("  PASS: H5")
+        _passed += 1
+    except Exception as e:
+        print(f"  FAIL: H5 -- {e}")
+        _failed += 1
+    finally:
+        driver.quit()
+        cleanup_doc(doc_id)
+
+
+def test_h6_author_coloring():
+    """H6: Text created by agent (REST) gets agent color class."""
+    global _passed, _failed
+    print("\n--- H6: Author coloring ---")
+    content = "This text was written by the agent via REST API.\nSecond line from agent."
+    resp = httpx.post(
+        f"{BACKEND_URL}/api/docs",
+        json={"title": "H6 - Author Color Test", "content": content, "contentType": "plaintext"},
+        timeout=5,
+    )
+    doc_id = resp.json()["id"]
+    driver = make_driver()
+    try:
+        open_doc_in_browser(driver, doc_id)
+        log("H6", "Doc open in browser")
+
+        # Text created via REST uses the server's client ID (not the browser's)
+        # So it should get the agent color class
+        agent_marks = driver.find_elements(By.CSS_SELECTOR, ".cm-author-agent")
+        log("H6", f"Agent-colored elements: {len(agent_marks)}")
+        assert len(agent_marks) > 0, "No .cm-author-agent elements found for REST-created content"
+
+        # No mentor marks should exist (mentor hasn't typed anything)
+        mentor_marks = driver.find_elements(By.CSS_SELECTOR, ".cm-author-mentor")
+        log("H6", f"Mentor-colored elements: {len(mentor_marks)}")
+        assert len(mentor_marks) == 0, f"Expected 0 mentor marks (no local edits), got {len(mentor_marks)}"
+
+        print("  PASS: H6")
+        _passed += 1
+    except Exception as e:
+        print(f"  FAIL: H6 -- {e}")
+        _failed += 1
+    finally:
+        driver.quit()
+        cleanup_doc(doc_id)
+
+
 if __name__ == "__main__":
     print(f"Backend: {BACKEND_URL}")
     print(f"Frontend: {FRONTEND_URL}")
@@ -315,6 +395,8 @@ if __name__ == "__main__":
     test_h2_agent_clears_highlights()
     test_h3_multiple_colors()
     test_h4_markdown_preview()
+    test_h5_wysiwyg_rendering()
+    test_h6_author_coloring()
 
     print(f"\n{'='*40}")
     print(f"Results: {_passed} passed, {_failed} failed out of {_passed + _failed}")
