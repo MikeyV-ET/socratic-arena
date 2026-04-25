@@ -108,6 +108,10 @@ app.add_middleware(
 app.include_router(replay_router)
 init_replayer()
 
+# Shared collaborative documents
+from shared_docs import router as docs_router, set_broadcast as docs_set_broadcast
+app.include_router(docs_router)
+
 # In-memory state
 def _build_default_state() -> StateSnapshot:
     """Load knight-bio's history as default, with candidate moments flagged.
@@ -260,6 +264,9 @@ async def broadcast(msg: dict):
             await ws.send_text(text)
         except Exception:
             clients.remove(ws)
+
+# Wire shared docs broadcast so doc.created/doc.deleted reach all WS clients
+docs_set_broadcast(broadcast)
 
 
 # --- Live session tailer ---
