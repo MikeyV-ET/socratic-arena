@@ -2,13 +2,13 @@
 """arena_adapter.py -- asdaaas adapter for Socratic Arena web UI.
 
 Bridges the Socratic Arena FastAPI backend to asdaaas agents via the
-standard adapter pattern (inbox/outbox/doorbells).
+standard adapter pattern (inbox for user->agent, updates.jsonl for agent->arena).
 
 Architecture:
   Arena UI (browser) -> WebSocket -> Arena backend (FastAPI)
   Arena backend -> REST /api/adapter/pending -> arena_adapter (this file)
   arena_adapter -> writes to agent's adapter inbox -> asdaaas -> agent
-  agent responds -> asdaaas writes to adapter outbox -> arena_adapter
+  agent responds -> grok writes updates.jsonl -> arena_adapter tails it
   arena_adapter -> POST /api/adapter/response -> Arena backend -> WebSocket -> UI
 
 Usage:
@@ -26,6 +26,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
+from urllib.parse import quote as _url_quote
 
 import httpx
 
@@ -104,28 +105,114 @@ def write_to_inbox(agents_home: Path, agent_name: str, content: str,
 
 
 # ============================================================================
-# OUTBOX: read agent responses from adapter outbox
+# UPDATES.JSONL TAILER: read agent responses from session updates
 # ============================================================================
 
-def poll_outbox(agents_home: Path, agent_name: str) -> list[dict]:
-    """Read and delete responses from the arena adapter outbox."""
-    outbox = agent_adapter_dir(agents_home, agent_name) / "outbox"
-    if not outbox.exists():
-        return []
-
-    responses = []
-    for entry in sorted(outbox.iterdir()):
-        if not entry.name.endswith(".json"):
-            continue
+def _find_updates_jsonl(agents_home: Path, agent_name: str) -> Path | None:
+    """Find the agent's updates.jsonl via session registry or direct search."""
+    reg_path = agents_home / ".session_registry.json"
+    if reg_path.exists():
         try:
-            with open(entry) as f:
-                data = json.load(f)
-            responses.append(data)
-            entry.unlink()
-        except (json.JSONDecodeError, OSError):
+            reg = json.loads(reg_path.read_text())
+            entry = reg.get(agent_name, {})
+            sid = entry.get("session_id", "")
+            cwd = entry.get("cwd", "")
+            if sid and cwd:
+                cwd_encoded = _url_quote(cwd, safe="")
+                p = Path.home() / ".grok" / "sessions" / cwd_encoded / sid / "updates.jsonl"
+                if p.exists():
+                    return p
+        except Exception:
             pass
 
-    return responses
+    # Fallback: scan agent's CWD for grok session
+    agent_cwd = agents_home / agent_name
+    cwd_encoded = _url_quote(str(agent_cwd), safe="")
+    sessions_dir = Path.home() / ".grok" / "sessions" / cwd_encoded
+    if sessions_dir.exists():
+        # Pick most recently modified session
+        candidates = sorted(sessions_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
+        for s in candidates:
+            p = s / "updates.jsonl"
+            if p.exists():
+                return p
+    return None
+
+
+class UpdatesTailer:
+    """Tails updates.jsonl for agent_message_chunk entries."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self._fh = open(path, "r")
+        self._fh.seek(0, 2)  # seek to end
+        self._buffer = ""  # accumulated agent text for current turn
+        self._thinking = ""  # accumulated thinking text
+        self._in_agent_turn = False
+        log.info("UpdatesTailer: tailing %s (seeked to end)", path)
+
+    def poll(self) -> list[dict]:
+        """Read new lines and return completed agent responses.
+
+        Returns list of dicts with keys: text, thinking (optional).
+        A response is flushed when a user_message_chunk arrives after
+        agent content, or when a tool_call starts after agent content.
+        """
+        new_data = self._fh.read()
+        if not new_data:
+            return []
+
+        results = []
+        for line in new_data.strip().split("\n"):
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            params = event.get("params", {})
+            update = params.get("update", {})
+            su = update.get("sessionUpdate", "")
+
+            if su == "agent_message_chunk":
+                text = update.get("content", {}).get("text", "")
+                if text:
+                    self._buffer += text
+                    self._in_agent_turn = True
+
+            elif su == "agent_thought_chunk":
+                text = update.get("content", {}).get("text", "")
+                if text:
+                    self._thinking += text
+
+            elif su == "user_message_chunk" and self._in_agent_turn:
+                # New user message = previous agent turn is done
+                results.append(self._flush())
+
+            elif su == "tool_call":
+                # Tool calls are part of the agent turn, don't flush
+                pass
+
+        return results
+
+    def flush_if_pending(self) -> dict | None:
+        """Flush any accumulated content (for periodic delivery)."""
+        if self._buffer:
+            return self._flush()
+        return None
+
+    def _flush(self) -> dict:
+        result = {"text": self._buffer}
+        if self._thinking:
+            result["thinking"] = self._thinking
+        self._buffer = ""
+        self._thinking = ""
+        self._in_agent_turn = False
+        return result
+
+    def close(self):
+        self._fh.close()
 
 
 # ============================================================================
@@ -175,17 +262,21 @@ class ArenaAdapter:
         self._node_map: dict[str, str] = {}  # msg_id -> arena node_id
         self._last_node_id: str = ""  # fallback for responses without metadata
         self._active_agents: set[str] = set()  # agents we've routed messages to
+        self._tailers: dict[str, UpdatesTailer] = {}  # agent -> tailer
+        self._flush_interval = 3.0  # seconds of silence before flushing pending response
+        self._last_agent_activity: float = 0
 
     def run(self):
         log.info("Starting arena adapter (default=%s) arena=%s", self.default_agent, self.arena_url)
         ensure_dirs(self.agents_home, self.default_agent)
         self._active_agents.add(self.default_agent)
+        self._init_tailer(self.default_agent)
         register(self.agents_home, self.default_agent)
 
         while self.running:
             try:
                 self._poll_arena_for_user_messages()
-                self._poll_outbox_for_agent_responses()
+                self._poll_updates_for_agent_responses()
                 self._heartbeat()
             except KeyboardInterrupt:
                 break
@@ -194,7 +285,19 @@ class ArenaAdapter:
 
             time.sleep(self.poll_interval)
 
+        for t in self._tailers.values():
+            t.close()
         log.info("Arena adapter stopped")
+
+    def _init_tailer(self, agent_name: str):
+        """Initialize an UpdatesTailer for an agent if not already tailing."""
+        if agent_name in self._tailers:
+            return
+        updates_path = _find_updates_jsonl(self.agents_home, agent_name)
+        if updates_path:
+            self._tailers[agent_name] = UpdatesTailer(updates_path)
+        else:
+            log.warning("No updates.jsonl found for %s", agent_name)
 
     def stop(self):
         self.running = False
@@ -221,6 +324,7 @@ class ArenaAdapter:
                 if target_agent not in self._active_agents:
                     ensure_dirs(self.agents_home, target_agent)
                     self._active_agents.add(target_agent)
+                    self._init_tailer(target_agent)
                     log.info("New agent activated: %s", target_agent)
 
                 msg_id = write_to_inbox(
@@ -237,49 +341,62 @@ class ArenaAdapter:
         except Exception as e:
             log.debug("Arena poll error: %s", e)
 
-    def _poll_outbox_for_agent_responses(self):
-        """Check all active agents' outboxes for responses and POST to arena backend."""
-        responses = []
+    def _poll_updates_for_agent_responses(self):
+        """Tail updates.jsonl for all active agents and deliver responses to arena."""
+        now = time.time()
+
         for agent in list(self._active_agents):
-            responses.extend(poll_outbox(self.agents_home, agent))
+            if agent not in self._tailers:
+                self._init_tailer(agent)
 
-        for resp in responses:
-            text = resp.get("text", "")
-            meta = resp.get("meta", {})
-            request_id = resp.get("request_id", "")
-
-            # Find the arena node_id this response belongs to.
-            # asdaaas write_to_outbox doesn't pass through inbound metadata,
-            # so fall back to the last node_id we sent a message for.
-            node_id = (meta.get("node_id", "")
-                       or self._node_map.get(request_id, "")
-                       or self._last_node_id)
-
-            if not node_id:
-                log.warning("Response has no node_id, cannot route to arena: %s", text[:80])
+            tailer = self._tailers.get(agent)
+            if not tailer:
                 continue
 
-            try:
-                r = httpx.post(
-                    f"{self.arena_url}/api/adapter/response",
-                    json={
-                        "nodeId": node_id,
-                        "content": text,
-                        "thinking": meta.get("thinking"),
-                    },
-                    timeout=10,
-                )
-                if r.status_code == 200:
-                    body = r.json()
-                    if body.get("status") == "ok":
-                        log.info("Delivered agent response to arena (node=%s, %d chars)",
-                                 node_id[:12], len(text))
-                    else:
-                        log.error("Arena response error: %s", body.get("message", "unknown"))
+            responses = tailer.poll()
+
+            # Also flush if agent has been silent for a while with pending content
+            if not responses and (now - self._last_agent_activity) > self._flush_interval:
+                flushed = tailer.flush_if_pending()
+                if flushed:
+                    responses = [flushed]
+
+            for resp in responses:
+                self._last_agent_activity = now
+                self._deliver_response(resp)
+
+    def _deliver_response(self, resp: dict):
+        """POST a completed agent response to the arena backend."""
+        text = resp.get("text", "")
+        if not text.strip():
+            return
+
+        node_id = self._last_node_id
+        if not node_id:
+            log.warning("Response has no node_id, cannot route to arena: %s", text[:80])
+            return
+
+        try:
+            r = httpx.post(
+                f"{self.arena_url}/api/adapter/response",
+                json={
+                    "nodeId": node_id,
+                    "content": text,
+                    "thinking": resp.get("thinking"),
+                },
+                timeout=10,
+            )
+            if r.status_code == 200:
+                body = r.json()
+                if body.get("status") == "ok":
+                    log.info("Delivered agent response to arena (node=%s, %d chars)",
+                             node_id[:12], len(text))
                 else:
-                    log.error("Arena rejected response (HTTP %d): %s", r.status_code, r.text[:200])
-            except Exception as e:
-                log.error("Failed to deliver response to arena: %s", e)
+                    log.error("Arena response error: %s", body.get("message", "unknown"))
+            else:
+                log.error("Arena rejected response (HTTP %d): %s", r.status_code, r.text[:200])
+        except Exception as e:
+            log.error("Failed to deliver response to arena: %s", e)
 
     def _heartbeat(self):
         now = time.time()
