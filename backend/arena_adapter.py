@@ -149,6 +149,7 @@ class UpdatesTailer:
         self._buffer = ""  # accumulated agent text for current turn
         self._thinking = ""  # accumulated thinking text
         self._in_agent_turn = False
+        self._after_tool = False  # true after a tool_call, adds paragraph break before next text
         log.info("UpdatesTailer: tailing %s (seeked to end)", path)
 
     def poll(self) -> list[dict]:
@@ -180,6 +181,10 @@ class UpdatesTailer:
             if su == "agent_message_chunk":
                 text = update.get("content", {}).get("text", "")
                 if text:
+                    # Add paragraph break if resuming after a tool call
+                    if self._after_tool and self._buffer and not self._buffer.endswith("\n"):
+                        self._buffer += "\n\n"
+                    self._after_tool = False
                     self._buffer += text
                     self._in_agent_turn = True
                     had_new_content = True
@@ -195,7 +200,7 @@ class UpdatesTailer:
 
             elif su == "tool_call":
                 # Tool calls are part of the agent turn, don't flush
-                pass
+                self._after_tool = True
 
         # If we got new content but no turn boundary, emit an intermediate update
         if had_new_content and not results:
@@ -224,6 +229,7 @@ class UpdatesTailer:
         self._buffer = ""
         self._thinking = ""
         self._in_agent_turn = False
+        self._after_tool = False
         return result
 
     def close(self):
