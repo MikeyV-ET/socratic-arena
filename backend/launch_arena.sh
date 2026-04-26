@@ -43,22 +43,22 @@ if [ "$1" = "--stop" ]; then
     exit 0
 fi
 
-# --- Check for already-running processes ---
+# --- Stop any existing processes before starting ---
 if [ -f "$PID_FILE" ]; then
-    all_alive=true
+    echo "Stopping existing arena processes..."
     while read -r pid name; do
-        if ! kill -0 "$pid" 2>/dev/null; then
-            all_alive=false
-            break
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null && echo "  Stopped $name (PID $pid)" || true
         fi
     done < "$PID_FILE"
-    if $all_alive; then
-        echo "Arena already running (PIDs in $PID_FILE). Use --stop first."
-        cat "$PID_FILE"
-        exit 1
-    fi
-    # Stale PID file, clean up
     rm -f "$PID_FILE"
+    sleep 1
+else
+    # No PID file but ports might be in use from a manual launch
+    pkill -f "uvicorn main:app.*--port 8000" 2>/dev/null || true
+    pkill -f "arena_adapter.py" 2>/dev/null || true
+    pkill -f "vite.*--port 5173" 2>/dev/null || true
+    sleep 1
 fi
 
 echo "=== Socratic Arena Launcher (detached) ==="

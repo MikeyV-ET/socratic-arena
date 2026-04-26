@@ -7,27 +7,25 @@ set -euo pipefail
 SA_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_PORT="${SA_BACKEND_PORT:-8000}"
 FRONTEND_PORT="${SA_FRONTEND_PORT:-5173}"
+AGENT="${SA_AGENT:-Q}"
 BACKEND_LOG="/tmp/sa_backend.log"
 FRONTEND_LOG="/tmp/sa_frontend.log"
+ADAPTER_LOG="/tmp/sa_adapter.log"
 BACKEND_PID="/tmp/sa_backend.pid"
 FRONTEND_PID="/tmp/sa_frontend.pid"
+ADAPTER_PID="/tmp/sa_adapter.pid"
 
 stop_all() {
     echo "Stopping Socratic Arena..."
-    if [ -f "$BACKEND_PID" ] && kill -0 "$(cat "$BACKEND_PID")" 2>/dev/null; then
-        kill "$(cat "$BACKEND_PID")" && echo "  Backend stopped (PID $(cat "$BACKEND_PID"))."
-        rm -f "$BACKEND_PID"
-    else
-        pkill -f "uvicorn main:app" 2>/dev/null && echo "  Backend stopped." || echo "  Backend not running."
-        rm -f "$BACKEND_PID"
-    fi
-    if [ -f "$FRONTEND_PID" ] && kill -0 "$(cat "$FRONTEND_PID")" 2>/dev/null; then
-        kill "$(cat "$FRONTEND_PID")" && echo "  Frontend stopped (PID $(cat "$FRONTEND_PID"))."
-        rm -f "$FRONTEND_PID"
-    else
-        pkill -f "node.*vite" 2>/dev/null && echo "  Frontend stopped." || echo "  Frontend not running."
-        rm -f "$FRONTEND_PID"
-    fi
+    for label_pid in "$BACKEND_PID:backend:uvicorn main:app" "$FRONTEND_PID:frontend:node.*vite" "$ADAPTER_PID:adapter:arena_adapter.py"; do
+        pf="${label_pid%%:*}"; rest="${label_pid#*:}"; name="${rest%%:*}"; pattern="${rest#*:}"
+        if [ -f "$pf" ] && kill -0 "$(cat "$pf")" 2>/dev/null; then
+            kill "$(cat "$pf")" && echo "  ${name} stopped (PID $(cat "$pf"))."
+        else
+            pkill -f "$pattern" 2>/dev/null && echo "  ${name} stopped." || echo "  ${name} not running."
+        fi
+        rm -f "$pf"
+    done
 }
 
 start_backend() {
@@ -46,41 +44,41 @@ start_frontend() {
     echo "  Frontend PID: $! (log: ${FRONTEND_LOG})"
 }
 
+start_adapter() {
+    echo "Starting arena adapter for ${AGENT}..."
+    cd "${SA_DIR}/backend"
+    nohup python3 arena_adapter.py --agent "${AGENT}" --arena-url "http://localhost:${BACKEND_PORT}" > "${ADAPTER_LOG}" 2>&1 &
+    echo $! > "$ADAPTER_PID"
+    echo "  Adapter PID: $! (log: ${ADAPTER_LOG})"
+}
+
 show_status() {
     echo "Socratic Arena status:"
-    if [ -f "$BACKEND_PID" ] && kill -0 "$(cat "$BACKEND_PID")" 2>/dev/null; then
-        echo "  Backend:  RUNNING (PID $(cat "$BACKEND_PID"), port ${BACKEND_PORT})"
-    else
-        echo "  Backend:  STOPPED"
-    fi
-    if [ -f "$FRONTEND_PID" ] && kill -0 "$(cat "$FRONTEND_PID")" 2>/dev/null; then
-        echo "  Frontend: RUNNING (PID $(cat "$FRONTEND_PID"), port ${FRONTEND_PORT})"
-    else
-        echo "  Frontend: STOPPED"
-    fi
+    for label_pid in "$BACKEND_PID:Backend:${BACKEND_PORT}" "$FRONTEND_PID:Frontend:${FRONTEND_PORT}" "$ADAPTER_PID:Adapter:${AGENT}"; do
+        pf="${label_pid%%:*}"; rest="${label_pid#*:}"; name="${rest%%:*}"; info="${rest#*:}"
+        if [ -f "$pf" ] && kill -0 "$(cat "$pf")" 2>/dev/null; then
+            echo "  ${name}:  RUNNING (PID $(cat "$pf"), ${info})"
+        else
+            echo "  ${name}:  STOPPED"
+        fi
+    done
 }
 
 case "${1:-start}" in
     stop)
         stop_all
         ;;
-    restart)
+    restart|start)
         stop_all
         sleep 1
         start_backend
         start_frontend
-        echo ""
-        echo "Socratic Arena restarted."
-        echo "  Frontend: http://localhost:${FRONTEND_PORT}"
-        echo "  Backend:  http://localhost:${BACKEND_PORT}"
-        ;;
-    start)
-        start_backend
-        start_frontend
+        start_adapter
         echo ""
         echo "Socratic Arena started."
         echo "  Frontend: http://localhost:${FRONTEND_PORT}"
         echo "  Backend:  http://localhost:${BACKEND_PORT}"
+        echo "  Adapter:  agent=${AGENT}"
         ;;
     status)
         show_status
