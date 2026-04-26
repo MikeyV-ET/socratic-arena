@@ -1,0 +1,13 @@
+22:28:28 [arena] Starting arena adapter (default=Q) arena=http://localhost:8000
+22:28:28 [arena] Registered with asdaaas
+22:28:28 [arena] HTTP Request: GET http://localhost:8000/api/adapter/pending "HTTP/1.1 200 OK"
+22:28:29 [arena] HTTP Request: GET http://localhost:8000/api/adapter/pending "HTTP/1.1 200 OK"
+22:28:29 [arena] HTTP Request: GET http://localhost:8000/api/adapter/pending "HTTP/1.1 200 OK"
+22:28:30 [arena] HTTP Request: GET http://localhost:8000/api/adapter/pending "HTTP/1.1 200 OK"
+22:28:30 [arena] HTTP Request: GET http://localhost:8000/api/adapter/pending "HTTP/1.1 200 OK"
+22:28:31 [arena] HTTP Request: GET http://localhost:8000/api/adapter/pending "HTTP/1.1 200 OK"
+22:28:31 [arena] HTTP Request: GET http://localhost:8000/api/adapter/pending "HTTP/1.1 200 OK"
+22:28:32 [arena] HTTP Request: GET http://localhost:8000/api/adapter/pending "HTTP/1.1 200 OK"
+22:28:32 [arena] HTTP Request: GET http://localhost:8000/api/adapter/pending "HTTP/1.1 200 OK"
+22:28:33 [arena] Received signal 2, shutting down
+22:28:33 [arena] Arena adapter stopped
