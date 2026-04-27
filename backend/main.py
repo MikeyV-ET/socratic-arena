@@ -109,8 +109,9 @@ app.include_router(replay_router)
 init_replayer()
 
 # Shared collaborative documents
-from shared_docs import router as docs_router, set_broadcast as docs_set_broadcast
+from shared_docs import router as docs_router, files_router, set_broadcast as docs_set_broadcast
 app.include_router(docs_router)
+app.include_router(files_router)
 
 # In-memory state
 def _build_default_state() -> StateSnapshot:

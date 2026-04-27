@@ -66,6 +66,21 @@ interface DocMeta {
   content_type: string;
   created_at: number;
   updated_at: number;
+  file_path?: string;
+}
+
+interface FileEntry {
+  name: string;
+  type: "file" | "dir";
+  path: string;
+  size?: number;
+  ext?: string;
+}
+
+interface BrowseResult {
+  path: string;
+  parent: string | null;
+  entries: FileEntry[];
 }
 
 const basePath = window.location.pathname.replace(/\/+$/, "");
@@ -226,6 +241,10 @@ export function SharedEditorPane() {
   const [viewMode, setViewMode] = useState<"edit" | "preview">("edit");
   const [previewText, setPreviewText] = useState("");
   const [showAuthors, setShowAuthors] = useState(true);
+  const [sidebarTab, setSidebarTab] = useState<"docs" | "files">("docs");
+  const [browseResult, setBrowseResult] = useState<BrowseResult | null>(null);
+  const [browseLoading, setBrowseLoading] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   // Clean up editor + provider when switching or unmounting
   const cleanup = useCallback(() => {
@@ -376,6 +395,61 @@ export function SharedEditorPane() {
     } catch { /* ignore */ }
   };
 
+  // Browse filesystem
+  const browseDir = useCallback(async (dirPath?: string) => {
+    setBrowseLoading(true);
+    try {
+      const url = dirPath
+        ? `${basePath}/api/files/browse?path=${encodeURIComponent(dirPath)}`
+        : `${basePath}/api/files/browse`;
+      const resp = await fetch(url);
+      const data: BrowseResult = await resp.json();
+      setBrowseResult(data);
+    } catch { /* ignore */ }
+    setBrowseLoading(false);
+  }, []);
+
+  // Open a file from disk into the editor
+  const openFile = useCallback(async (filePath: string) => {
+    try {
+      const resp = await fetch(`${basePath}/api/files/open`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: filePath }),
+      });
+      const doc: DocMeta = await resp.json();
+      await refreshDocs();
+      openDoc(doc.id);
+      setSidebarTab("docs");
+    } catch { /* ignore */ }
+  }, [refreshDocs, openDoc]);
+
+  // Save doc back to its source file
+  const saveToFile = useCallback(async () => {
+    if (!activeDocId) return;
+    setSaveStatus("saving");
+    try {
+      const resp = await fetch(`${basePath}/api/docs/${activeDocId}/save-to-file`, {
+        method: "POST",
+      });
+      if (resp.ok) {
+        setSaveStatus("saved");
+        setTimeout(() => setSaveStatus("idle"), 2000);
+      } else {
+        setSaveStatus("error");
+        setTimeout(() => setSaveStatus("idle"), 3000);
+      }
+    } catch {
+      setSaveStatus("error");
+      setTimeout(() => setSaveStatus("idle"), 3000);
+    }
+  }, [activeDocId]);
+
+  // Load initial file browser when switching to files tab
+  useEffect(() => {
+    if (sidebarTab === "files" && !browseResult) browseDir();
+  }, [sidebarTab, browseResult, browseDir]);
+
   // Delete a doc
   const deleteDoc = async (docId: string) => {
     try {
@@ -407,6 +481,22 @@ export function SharedEditorPane() {
         <div className="flex items-center gap-1.5">
           {activeDocId && (
             <>
+              {activeDoc?.file_path && (
+                <button
+                  onClick={saveToFile}
+                  disabled={saveStatus === "saving"}
+                  className={`px-2 py-0.5 text-[10px] rounded transition-colors ${
+                    saveStatus === "saved" ? "bg-green-500/20 text-green-400" :
+                    saveStatus === "error" ? "bg-red-500/20 text-red-400" :
+                    "bg-primary/10 hover:bg-primary/20 text-primary"
+                  }`}
+                  data-testid="save-file-btn"
+                >
+                  {saveStatus === "saving" ? "Saving..." :
+                   saveStatus === "saved" ? "Saved" :
+                   saveStatus === "error" ? "Error" : "Save"}
+                </button>
+              )}
               <div className="flex rounded border border-border overflow-hidden" data-testid="view-mode-toggle">
                 <button
                   onClick={() => setViewMode("edit")}
@@ -467,36 +557,119 @@ export function SharedEditorPane() {
         </div>
       )}
 
-      {/* Doc list sidebar + editor area */}
+      {/* Sidebar + editor area */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Doc list */}
-        <div className="w-40 border-r border-border overflow-y-auto shrink-0">
-          {docs.length === 0 && (
-            <div className="text-xs text-muted-foreground text-center py-4">
-              No documents
+        {/* Tabbed sidebar */}
+        <div className="w-48 border-r border-border flex flex-col shrink-0">
+          {/* Sidebar tabs */}
+          <div className="flex border-b border-border">
+            <button
+              onClick={() => setSidebarTab("docs")}
+              className={`flex-1 px-2 py-1 text-[10px] font-medium transition-colors ${
+                sidebarTab === "docs" ? "text-primary border-b-2 border-primary" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Docs
+            </button>
+            <button
+              onClick={() => setSidebarTab("files")}
+              className={`flex-1 px-2 py-1 text-[10px] font-medium transition-colors ${
+                sidebarTab === "files" ? "text-primary border-b-2 border-primary" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Files
+            </button>
+          </div>
+
+          {/* Docs tab */}
+          {sidebarTab === "docs" && (
+            <div className="flex-1 overflow-y-auto">
+              {docs.length === 0 && (
+                <div className="text-xs text-muted-foreground text-center py-4">
+                  No documents
+                </div>
+              )}
+              {docs.map((doc) => (
+                <div
+                  key={doc.id}
+                  className={`flex items-center gap-1 px-2 py-1.5 text-xs cursor-pointer transition-colors group ${
+                    activeDocId === doc.id
+                      ? "bg-primary/10 text-foreground"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                  }`}
+                  onClick={() => openDoc(doc.id)}
+                  data-testid={`doc-item-${doc.id}`}
+                >
+                  <span className="truncate flex-1">
+                    {doc.file_path ? `${doc.title}` : doc.title}
+                  </span>
+                  {doc.file_path && (
+                    <span className="text-[8px] text-muted-foreground shrink-0" title={doc.file_path}>F</span>
+                  )}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); deleteDoc(doc.id); }}
+                    className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive text-[10px] transition-opacity"
+                    title="Delete"
+                  >
+                    &times;
+                  </button>
+                </div>
+              ))}
             </div>
           )}
-          {docs.map((doc) => (
-            <div
-              key={doc.id}
-              className={`flex items-center gap-1 px-2 py-1.5 text-xs cursor-pointer transition-colors group ${
-                activeDocId === doc.id
-                  ? "bg-primary/10 text-foreground"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-              }`}
-              onClick={() => openDoc(doc.id)}
-              data-testid={`doc-item-${doc.id}`}
-            >
-              <span className="truncate flex-1">{doc.title}</span>
-              <button
-                onClick={(e) => { e.stopPropagation(); deleteDoc(doc.id); }}
-                className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive text-[10px] transition-opacity"
-                title="Delete"
-              >
-                &times;
-              </button>
+
+          {/* Files tab */}
+          {sidebarTab === "files" && (
+            <div className="flex-1 overflow-y-auto">
+              {browseResult && (
+                <>
+                  {/* Current path breadcrumb */}
+                  <div className="px-2 py-1 text-[9px] text-muted-foreground border-b border-border truncate" title={browseResult.path}>
+                    {browseResult.path.split("/").slice(-2).join("/")}
+                  </div>
+                  {/* Go up */}
+                  {browseResult.parent && (
+                    <div
+                      className="flex items-center gap-1 px-2 py-1.5 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                      onClick={() => browseDir(browseResult.parent!)}
+                    >
+                      <span className="text-[10px]">..</span>
+                    </div>
+                  )}
+                  {/* Entries */}
+                  {browseLoading ? (
+                    <div className="text-xs text-muted-foreground text-center py-4">Loading...</div>
+                  ) : (
+                    browseResult.entries.map((entry) => (
+                      <div
+                        key={entry.path}
+                        className="flex items-center gap-1 px-2 py-1.5 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                        onClick={() => entry.type === "dir" ? browseDir(entry.path) : openFile(entry.path)}
+                        title={entry.path}
+                      >
+                        <span className="text-[10px] shrink-0 w-3">
+                          {entry.type === "dir" ? "D" : ""}
+                        </span>
+                        <span className="truncate flex-1">{entry.name}</span>
+                        {entry.size !== undefined && (
+                          <span className="text-[9px] text-muted-foreground shrink-0">
+                            {entry.size < 1024 ? `${entry.size}B` : `${(entry.size / 1024).toFixed(0)}K`}
+                          </span>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </>
+              )}
+              {!browseResult && !browseLoading && (
+                <div className="text-xs text-muted-foreground text-center py-4">
+                  <button onClick={() => browseDir()} className="text-primary hover:underline">
+                    Browse files
+                  </button>
+                </div>
+              )}
             </div>
-          ))}
+          )}
         </div>
 
         {/* Editor / Preview area */}

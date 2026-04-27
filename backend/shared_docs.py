@@ -12,6 +12,7 @@ read/write the same document with conflict-free merging.
 import asyncio
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Callable, Awaitable
@@ -39,6 +40,7 @@ class DocMeta(BaseModel):
     content_type: str = "plaintext"  # plaintext | markdown
     created_at: float
     updated_at: float
+    file_path: str | None = None  # source file path (for open-from-disk)
 
 
 class _LiveDoc:
@@ -253,6 +255,125 @@ async def delete_doc(doc_id: str):
     _persist_index()
     await _notify("doc.deleted", {"id": doc_id})
     return {"status": "ok"}
+
+
+@router.post("/{doc_id}/save-to-file")
+async def save_doc_to_file(doc_id: str):
+    """Save document content back to its source file on disk."""
+    live = _docs.get(doc_id)
+    if not live:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    if not live.meta.file_path:
+        return JSONResponse({"error": "no file_path associated"}, status_code=400)
+    fp = Path(live.meta.file_path)
+    try:
+        fp.write_text(str(live.text))
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    live.meta.updated_at = time.time()
+    _persist_index()
+    return {"status": "ok", "path": str(fp)}
+
+
+# ---------------------------------------------------------------------------
+# File browser endpoints (separate router to avoid /{doc_id} conflict)
+# ---------------------------------------------------------------------------
+
+files_router = APIRouter(prefix="/api/files", tags=["files"])
+
+_FILE_EXTS = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".toml", ".sh", ".csv", ".log"}
+_AGENT_HOME: Path = Path.home() / "agents"
+
+
+def set_agent_home(path: Path):
+    global _AGENT_HOME
+    _AGENT_HOME = path
+
+
+@files_router.get("/browse")
+async def browse_files(path: str | None = None):
+    """List directory contents for the file browser.
+
+    Returns dirs and text files. Defaults to the current agent's home.
+    """
+    if path:
+        target = Path(path).resolve()
+    else:
+        agent = os.environ.get("ARENA_AGENT", "Q")
+        target = (_AGENT_HOME / agent).resolve()
+
+    if not target.is_dir():
+        return JSONResponse({"error": "not a directory"}, status_code=400)
+
+    entries = []
+    try:
+        for item in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+            if item.name.startswith("."):
+                continue
+            if item.is_dir():
+                entries.append({"name": item.name, "type": "dir", "path": str(item)})
+            elif item.suffix.lower() in _FILE_EXTS:
+                try:
+                    size = item.stat().st_size
+                except OSError:
+                    size = 0
+                entries.append({
+                    "name": item.name,
+                    "type": "file",
+                    "path": str(item),
+                    "size": size,
+                    "ext": item.suffix,
+                })
+    except PermissionError:
+        return JSONResponse({"error": "permission denied"}, status_code=403)
+
+    parent = str(target.parent) if target != target.parent else None
+    return {"path": str(target), "parent": parent, "entries": entries}
+
+
+@files_router.post("/open")
+async def open_file(body: dict):
+    """Open a file from disk into the shared editor.
+
+    Body: {"path": "/absolute/path/to/file.md"}
+    Creates a Yjs doc seeded with the file content.
+    """
+    file_path = body.get("path")
+    if not file_path:
+        return JSONResponse({"error": "path required"}, status_code=400)
+    fp = Path(file_path)
+    if not fp.is_file():
+        return JSONResponse({"error": "file not found"}, status_code=404)
+
+    # Check if already open
+    for doc in _docs.values():
+        if doc.meta.file_path and Path(doc.meta.file_path).resolve() == fp.resolve():
+            return doc.meta.model_dump()
+
+    try:
+        content = fp.read_text(errors="replace")
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+    ct = "markdown" if fp.suffix.lower() == ".md" else "plaintext"
+    doc_id = new_id()
+    now = time.time()
+    meta = DocMeta(
+        id=doc_id,
+        title=fp.name,
+        content_type=ct,
+        created_at=now,
+        updated_at=now,
+        file_path=str(fp.resolve()),
+    )
+    live = _LiveDoc(meta)
+    if content:
+        live.text += content
+    _docs[doc_id] = live
+    _persist_index()
+    _persist_doc(live)
+    await _notify("doc.created", meta.model_dump())
+    return meta.model_dump()
 
 
 # ---------------------------------------------------------------------------
