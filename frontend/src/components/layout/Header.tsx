@@ -16,6 +16,13 @@ export function Header() {
   const connected = useArenaStore((s) => s.connected);
   const theme = useArenaStore((s) => s.theme);
   const toggleTheme = useArenaStore((s) => s.toggleTheme);
+  const fontSize = useArenaStore((s) => s.fontSize);
+  const setFontSize = useArenaStore((s) => s.setFontSize);
+
+  // Initialize CSS variable on mount
+  useEffect(() => {
+    document.documentElement.style.setProperty("--sa-font-size", `${fontSize}px`);
+  }, []);
   const currentAgent = useArenaStore((s) => s.currentAgent);
   const setCurrentAgent = useArenaStore((s) => s.setCurrentAgent);
   const agents = useArenaStore((s) => s.agents);
@@ -134,6 +141,27 @@ export function Header() {
             </option>
           ))}
         </select>
+
+        {/* Font size controls */}
+        <div className="flex items-center gap-0.5 border border-border rounded-md overflow-hidden">
+          <button
+            onClick={() => setFontSize(fontSize - 1)}
+            className="px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            title="Decrease font size"
+          >
+            A-
+          </button>
+          <span className="px-1 py-1 text-[10px] text-muted-foreground font-mono min-w-[24px] text-center">
+            {fontSize}
+          </span>
+          <button
+            onClick={() => setFontSize(fontSize + 1)}
+            className="px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            title="Increase font size"
+          >
+            A+
+          </button>
+        </div>
 
         <button
           onClick={toggleTheme}

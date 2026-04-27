@@ -88,9 +88,11 @@ interface ArenaState {
   setHighlightedMoment: (index: number | null) => void;
   bumpMomentsVersion: () => void;
 
-  // Theme
+  // Theme & display
   theme: "dark" | "light";
   toggleTheme: () => void;
+  fontSize: number;
+  setFontSize: (size: number) => void;
 
   // Agent
   currentAgent: string;
@@ -349,6 +351,14 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
       localStorage.setItem("arena-theme", next);
       document.documentElement.setAttribute("data-theme", next);
       return { theme: next };
+    }),
+  fontSize: parseInt(localStorage.getItem("arena-font-size") || "14", 10),
+  setFontSize: (size: number) =>
+    set(() => {
+      const clamped = Math.max(10, Math.min(24, size));
+      localStorage.setItem("arena-font-size", String(clamped));
+      document.documentElement.style.setProperty("--sa-font-size", `${clamped}px`);
+      return { fontSize: clamped };
     }),
 
   promptDraft: { systemPrompt: "", contextPrompt: "", probe: "", bridgeProbe: "", expectedBehavior: "", failureBehavior: "" },

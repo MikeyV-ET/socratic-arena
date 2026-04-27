@@ -4,7 +4,7 @@ import { Workbench } from "@/components/workbench/Workbench";
 
 export function PanelLayout() {
   return (
-    <Group orientation="horizontal" className="flex-1">
+    <Group orientation="horizontal" className="flex-1 sa-panel-content">
       {/* Left: the collaborator */}
       <Panel id="conversation" defaultSize={40} minSize={25}>
         <ConversationPane />
