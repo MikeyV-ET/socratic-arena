@@ -168,10 +168,6 @@ _arena_node_ids: set[str] = set()
 # When an arena turn is in progress, this holds the assistant placeholder node ID.
 # LiveTailer redirects agent_message_chunk streaming to this node instead of creating duplicates.
 _pending_arena_node_id: str | None = None
-# Maps live-tailed node IDs to their arena redirect target during streaming.
-_arena_stream_redirect: dict[str, str] = {}
-# Tracks how many chars have been streamed to the arena node (for delta calculation).
-_arena_stream_sent: int = 0
 
 user_viewport: dict = {
     "conversationNode": "", "workbenchTab": "history", "source": "",
@@ -320,32 +316,14 @@ async def _live_tail_loop():
                     parent_id = entry.get("parent_id")
                     node_id = node_data["id"]
 
-                    # When an arena turn is in progress and the live-tailer
-                    # sees a new assistant node, redirect its content as a
-                    # streaming chunk to the arena placeholder instead of
-                    # creating a duplicate node.
+                    # When an arena turn is in progress, skip assistant nodes
+                    # entirely — the arena adapter handles delivery via
+                    # /api/adapter/response. This eliminates the dual-tailer
+                    # race condition.
                     if (_pending_arena_node_id
                             and node_data.get("role") == "assistant"
                             and node_id not in _arena_node_ids):
-                        global _arena_stream_sent
-                        content = node_data.get("content", "")
-                        if content:
-                            arena_node = state.tree.nodes.get(_pending_arena_node_id)
-                            if arena_node:
-                                arena_node.content = (arena_node.content or "") + content
-                            await broadcast({
-                                "type": "conversation.chunk",
-                                "payload": {
-                                    "nodeId": _pending_arena_node_id,
-                                    "content": content,
-                                },
-                            })
-                            _arena_stream_sent = len(content)
-                        else:
-                            _arena_stream_sent = 0
-                        # Track this live-tailed ID so subsequent updates
-                        # can also be redirected.
-                        _arena_stream_redirect[node_id] = _pending_arena_node_id
+                        log.debug("LiveTailer: skipping assistant node %s (arena turn in progress)", node_id)
                         continue
 
                     # Skip nodes that already exist (prevents parent-cycle
@@ -385,24 +363,6 @@ async def _live_tail_loop():
                 elif action == "update":
                     node_id = entry["node_id"]
 
-                    # Redirect streaming updates for redirected nodes.
-                    # LiveTailer sends full accumulated content; extract delta.
-                    arena_target = _arena_stream_redirect.get(node_id)
-                    if arena_target and arena_target in state.tree.nodes:
-                        full_content = entry.get("content", "")
-                        delta = full_content[_arena_stream_sent:]
-                        if delta:
-                            state.tree.nodes[arena_target].content = full_content
-                            _arena_stream_sent = len(full_content)
-                            await broadcast({
-                                "type": "conversation.chunk",
-                                "payload": {
-                                    "nodeId": arena_target,
-                                    "content": delta,
-                                },
-                            })
-                        continue
-
                     if node_id in state.tree.nodes:
                         state.tree.nodes[node_id].content = entry["content"]
                         if entry.get("thinking"):
@@ -420,12 +380,6 @@ async def _live_tail_loop():
 
                 elif action == "finalize":
                     node_id = entry["node_id"]
-
-                    # Redirected finalize — just clean up, the adapter_response
-                    # will deliver the final content.
-                    if node_id in _arena_stream_redirect:
-                        del _arena_stream_redirect[node_id]
-                        continue
 
                     if node_id in state.tree.nodes:
                         state.tree.nodes[node_id].content = entry["content"]
@@ -1796,12 +1750,9 @@ async def adapter_response(body: dict):
         )
 
     # Clear the pending arena node — final response arrived
-    global _pending_arena_node_id, _arena_stream_sent
+    global _pending_arena_node_id
     if _pending_arena_node_id == node_id:
         _pending_arena_node_id = None
-        _arena_stream_sent = 0
-        # Clean up any redirect mappings pointing to this node
-        _arena_stream_redirect.clear()
 
     node = state.tree.nodes[node_id]
     node.content = content
