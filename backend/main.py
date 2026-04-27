@@ -138,7 +138,7 @@ def _build_default_state() -> StateSnapshot:
     live_sid = _sid_file.read_text().strip() if _sid_file.exists() else None
     log.info("Loading updates from: %s (live session: %s)", updates_path, live_sid)
 
-    st = build_state_from_updates(str(updates_path), label="Knight-Bio: Desire Detection", live_session_id=live_sid)
+    st = build_state_from_updates(str(updates_path), label="Knight-Bio: Desire Detection", live_session_id=live_sid, tail_only=True)
     if notebook_path.is_file():
         st.notebook = build_notebook(str(notebook_path))
 
@@ -1691,8 +1691,8 @@ def _build_agent_state(agent_name: str) -> StateSnapshot:
     notebook_path = agent_dir / f"lab_notebook_{agent_name.lower()}.md"
 
     if updates_path:
-        log.info("Loading updates for %s from: %s", agent_name, updates_path)
-        st = build_state_from_updates(str(updates_path), label=agent_name)
+        log.info("Loading updates for %s from: %s (tail-only)", agent_name, updates_path)
+        st = build_state_from_updates(str(updates_path), label=agent_name, tail_only=True)
     else:
         log.info("No session data for %s, creating empty state", agent_name)
         st = StateSnapshot(

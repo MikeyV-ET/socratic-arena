@@ -186,9 +186,122 @@ def build_tree_from_updates(entries: list[dict], label: str = "Session", live_se
     )
 
 
-def build_state_from_updates(filepath: str, label: str = "Session", live_session_id: str | None = None, agent_label: str | None = None) -> StateSnapshot:
-    """Full pipeline: updates.jsonl -> StateSnapshot."""
-    entries = parse_updates(filepath, live_session_id=live_session_id, agent_label=agent_label or label)
+def parse_updates_tail(filepath: str, tail_bytes: int = 102400, agent_label: str | None = None) -> list[dict]:
+    """Parse only the last tail_bytes of an updates.jsonl file.
+
+    Reads the tail of the file, discards the first (possibly partial) line,
+    and parses the rest. Default 100KB ≈ 5-6 events ≈ 2-3 conversation turns.
+    """
+    import os
+    file_size = os.path.getsize(filepath)
+    offset = max(0, file_size - tail_bytes)
+
+    raw_events = []
+    with open(filepath) as f:
+        if offset > 0:
+            f.seek(offset)
+            f.readline()  # discard partial first line
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                raw_events.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+
+    # Reuse the same grouping logic as parse_updates
+    entries = []
+    current_agent = None
+    current_thinking = None
+
+    for event in raw_events:
+        params = event.get("params", {})
+        update = params.get("update", {})
+        su = update.get("sessionUpdate", "")
+        ts = event.get("timestamp", 0)
+        meta = params.get("_meta", {})
+        event_id = meta.get("eventId", "")
+
+        if su == "user_message_chunk":
+            if current_agent:
+                entries.append(current_agent)
+                current_agent = None
+            current_thinking = None
+
+            text = update.get("content", {}).get("text", "")
+            if not text.strip():
+                continue
+
+            entries.append({
+                "id": event_id or new_id(),
+                "role": "user",
+                "content": text,
+                "thinking": None,
+                "timestamp": ts * 1000,
+                "tools": [],
+                "model": None,
+            })
+
+        elif su == "agent_thought_chunk":
+            thinking_text = update.get("content", {}).get("text", "")
+            if thinking_text.strip():
+                if current_thinking is None:
+                    current_thinking = thinking_text
+                else:
+                    current_thinking += thinking_text
+
+        elif su == "agent_message_chunk":
+            text = update.get("content", {}).get("text", "")
+            model = meta.get("modelId", "")
+
+            if current_agent and current_agent.get("_turn_ts") == ts:
+                current_agent["content"] += text
+            else:
+                if current_agent:
+                    entries.append(current_agent)
+                current_agent = {
+                    "id": event_id or new_id(),
+                    "role": "assistant",
+                    "content": text,
+                    "thinking": current_thinking,
+                    "timestamp": ts * 1000,
+                    "tools": [],
+                    "model": model,
+                    "agent_label": agent_label,
+                    "_turn_ts": ts,
+                }
+                current_thinking = None
+
+        elif su == "tool_call":
+            tool_id = update.get("toolCallId", "")
+            title = update.get("title", "")
+            if current_agent:
+                current_agent["tools"].append({"id": tool_id, "name": title})
+
+        elif su == "compaction_checkpoint":
+            if current_agent:
+                entries.append(current_agent)
+                current_agent = None
+
+    if current_agent:
+        entries.append(current_agent)
+
+    for e in entries:
+        e.pop("_turn_ts", None)
+
+    return entries
+
+
+def build_state_from_updates(filepath: str, label: str = "Session", live_session_id: str | None = None, agent_label: str | None = None, tail_only: bool = False, tail_bytes: int = 102400) -> StateSnapshot:
+    """Full pipeline: updates.jsonl -> StateSnapshot.
+
+    If tail_only=True, only reads the last tail_bytes of the file (fast startup).
+    """
+    if tail_only:
+        entries = parse_updates_tail(filepath, tail_bytes=tail_bytes, agent_label=agent_label or label)
+    else:
+        entries = parse_updates(filepath, live_session_id=live_session_id, agent_label=agent_label or label)
     tree = build_tree_from_updates(entries, label=label)
     return StateSnapshot(
         tree=tree,
