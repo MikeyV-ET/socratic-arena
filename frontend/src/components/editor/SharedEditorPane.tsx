@@ -608,7 +608,7 @@ export function SharedEditorPane() {
                   )}
                   <button
                     onClick={(e) => { e.stopPropagation(); deleteDoc(doc.id); }}
-                    className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive text-[10px] transition-opacity"
+                    className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive text-sm leading-none px-0.5 transition-opacity"
                     title="Delete"
                   >
                     &times;

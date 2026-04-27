@@ -34,7 +34,7 @@ function ActivityIndicator({ readOnly }: { readOnly: boolean }) {
           <span className="w-1.5 h-1.5 rounded-full bg-success/60 animate-bounce" style={{ animationDelay: "150ms" }} />
           <span className="w-1.5 h-1.5 rounded-full bg-success/60 animate-bounce" style={{ animationDelay: "300ms" }} />
         </span>
-        <button onClick={dismiss} className="ml-auto text-[10px] text-muted-foreground hover:text-foreground transition-colors" title="Dismiss">
+        <button onClick={dismiss} className="ml-auto text-sm text-muted-foreground hover:text-foreground px-1 transition-colors" title="Dismiss">
           &times;
         </button>
       </div>

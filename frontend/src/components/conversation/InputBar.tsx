@@ -89,7 +89,7 @@ export function InputBar() {
           {files.map((f, i) => (
             <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-muted text-xs text-muted-foreground border border-border">
               <span className="max-w-[120px] truncate">{f.name}</span>
-              <button type="button" onClick={() => removeFile(i)} className="text-muted-foreground hover:text-foreground">&times;</button>
+              <button type="button" onClick={() => removeFile(i)} className="text-sm text-muted-foreground hover:text-destructive px-0.5">&times;</button>
             </span>
           ))}
         </div>
