@@ -169,6 +169,34 @@ _arena_node_ids: set[str] = set()
 # LiveTailer redirects agent_message_chunk streaming to this node instead of creating duplicates.
 _pending_arena_node_id: str | None = None
 
+# Arena chat persistence — sidecar file for arena-created nodes
+ARENA_CHAT_FILE = Path(__file__).resolve().parent / "data" / "arena_chat.jsonl"
+
+
+def _persist_arena_node(node_data: dict):
+    """Append a node to the arena chat sidecar file."""
+    ARENA_CHAT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(ARENA_CHAT_FILE, "a") as f:
+        f.write(json.dumps(node_data) + "\n")
+
+
+def _load_arena_chat() -> list[dict]:
+    """Load persisted arena nodes from sidecar file."""
+    if not ARENA_CHAT_FILE.exists():
+        return []
+    nodes = []
+    with open(ARENA_CHAT_FILE) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                nodes.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return nodes
+
+
 user_viewport: dict = {
     "conversationNode": "", "workbenchTab": "history", "source": "",
     "workbenchFocus": {},  # {tab, contentId, contentType, summary}
@@ -603,6 +631,9 @@ async def handle_conversation_send(ws: WebSocket, payload: dict):
     _arena_node_ids.add(assistant_node.id)
     user_node.children.append(assistant_node.id)
     state.tree.active_node_id = assistant_node.id
+
+    # Persist user node to sidecar file
+    _persist_arena_node(user_node.model_dump())
 
     # Broadcast new nodes incrementally (NOT full state.snapshot, which
     # gets trimmed and can drop arena nodes when live tailer moves activeNodeId)
@@ -1503,6 +1534,24 @@ async def load_persisted_data():
     _load_prompts()
     _load_deleted_moments()
     _load_user_moments()
+
+    # Load persisted arena chat nodes into the state tree
+    arena_nodes = _load_arena_chat()
+    if arena_nodes:
+        prev_id = state.tree.active_node_id
+        for nd in arena_nodes:
+            node = ConversationNode.model_validate(nd)
+            if node.id not in state.tree.nodes:
+                state.tree.nodes[node.id] = node
+                _arena_node_ids.add(node.id)
+                if prev_id and prev_id in state.tree.nodes:
+                    parent = state.tree.nodes[prev_id]
+                    if node.id not in parent.children:
+                        parent.children.append(node.id)
+                prev_id = node.id
+        if prev_id:
+            state.tree.active_node_id = prev_id
+        log.info("Loaded %d arena chat nodes from sidecar", len(arena_nodes))
     # If ARENA_AGENT is set to something other than knight-bio, switch on startup
     if _current_agent != "knight-bio":
         state = _build_agent_state(_current_agent)
@@ -1758,6 +1807,9 @@ async def adapter_response(body: dict):
     node.content = content
     if thinking:
         node.thinking = thinking
+
+    # Persist completed assistant node to sidecar file
+    _persist_arena_node(node.model_dump())
 
     # Send lightweight node update instead of full 2MB+ state snapshot
     await broadcast({
