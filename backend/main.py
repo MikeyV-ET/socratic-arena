@@ -1790,6 +1790,10 @@ async def adapter_pending():
 @app.post("/api/adapter/response")
 async def adapter_response(body: dict):
     """Receive agent response from asdaaas adapter and populate the assistant node."""
+    agent = body.get("agent", "")
+    if agent and agent != _current_agent:
+        return {"status": "ignored", "message": f"response from {agent} ignored (current agent is {_current_agent})"}
+
     node_id = body.get("nodeId", "")
     content = body.get("content", "")
     thinking = body.get("thinking")
@@ -1834,6 +1838,10 @@ async def adapter_response(body: dict):
 @app.post("/api/adapter/chunk")
 async def adapter_chunk(body: dict):
     """Receive streaming chunk from asdaaas adapter."""
+    agent = body.get("agent", "")
+    if agent and agent != _current_agent:
+        return {"status": "ignored"}
+
     node_id = body.get("nodeId", "")
     content = body.get("content", "")
     chunk_type = body.get("type", "text")

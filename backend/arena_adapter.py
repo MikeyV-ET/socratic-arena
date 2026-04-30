@@ -393,6 +393,7 @@ class ArenaAdapter:
                     tailer.mark_delivered()
 
             for resp in responses:
+                resp["_agent"] = agent
                 self._last_agent_activity = now
                 self._deliver_response(resp)
 
@@ -414,6 +415,7 @@ class ArenaAdapter:
                     "nodeId": node_id,
                     "content": text,
                     "thinking": resp.get("thinking"),
+                    "agent": resp.get("_agent", self.default_agent),
                 },
                 timeout=10,
             )
