@@ -48,7 +48,7 @@ def _detect_file_manager() -> str:
 APP_PRESETS: dict[str, dict] = {
     "chrome": {
         "label": "Chrome Browser",
-        "cmd": "google-chrome --app={url} --no-first-run --disable-default-apps --user-data-dir=/tmp/xpra-chrome-{display} --start-maximized --window-position=0,0",
+        "cmd": "google-chrome {url} --no-first-run --disable-default-apps --user-data-dir=/tmp/xpra-chrome-{display} --window-size=1024,768 --window-position=0,0",
         "default_url": "https://www.google.com",
     },
     "terminal": {
@@ -159,7 +159,7 @@ class PanelManager:
             "--encodings=png,rgb,jpeg",
             "--video-encoders=none",
             "--pulseaudio=no",
-            "--resize-display=yes",
+            "--resize-display=1024x768",
             f"--start-child={app_cmd}",
             "--exit-with-children=no",
         ]
