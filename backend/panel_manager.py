@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -48,7 +49,7 @@ def _detect_file_manager() -> str:
 APP_PRESETS: dict[str, dict] = {
     "chrome": {
         "label": "Chrome Browser",
-        "cmd": "google-chrome {url} --no-first-run --disable-default-apps --user-data-dir=/tmp/xpra-chrome-{display} --window-size=1024,768 --window-position=0,0",
+        "cmd": "google-chrome {url} --no-first-run --disable-default-apps --user-data-dir=/tmp/xpra-chrome-{display} --start-maximized",
         "default_url": "https://www.google.com",
     },
     "terminal": {
@@ -159,7 +160,7 @@ class PanelManager:
             "--encodings=png,rgb,jpeg",
             "--video-encoders=none",
             "--pulseaudio=no",
-            "--resize-display=1024x768",
+            "--resize-display=yes",
             f"--start-child={app_cmd}",
             "--exit-with-children=no",
         ]
@@ -182,8 +183,8 @@ class PanelManager:
             stderr = await proc.stderr.read()
             raise RuntimeError(f"Xpra failed to start: {stderr.decode()}")
 
-        # Resize app windows to fill the Xpra display (some apps start tiny)
-        if app_type != "chrome":  # Chrome handles its own --window-size
+        # Maximize app windows to fill the Xpra display (some apps start tiny)
+        if app_type != "chrome":  # Chrome handles its own --start-maximized
             asyncio.create_task(self._resize_windows(display))
 
         # Proxied URL: frontend iframe stays same-origin via /api/panel/{id}/proxy
@@ -209,12 +210,25 @@ class PanelManager:
 
     @staticmethod
     async def _resize_windows(display: int):
-        """Wait for app windows to appear, then resize them to fill the display."""
+        """Wait for app windows to appear, then maximize them to fill the display."""
         env = {**os.environ, "DISPLAY": f":{display}"}
         for attempt in range(5):
             await asyncio.sleep(2)
             try:
-                # Find all visible windows and resize each to 1024x768 at origin
+                # Get actual display dimensions (dynamic with --resize-display=yes)
+                xdp = await asyncio.create_subprocess_exec(
+                    "xdpyinfo", stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE, env=env,
+                )
+                xdp_out, _ = await xdp.communicate()
+                dw, dh = 1024, 768  # fallback
+                for line in xdp_out.decode().splitlines():
+                    if "dimensions:" in line:
+                        m = re.search(r"(\d+)x(\d+)\s+pixels", line)
+                        if m:
+                            dw, dh = int(m.group(1)), int(m.group(2))
+                        break
+
                 result = await asyncio.create_subprocess_exec(
                     "xdotool", "search", "--onlyvisible", "--name", "",
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -226,14 +240,14 @@ class PanelManager:
                     continue
                 for wid in wids:
                     await asyncio.create_subprocess_exec(
-                        "xdotool", "windowsize", wid, "1024", "768",
+                        "xdotool", "windowsize", wid, str(dw), str(dh),
                         env=env,
                     )
                     await asyncio.create_subprocess_exec(
                         "xdotool", "windowmove", wid, "0", "0",
                         env=env,
                     )
-                log.info("Resized %d windows on display :%d", len(wids), display)
+                log.info("Resized %d windows to %dx%d on display :%d", len(wids), dw, dh, display)
                 return
             except Exception as e:
                 log.warning("Window resize attempt %d failed: %s", attempt + 1, e)
