@@ -79,7 +79,38 @@ Two things in one:
 
 ---
 
-## All Features Complete
+## All Roadmap Features Complete
+
+---
+
+## Post-Roadmap Features
+
+### 15. Shared Collaborative Editor
+**What the user sees:** Editor tab in workbench. Create documents, edit collaboratively with the agent in real-time. WYSIWYG markdown rendering, author coloring (blue=agent, green=mentor), agent-initiated line highlighting.
+**Backend:** shared_docs.py (Yjs/pycrdt, REST API for CRUD, WebSocket sync).
+**Commits:** 9472a0d, bfe50f2, b8095ab, 42b01e8, 6304c06.
+**Tested:** 11 API tests, 3 Selenium tests, 3 mirror tests, 3 bidirectional tests.
+
+### 16. File Browser
+**What the user sees:** Files tab in editor sidebar. Browse filesystem starting at agent home directory, navigate up with "..". Click file to open in editor. Save button writes back to disk.
+**Backend:** files_router in shared_docs.py (`/api/files/browse`, `/api/files/open`, save-to-file).
+**Commit:** c8380b1.
+
+### 17. Stability Fixes
+**What the user sees:** Fast startup, no duplicate messages, chat survives restart.
+- Tail-only startup: 100KB tail read instead of 843MB full parse (c58009d)
+- LiveTailer arena filtering: skips arena turns to prevent dual delivery (6360c08)
+- Arena chat persistence: arena_chat.jsonl sidecar survives backend restart (528525a)
+
+### 18. Font Size Controls
+**What the user sees:** A-/A+ buttons in header. Range 10-24px. Persisted in localStorage. All panels including CodeMirror editor inherit the size.
+**Commit:** 1d541cb.
+
+### 19. UI Polish
+- Close button sizing: all x/delete buttons enlarged with better click targets (bc5b295)
+- Chrome default URL set to SA frontend (0a5c127)
+- Virtual keyboard disabled in Xpra (0a5c127)
+- Agent switch clears arena state properly (7ce04f9)
 
 ---
 
@@ -163,4 +194,5 @@ Current test counts:
 - 6 episode runner tests (item 12)
 - 7 training data export tests (item 13)
 - 4 dockable tabs tests (item 14)
+- 20 shared editor tests (11 API, 3 Selenium, 3 mirror, 3 bidirectional)
 - Various other test files (checkpoint replayer, navigation)

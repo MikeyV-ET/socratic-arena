@@ -99,7 +99,7 @@ At a compaction boundary:
 - grok binary stores a **checkpoint file** with full prompt state
 - Agent resumes with summary as history
 
-Compaction boundaries are the natural fork points for parallel sessions.
+Compaction boundaries are the natural isolation points. Each session between two boundaries is a self-contained episode.
 
 ### Compaction Checkpoints
 
@@ -127,19 +127,19 @@ A point in a session where the agent made a decision the mentor would correct. I
 - **By pattern**: Scanning transcripts for known anti-patterns
 - **By correction**: When mentor corrects, the preceding choice is the moment
 
-Moments are NOT fork points. The fork happens at the **compaction boundary preceding the moment**. The moment is what you test for; the boundary is where you start.
+Moments live within episodes (sessions between compaction boundaries). To test whether a principle change would have caught the moment, isolate the episode by its preceding compaction boundary and replay from there.
 
 ### Parallel Sessions
 
 To test a principle change (e.g., adding "reproduce at the level the user experiences the problem" to AGENTS.md):
 
-1. Take the compaction checkpoint preceding the moment
+1. Isolate the episode containing the moment (bounded by compaction checkpoints)
 2. Patch the system prompt with modified AGENTS.md
 3. Start N independent sessions from the patched checkpoint
 4. Feed the same user messages that led to the moment
 5. Score: did the agent handle the moment differently?
 
-No shared state, no branching tree. Just N samples from the same starting point with different instructions.
+No shared state. Just N samples from the same starting point with different instructions.
 
 ### The RLAIHIS Training Loop
 
@@ -151,8 +151,8 @@ No shared state, no branching tree. Just N samples from the same starting point 
               Example: agent implements a fix before building a test,
               despite the mentor asking for test-first workflow.
 
-3. FORK       Go back to the compaction boundary preceding the moment.
-              The checkpoint file is the seed.
+3. ISOLATE    Identify the compaction boundary preceding the moment.
+              The checkpoint file is the episode seed.
               Modify the agent's instructions (e.g., add a principle to AGENTS.md).
 
 4. REPLAY     Spawn N parallel sessions from the modified checkpoint.
@@ -394,11 +394,13 @@ makes the interactions improvable; the workspace is what makes them possible.
 
 ## Development Status
 
-### Built (all 14 roadmap items complete)
+### Built (14 roadmap items + post-roadmap features)
+
+**Roadmap items (1-14):**
 - Live workspace (conversation, notebook, history panes)
-- Real-time session streaming (LiveTailer)
+- Real-time session streaming (LiveTailer with arena filtering)
 - Two-way communication (user <-> agent via arena adapter)
-- Multi-agent support (discovery, switching, per-pane selection)
+- Multi-agent support (discovery, switching, per-pane selection, arena state clearing)
 - Workspace navigation (scroll to any node)
 - Prompt testing (N completions, variance measurement)
 - Moment flagging and correction authoring
@@ -411,10 +413,21 @@ makes the interactions improvable; the workspace is what makes them possible.
 - Dockable/closeable tabs (close, reopen from menu, drag to reorder, localStorage persistence)
 - Streaming unification (LiveTailer chunks redirect to arena placeholder nodes)
 - Workbench split view (horizontal or vertical)
-- Response rendering fix (activeNodeId drift resolved -- live tailer no longer overrides arena activeNodeId)
+
+**Post-roadmap features:**
+- Shared collaborative editor (Yjs/pycrdt, real-time, WYSIWYG markdown, author coloring, line highlighting)
+- File browser (browse filesystem, open files into editor, save back to disk)
+- Arena chat persistence (arena_chat.jsonl sidecar, survives backend restart)
+- Tail-only startup (100KB tail read instead of full updates.jsonl parse)
+- Font size controls (A-/A+ in header, CSS variable, localStorage persistence)
 - Panel refresh survival (frontend fetches /api/panel/list on WebSocket connect)
 - Xpra reverse proxy (HTTP+WS, same-origin, retry logic for startup race)
 - Agent-side Selenium (agent_panel.py CDP toolkit)
+
+**Historical (hackathon-era, not used in live operation):**
+- agent_stdio.py (direct grok subprocess management -- replaced by arena adapter)
+- Session segment loading (42 segments from sixel-bio -- demo data)
+- mock_data.py, demo_dataset.py (fallback/demo data generators)
 
 ### Not yet built
 - Checkpoint seeding mechanism (feeding checkpoint to `grok agent stdio` for parallel sessions)

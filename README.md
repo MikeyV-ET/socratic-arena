@@ -83,6 +83,7 @@ socratic-arena/
     models.py            # Pydantic models (CamelCase serialization)
     updates_parser.py    # Parses grok session updates.jsonl into tree
     notebook_parser.py   # Parses markdown lab notebooks
+    shared_docs.py       # Shared collaborative editor (Yjs/pycrdt, file browser, REST API)
     session_parser.py    # Parses legacy session formats
     compaction_parser.py # Extracts compaction boundaries from session data
     checkpoint_replayer.py # Replays from compaction checkpoints
@@ -91,7 +92,7 @@ socratic-arena/
     moment_scanner.py    # Scans sessions for candidate Socratic moments
     artifact_renderer.py # Renders markdown slides to HTML
     replay_router.py     # Routes replayed messages
-    agent_stdio.py       # AsyncIO wrapper for grok agent stdio subprocess
+    agent_stdio.py       # AsyncIO wrapper for grok agent stdio (historical, not used in live operation)
     demo_panel_agent.py  # Demo: agent controls a panel via Selenium
     launch_arena.sh      # Launches all components (backend + frontend + adapter, detached)
     requirements.txt     # Python dependencies
@@ -103,6 +104,7 @@ socratic-arena/
       types/index.ts       # TypeScript interfaces
       components/
         conversation/      # ConversationPane, Message, InputBar, CorrectionButton, FlagButton, ForkButton
+        editor/            # SharedEditorPane (collaborative editor, file browser, WYSIWYG, author colors)
         notebook/          # NotebookPane (lab notebook viewer)
         prompt/            # PromptTestPane, PromptDevPane
         workbench/         # Workbench (tabbed right panel), MomentsPane, CorrectionsPane,
@@ -120,24 +122,27 @@ socratic-arena/
     test_livetailer_interference.py
     test_ws_sequence.py
   DESIGN.md              # System design document
+  DESIGN_shared_editor.md # Shared collaborative editor design
   ROADMAP.md             # Feature roadmap and test plan
-  SYSTEM.md              # Historical hackathon-era system doc
+  SYSTEM_HACKATHON.md    # Archived hackathon-era system doc
   launch.sh              # Legacy launcher
-  _backup_mvp/           # Archived Phase 1/2 code (fork engine, etc.)
+  _backup_mvp/           # Archived Phase 1/2 code
 ```
 
 ## Key Concepts
 
-- **Conversation Tree**: Messages form a tree (not a list). Branches allow exploring alternative paths from any point.
-- **Moments**: Points in the conversation where the agent made a choice that could have gone differently. Can be auto-detected or manually flagged. These are the test cases for both GRPO training and AGENTS.md iteration.
-- **Compaction Boundaries**: The only points where agent state is cleanly captured and reproducible. Agent state mid-session is the entire context window (not portable). At a compaction boundary, state collapses to a compact text artifact (the compaction summary). These are the fork points for parallel sessions.
-- **Parallel Sessions**: Instead of "forking" (wrong metaphor -- there's no persistent state to fork), you start N independent sessions from the same compaction checkpoint with modified instructions. Each session is a sample of what the agent would do differently.
+- **Episodes**: The session between two compaction boundaries. Each episode is a self-contained unit of agent-mentor interaction. This is the natural unit for capture, replay, and training.
+- **Moments**: Points within an episode where the agent made a choice that could have gone differently. Can be auto-detected or manually flagged. These are the test cases for both GRPO training and AGENTS.md iteration.
+- **Compaction Boundaries**: The only points where agent state is cleanly captured and reproducible. Agent state mid-session is the entire context window (not portable). At a compaction boundary, state collapses to a compact text artifact (the compaction summary). These are the isolation points for episodes.
+- **Parallel Sessions**: Start N independent sessions from the same compaction checkpoint with modified instructions. Each session is a sample of what the agent would do differently.
 - **Compaction Checkpoints**: The grok binary stores checkpoints at each compaction boundary (`~/.grok/sessions/.../compaction_checkpoints/`). Each checkpoint contains the full conversation state (system prompt, compacted history, user info, file paths) -- everything needed to seed a parallel session.
 - **Corrections**: Structured annotations on conversation nodes. Three fields: what was missing, what should have happened, correction text. These become training signal.
 - **Hosted Panels**: Desktop applications (Chrome, terminal, file manager) hosted via Xpra and embedded as iframes. Human sees pixels via Xpra HTML5 client; agent controls via Selenium/CDP. Same application, different interfaces.
 - **Training Data Export**: GRPO-format JSONL export combining corrections (reward=0) and episode scores (normalized 0-1).
-- **Live Tailer**: Streams the agent's real-time session activity into the arena tree.
+- **Shared Editor**: Real-time collaborative document editor (Yjs/pycrdt). Supports WYSIWYG markdown, author coloring, agent-initiated line highlighting. Can open files from disk and save back.
+- **Live Tailer**: Streams the agent's real-time session activity into the arena. Filters arena turns to prevent dual delivery.
 - **Arena Adapter**: Bridges arena UI messages to asdaaas agents via the standard inbox/outbox filesystem protocol.
+- **Arena Chat Persistence**: Conversation nodes stored in `arena_chat.jsonl` sidecar file, surviving backend restarts.
 
 ## REST API
 
@@ -228,6 +233,23 @@ socratic-arena/
 | POST | `/api/session/load` | Load from JSONL with filters |
 | POST | `/api/session/load-updates` | Load from updates.jsonl |
 
+### Shared Editor
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/docs` | List all open documents |
+| POST | `/api/docs` | Create a new document |
+| GET | `/api/docs/{id}` | Get document metadata |
+| DELETE | `/api/docs/{id}` | Delete a document |
+| POST | `/api/docs/{id}/highlight` | Add agent-initiated line highlight |
+| DELETE | `/api/docs/{id}/highlight` | Remove highlight |
+| POST | `/api/docs/{id}/save-to-file` | Save document back to source file on disk |
+
+### File Browser
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/files/browse` | Browse filesystem directory (defaults to agent home) |
+| POST | `/api/files/open` | Open a file from disk into a new editor document |
+
 ## WebSocket Protocol (/ws)
 
 | Type | Direction | Purpose |
@@ -246,6 +268,11 @@ socratic-arena/
 | `prompt_test.run` | C->S | Start test |
 | `prompt_test.result` | S->C | Individual result |
 | `prompt_test.complete` | S->C | All tests done |
+| `doc.created` | S->C | New shared document created |
+| `doc.deleted` | S->C | Shared document deleted |
+| `doc.updated` | S->C | Document metadata updated |
+| `highlight.set` | S->C | Agent highlight applied to editor line |
+| `highlight.clear` | S->C | Agent highlight removed |
 
 ## Parallel Sessions -- The Training Loop
 
@@ -259,8 +286,8 @@ The core training loop for RLAIHIS (Reinforcement Learning from AI-Human Interac
    Example: agent implements a fix before building a test,
    despite the mentor asking for test-first workflow.
 
-3. FORK -- Go back to the compaction boundary that preceded the moment.
-   The checkpoint file is the seed. Modify the agent's instructions
+3. ISOLATE -- Identify the compaction boundary preceding the moment.
+   The checkpoint file is the episode seed. Modify the agent's instructions
    (e.g., add a principle to AGENTS.md).
 
 4. REPLAY -- Spawn N parallel sessions from the modified checkpoint.

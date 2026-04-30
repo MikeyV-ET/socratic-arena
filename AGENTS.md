@@ -59,4 +59,4 @@ Key components:
 
 This project originated at a hackathon (2026-04-12) where agents named Bishop (frontend) and Rook (backend) built the initial version. Those agents no longer exist. The codebase was ported to the MikeyV infrastructure and extended by Q through sessions 50-58+.
 
-SYSTEM.md preserves the original hackathon-era documentation for reference.
+SYSTEM_HACKATHON.md preserves the original hackathon-era documentation for reference.
