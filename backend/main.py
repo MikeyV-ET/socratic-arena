@@ -1732,6 +1732,8 @@ async def switch_agent(body: dict):
         return {"status": "error", "message": f"agent {agent_name} not found"}
 
     log.info("Switching arena to agent: %s", agent_name)
+    _arena_node_ids.clear()
+    _arena_turn_active = False
     state = _build_agent_state(agent_name)
     _current_agent = agent_name
 
