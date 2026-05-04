@@ -181,8 +181,14 @@ def _persist_arena_node(node_data: dict):
         f.write(json.dumps(node_data) + "\n")
 
 
+ARENA_CHAT_MAX_NODES = 200  # Cap loaded arena nodes to prevent frontend freeze
+
 def _load_arena_chat() -> list[dict]:
-    """Load persisted arena nodes from sidecar file."""
+    """Load persisted arena nodes from sidecar file.
+
+    Only the last ARENA_CHAT_MAX_NODES entries are returned to prevent
+    large payloads from freezing the frontend renderer on initial load.
+    """
     if not ARENA_CHAT_FILE.exists():
         return []
     nodes = []
@@ -195,6 +201,8 @@ def _load_arena_chat() -> list[dict]:
                 nodes.append(json.loads(line))
             except json.JSONDecodeError:
                 continue
+    if len(nodes) > ARENA_CHAT_MAX_NODES:
+        nodes = nodes[-ARENA_CHAT_MAX_NODES:]
     return nodes
 
 
