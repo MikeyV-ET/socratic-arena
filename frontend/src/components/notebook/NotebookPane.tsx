@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useArenaStore } from "@/stores/arenaStore";
@@ -27,31 +28,44 @@ export function NotebookPane() {
   const setNotebookAgent = useArenaStore((s) => s.setNotebookAgent);
   const setNotebook = useArenaStore((s) => s.setNotebook);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const activeEntryRef = useRef<HTMLDivElement>(null);
-  const entryRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const entries = notebook.entries.filter(
     (e) => !e.branchId || e.branchId === activeBranchId || e.branchId === "main"
   );
 
-  // Auto-scroll notebook to active entry when selection changes
-  useEffect(() => {
-    if (activeEntryRef.current && scrollRef.current) {
-      activeEntryRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }
-  }, [selectedNodeId]);
+  const virtualizer = useVirtualizer({
+    count: entries.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 150,
+    overscan: 3,
+  });
 
   // Scroll to specific notebook entry (from workspace.navigate or moment navigation)
   useEffect(() => {
     if (!notebookScrollTargetId) return;
-    const el = entryRefs.current[notebookScrollTargetId];
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    const index = entries.findIndex((e) => e.id === notebookScrollTargetId);
+    if (index !== -1) {
+      virtualizer.scrollToIndex(index, { align: "start" });
+      const entry = entries[index];
       reportWorkbenchFocus("notebook", notebookScrollTargetId, "notebook_entry",
-        entries.find((e) => e.id === notebookScrollTargetId)?.title?.slice(0, 100) ?? "");
+        entry?.title?.slice(0, 100) ?? "");
     }
     clearNotebookScrollTarget();
-  }, [notebookScrollTargetId, clearNotebookScrollTarget, reportWorkbenchFocus, entries]);
+  }, [notebookScrollTargetId, clearNotebookScrollTarget, reportWorkbenchFocus, entries, virtualizer]);
+
+  // Auto-scroll to active entry when selection changes
+  useEffect(() => {
+    if (!selectedNodeId) return;
+    const index = entries.findIndex((e) => isNodeInRange(selectedNodeId, e.eventIdRange));
+    if (index !== -1) {
+      virtualizer.scrollToIndex(index, { align: "nearest" });
+    }
+  }, [selectedNodeId, entries, virtualizer]);
+
+  const handleEntryClick = useCallback((entry: NE) => {
+    reportWorkbenchFocus("notebook", entry.id, "notebook_entry", entry.title?.slice(0, 100));
+    if (entry.eventIdRange[0]) scrollToNode(entry.eventIdRange[0]);
+  }, [reportWorkbenchFocus, scrollToNode]);
 
   return (
     <div className="flex flex-col h-full bg-card" data-testid="notebook-pane">
@@ -66,64 +80,73 @@ export function NotebookPane() {
           onDataLoaded={(d: any) => { if (d.notebook) setNotebook(d.notebook); }}
         />
       </div>
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-3">
-        {entries.map((entry) => {
-          const active = isNodeInRange(selectedNodeId, entry.eventIdRange);
-          return (
-          <div
-            key={entry.id}
-            ref={(el) => { entryRefs.current[entry.id] = el; if (active) (activeEntryRef as React.MutableRefObject<HTMLDivElement | null>).current = el; }}
-            data-testid={`notebook-entry-${entry.id}`}
-            className={`p-3 rounded-md border space-y-2 transition-colors cursor-pointer hover:border-accent/40 ${
-              active
-                ? "border-accent/60 bg-accent/10"
-                : "border-border bg-background/50"
-            }`}
-            onClick={() => {
-              reportWorkbenchFocus("notebook", entry.id, "notebook_entry", entry.title?.slice(0, 100));
-              if (entry.eventIdRange[0]) scrollToNode(entry.eventIdRange[0]);
-            }}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <h3 className="text-xs font-medium text-foreground leading-tight flex-1">
-                {entry.title}
-              </h3>
-              <div className="flex items-center gap-1">
-                <EntryFlagButton entry={entry} />
-                <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                  {new Date(entry.timestamp).toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </span>
-              </div>
-            </div>
-            {entry.flags && entry.flags.length > 0 && (
-              <div className="text-[10px] text-warning flex items-center gap-1">
-                &#9873; Flagged as training candidate
-              </div>
-            )}
-            <div className={`text-xs text-muted-foreground leading-relaxed prose prose-sm max-w-none prose-p:my-1 prose-li:my-0 prose-table:text-xs prose-th:text-left prose-td:px-2 prose-td:py-1 prose-th:px-2 prose-th:py-1${theme === "dark" ? " prose-invert" : ""}`}>
-              <Markdown remarkPlugins={[remarkGfm]}>{entry.content}</Markdown>
-            </div>
-            {entry.tags && entry.tags.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {entry.tags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-          );
-        })}
-        {entries.length === 0 && (
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3">
+        {entries.length === 0 ? (
           <div className="text-xs text-muted-foreground text-center py-8">
             No notebook entries for this branch
+          </div>
+        ) : (
+          <div style={{ height: virtualizer.getTotalSize(), width: "100%", position: "relative" }}>
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const entry = entries[virtualRow.index];
+              const active = isNodeInRange(selectedNodeId, entry.eventIdRange);
+              return (
+                <div
+                  key={entry.id}
+                  data-index={virtualRow.index}
+                  ref={virtualizer.measureElement}
+                  data-testid={`notebook-entry-${entry.id}`}
+                  className={`p-3 rounded-md border space-y-2 transition-colors cursor-pointer hover:border-accent/40 mb-3 ${
+                    active
+                      ? "border-accent/60 bg-accent/10"
+                      : "border-border bg-background/50"
+                  }`}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                  onClick={() => handleEntryClick(entry)}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="text-xs font-medium text-foreground leading-tight flex-1">
+                      {entry.title}
+                    </h3>
+                    <div className="flex items-center gap-1">
+                      <EntryFlagButton entry={entry} />
+                      <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                        {new Date(entry.timestamp).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                    </div>
+                  </div>
+                  {entry.flags && entry.flags.length > 0 && (
+                    <div className="text-[10px] text-warning flex items-center gap-1">
+                      &#9873; Flagged as training candidate
+                    </div>
+                  )}
+                  <div className={`text-xs text-muted-foreground leading-relaxed prose prose-sm max-w-none prose-p:my-1 prose-li:my-0 prose-table:text-xs prose-th:text-left prose-td:px-2 prose-td:py-1 prose-th:px-2 prose-th:py-1${theme === "dark" ? " prose-invert" : ""}`}>
+                    <Markdown remarkPlugins={[remarkGfm]}>{entry.content}</Markdown>
+                  </div>
+                  {entry.tags && entry.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {entry.tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

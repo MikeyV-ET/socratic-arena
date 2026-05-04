@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useArenaStore } from "@/stores/arenaStore";
 
 interface Boundary {
   index: number;
@@ -97,7 +98,7 @@ export function BoundariesPane() {
   const [loadingSummary, setLoadingSummary] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
 
-  const agent = "Q";
+  const agent = useArenaStore((s) => s.currentAgent) || "Q";
 
   useEffect(() => {
     setLoading(true);
