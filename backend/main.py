@@ -2143,7 +2143,7 @@ async def list_compaction_boundaries(agent: str = ""):
     """List compaction boundaries for an agent."""
     agent_name = agent or _current_agent
     if agent_name not in _boundaries_cache:
-        _boundaries_cache[agent_name] = parse_boundaries(agent_name)
+        _boundaries_cache[agent_name] = await asyncio.to_thread(parse_boundaries, agent_name)
     return {"agent": agent_name, "boundaries": _boundaries_cache[agent_name]}
 
 

@@ -117,6 +117,9 @@ def parse_boundaries(agent_name: str) -> list[dict]:
 
     with open(updates_path) as f:
         for line in f:
+            # Fast string pre-filter: skip lines that can't be compaction events
+            if "compaction_checkpoint" not in line:
+                continue
             line = line.strip()
             if not line:
                 continue
