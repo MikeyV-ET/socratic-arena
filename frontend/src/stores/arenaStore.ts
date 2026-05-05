@@ -127,6 +127,7 @@ interface ArenaState {
   setNotebook: (notebook: Notebook) => void;
   setPrompts: (prompts: TrainingPrompt[]) => void;
   setArtifacts: (artifacts: Artifact[]) => void;
+  applySnapshot: (payload: { tree?: ConversationTree; notebook?: Notebook; prompts?: TrainingPrompt[]; artifacts?: Artifact[] }) => void;
   switchBranch: (branchId: string) => void;
   selectNode: (nodeId: string) => void;
   scrollToNode: (nodeId: string) => void;
@@ -298,7 +299,7 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
     const targetId = state.selectedNodeId || t.activeNodeId;
     const ancestors = new Set<string>();
     let anc: ConversationNode | undefined = targetId ? t.nodes[targetId] : undefined;
-    while (anc) {
+    while (anc && !ancestors.has(anc.id)) {
       ancestors.add(anc.id);
       anc = anc.parentId ? t.nodes[anc.parentId] : undefined;
     }
@@ -311,8 +312,10 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
 
     const getNodePath = (nodeId: string): ConversationNode[] => {
       const path: ConversationNode[] = [];
+      const seen = new Set<string>();
       let current: ConversationNode | undefined = t.nodes[nodeId];
-      while (current) {
+      while (current && !seen.has(current.id)) {
+        seen.add(current.id);
         path.unshift(current);
         current = current.parentId ? t.nodes[current.parentId] : undefined;
       }
@@ -323,18 +326,22 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
       nodes.push(...getNodePath(branch.parentNodeId));
       const forkPoint = t.nodes[branch.parentNodeId];
       if (forkPoint) {
+        const visited = new Set<string>();
         let current: ConversationNode | undefined;
         const nextOnBranch = pickNext(forkPoint.children);
         current = nextOnBranch ? t.nodes[nextOnBranch] : undefined;
-        while (current) {
+        while (current && !visited.has(current.id)) {
+          visited.add(current.id);
           nodes.push(current);
           const nextId = pickNext(current.children);
           current = nextId ? t.nodes[nextId] : undefined;
         }
       }
     } else {
+      const visited = new Set<string>();
       let current: ConversationNode | undefined = t.nodes[branch.rootNodeId];
-      while (current) {
+      while (current && !visited.has(current.id)) {
+        visited.add(current.id);
         nodes.push(current);
         const nextId = pickNext(current.children);
         current = nextId ? t.nodes[nextId] : undefined;
@@ -427,9 +434,10 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
 
     // Build ancestor set from activeNodeId to root so the walk
     // follows the path toward the current active node at branch points.
+    // Guard against parentId cycles (data corruption) with visited set.
     const ancestors = new Set<string>();
     let anc: ConversationNode | undefined = tree.nodes[tree.activeNodeId];
-    while (anc) {
+    while (anc && !ancestors.has(anc.id)) {
       ancestors.add(anc.id);
       anc = anc.parentId ? tree.nodes[anc.parentId] : undefined;
     }
@@ -445,18 +453,22 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
 
       const forkPoint = tree.nodes[branch.parentNodeId];
       if (forkPoint) {
+        const visited = new Set<string>();
         let current: ConversationNode | undefined;
         const nextOnBranch = pickNext(forkPoint.children);
         current = nextOnBranch ? tree.nodes[nextOnBranch] : undefined;
-        while (current) {
+        while (current && !visited.has(current.id)) {
+          visited.add(current.id);
           nodes.push(current);
           const nextId = pickNext(current.children);
           current = nextId ? tree.nodes[nextId] : undefined;
         }
       }
     } else {
+      const visited = new Set<string>();
       let current: ConversationNode | undefined = tree.nodes[branch.rootNodeId];
-      while (current) {
+      while (current && !visited.has(current.id)) {
+        visited.add(current.id);
         nodes.push(current);
         const nextId = pickNext(current.children);
         current = nextId ? tree.nodes[nextId] : undefined;
@@ -469,8 +481,10 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
   getNodePath: (nodeId: string) => {
     const { tree } = get();
     const path: ConversationNode[] = [];
+    const visited = new Set<string>();
     let current: ConversationNode | undefined = tree.nodes[nodeId];
-    while (current) {
+    while (current && !visited.has(current.id)) {
+      visited.add(current.id);
       path.unshift(current);
       current = current.parentId ? tree.nodes[current.parentId] : undefined;
     }
@@ -485,6 +499,13 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
   setNotebook: (notebook) => set({ notebook }),
   setPrompts: (prompts) => set({ prompts }),
   setArtifacts: (artifacts) => set({ artifacts }),
+  applySnapshot: (payload) => set((state) => ({
+    ...(payload.tree ? { tree: payload.tree } : {}),
+    ...(payload.notebook ? { notebook: payload.notebook } : {}),
+    ...(payload.prompts ? { prompts: payload.prompts } : {}),
+    ...(payload.artifacts ? { artifacts: payload.artifacts } : {}),
+    scrollTrigger: state.scrollTrigger + 1,
+  })),
 
   switchBranch: (branchId) => {
     set((state) => ({

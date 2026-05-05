@@ -30,12 +30,13 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
   const store = useArenaStore.getState();
   switch (msg.type) {
     case "state.snapshot": {
-      const snapTree = msg.payload.tree as Record<string, unknown> | undefined;
-      if (snapTree) store.setTree(snapTree as never);
-      if (msg.payload.notebook) store.setNotebook(msg.payload.notebook as never);
-      if (msg.payload.prompts) store.setPrompts(msg.payload.prompts as never);
-      if (msg.payload.artifacts) store.setArtifacts(msg.payload.artifacts as never);
-      store.triggerScrollToBottom();
+      // Batch all state updates into a single zustand set() call.
+      store.applySnapshot({
+        ...(msg.payload.tree ? { tree: msg.payload.tree as never } : {}),
+        ...(msg.payload.notebook ? { notebook: msg.payload.notebook as never } : {}),
+        ...(msg.payload.prompts ? { prompts: msg.payload.prompts as never } : {}),
+        ...(msg.payload.artifacts ? { artifacts: msg.payload.artifacts as never } : {}),
+      });
       break;
     }
 
