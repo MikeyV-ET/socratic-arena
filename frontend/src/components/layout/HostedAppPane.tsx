@@ -234,7 +234,15 @@ export function HostedAppPane() {
 
       {/* Active panel iframe */}
       {activePanel && (
-        <div className="flex-1 relative">
+        <div
+          className="flex-1 relative"
+          onMouseEnter={(e) => {
+            const iframe = e.currentTarget.querySelector<HTMLIFrameElement>(
+              `iframe[title="${activePanel.label}"]`
+            );
+            if (iframe) iframe.focus();
+          }}
+        >
           {panels.map((p) => (
             <iframe
               key={p.id}

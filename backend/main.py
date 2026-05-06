@@ -2087,6 +2087,8 @@ async def panel_proxy_ws(websocket: WebSocket, panel_id: str):
             subprotocols=upstream_subprotocols,
             max_size=20 * 1024 * 1024,
             open_timeout=10,
+            ping_interval=None,
+            ping_timeout=None,
         )
     except Exception as e:
         log.warning("Panel proxy WS: cannot connect to Xpra %s: %s", panel_id, e)
