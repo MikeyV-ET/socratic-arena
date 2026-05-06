@@ -165,7 +165,7 @@ class PanelManager:
         # Launch Xpra (use shell=True so --start-child value stays as one arg)
         xpra_parts = [
             "xpra", "start", f":{display}",
-            f"--bind-tcp=0.0.0.0:{port}",
+            f"--bind-tcp=127.0.0.1:{port}",
             "--html=on",
             "--clipboard=no",
             "--notifications=no",
