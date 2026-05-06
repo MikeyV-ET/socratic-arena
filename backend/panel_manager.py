@@ -177,6 +177,7 @@ class PanelManager:
             "--headerbar=no",
             f"--start-child={app_cmd}",
             "--exit-with-children=yes",
+            "--no-daemon",
         ]
         xpra_shell = " ".join(shlex.quote(p) for p in xpra_parts)
 
