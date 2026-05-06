@@ -96,6 +96,7 @@ class PanelManager:
     def __init__(self):
         self._sessions: dict[str, PanelSession] = {}
         self._next_id = 1
+        self._on_panel_stopped = None  # async callback(panel_id)
 
     @property
     def sessions(self) -> dict[str, PanelSession]:
@@ -163,7 +164,7 @@ class PanelManager:
             "--resize-display=yes",
             "--headerbar=no",
             f"--start-child={app_cmd}",
-            "--exit-with-children=no",
+            "--exit-with-children=yes",
         ]
         xpra_shell = " ".join(shlex.quote(p) for p in xpra_parts)
 
@@ -206,7 +207,23 @@ class PanelManager:
 
         self._sessions[panel_id] = session
         log.info("Panel %s launched: %s at %s", panel_id, app_label, client_url)
+
+        # Monitor for child exit -- auto-cleanup when app closes
+        asyncio.create_task(self._monitor_exit(panel_id, proc))
+
         return session
+
+    async def _monitor_exit(self, panel_id: str, proc):
+        """Wait for Xpra process to exit, then clean up and notify clients."""
+        try:
+            await proc.wait()
+        except Exception:
+            pass
+        if panel_id in self._sessions:
+            log.info("Panel %s exited (app closed), cleaning up", panel_id)
+            session = self._sessions.pop(panel_id, None)
+            if session and self._on_panel_stopped:
+                await self._on_panel_stopped(panel_id)
 
     @staticmethod
     async def _resize_windows(display: int):

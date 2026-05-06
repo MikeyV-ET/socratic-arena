@@ -1879,6 +1879,11 @@ async def adapter_chunk(body: dict):
 
 from panel_manager import panel_manager, APP_PRESETS
 
+async def _on_panel_stopped(panel_id: str):
+    await broadcast({"type": "panel.stopped", "payload": {"id": panel_id}})
+
+panel_manager._on_panel_stopped = _on_panel_stopped
+
 
 @app.get("/api/panel/presets")
 async def panel_presets():
