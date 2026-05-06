@@ -11,9 +11,10 @@ const proseClass = "text-sm text-foreground leading-relaxed prose prose-sm max-w
 
 interface MessageProps {
   node: ConversationNode;
+  readOnly?: boolean;
 }
 
-export function Message({ node }: MessageProps) {
+export function Message({ node, readOnly = false }: MessageProps) {
   const [showThinking, setShowThinking] = useState(false);
   const tree = useArenaStore((s) => s.tree);
   const theme = useArenaStore((s) => s.theme);
@@ -76,13 +77,15 @@ export function Message({ node }: MessageProps) {
             )}
           </div>
 
-          <div className={`flex items-center gap-1 transition-opacity ${
-            node.flags.length > 0 ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-          }`}>
-            <ForkButton node={node} />
-            <CorrectionButton node={node} />
-            <FlagButton node={node} />
-          </div>
+          {!readOnly && (
+            <div className={`flex items-center gap-1 transition-opacity ${
+              node.flags.length > 0 ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+            }`}>
+              <ForkButton node={node} />
+              <CorrectionButton node={node} />
+              <FlagButton node={node} />
+            </div>
+          )}
         </div>
 
         {/* Thinking toggle */}

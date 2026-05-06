@@ -234,7 +234,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
               >
-                <Message node={node} />
+                <Message node={node} readOnly={readOnly} />
               </div>
             );
           })}

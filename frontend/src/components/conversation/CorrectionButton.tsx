@@ -9,21 +9,12 @@ export function CorrectionButton({ node }: CorrectionButtonProps) {
   const corrections = useArenaStore((s) => s.corrections);
   const setEditingNodeId = useArenaStore((s) => s.setEditingCorrectionNodeId);
   const setActiveTab = useArenaStore((s) => s.setActiveTab);
-  const setSplitTab = useArenaStore((s) => s.setSplitTab);
-  const activeTab = useArenaStore((s) => s.activeTab);
-  const openTab = useArenaStore((s) => s.openTab);
 
   const hasCorrection = corrections.some((c) => c.nodeId === node.id);
 
   const handleClick = () => {
     setEditingNodeId(node.id);
-    if (activeTab === "history") {
-      // Open corrections as split instead of replacing history
-      openTab("corrections");
-      setSplitTab("corrections");
-    } else {
-      setActiveTab("corrections");
-    }
+    setActiveTab("corrections");
   };
 
   return (
