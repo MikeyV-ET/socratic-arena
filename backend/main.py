@@ -1844,14 +1844,31 @@ async def get_agent_notebook(name: str):
 
 
 @app.get("/api/agent/{name}/history")
-async def get_agent_history(name: str):
-    """Load a specific agent's conversation tree (independent of chat target)."""
+async def get_agent_history(name: str, sessionId: str | None = None, tailMB: int = 5):
+    """Load a specific agent's conversation tree for history browsing.
+
+    Uses tail-based loading for performance (large files can be 800MB+).
+    Optional sessionId query param loads a specific historical session.
+    tailMB controls how much of the file to read (default 5MB = ~50+ turns).
+    """
     from updates_parser import build_state_from_updates
-    updates_path = get_agent_updates_path(name)
+    if sessionId:
+        updates_path = _get_updates_path_for_session(name, sessionId)
+    else:
+        updates_path = get_agent_updates_path(name)
     if not updates_path:
         return {"status": "error", "message": f"No session data for {name}"}
-    st = build_state_from_updates(str(updates_path), label=name)
-    return {"status": "ok", "agent": name, "tree": st.tree.model_dump()}
+    tail_bytes = max(1, min(tailMB, 50)) * 1024 * 1024
+    file_size = updates_path.stat().st_size
+    use_tail = file_size > tail_bytes
+    st = await asyncio.to_thread(
+        build_state_from_updates, str(updates_path), label=name,
+        tail_only=use_tail, tail_bytes=tail_bytes
+    )
+    return {
+        "status": "ok", "agent": name, "tree": st.tree.model_dump(),
+        "truncated": use_tail, "fileSize": file_size,
+    }
 
 
 # --- Adapter bridge endpoints (asdaaas arena adapter uses these) ---

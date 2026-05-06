@@ -175,7 +175,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   }, [nodes.length, virtualizer]);
 
   const historyHeader = readOnly ? (
-    <div className="flex items-center justify-between px-2 py-0.5 border-b border-border/50">
+    <div className="flex items-center px-2 py-0.5 border-b border-border/50">
       <PaneAgentSelector
         value={historyAgent}
         onChange={setHistoryAgent}
@@ -183,7 +183,6 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
         onDataLoaded={handleHistoryDataLoaded}
         label="Agent"
       />
-      <FontSizeControl paneId={paneId} />
     </div>
   ) : null;
 
