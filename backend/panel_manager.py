@@ -54,7 +54,7 @@ APP_PRESETS: dict[str, dict] = {
     },
     "terminal": {
         "label": "Terminal",
-        "cmd": "xterm -fa Monospace -fs 12",
+        "cmd": "xterm -fa Monospace -fs 12 -maximized",
     },
     "files": {
         "label": "File Manager",
@@ -161,6 +161,7 @@ class PanelManager:
             "--video-encoders=none",
             "--pulseaudio=no",
             "--resize-display=yes",
+            "--headerbar=no",
             f"--start-child={app_cmd}",
             "--exit-with-children=no",
         ]
@@ -183,9 +184,8 @@ class PanelManager:
             stderr = await proc.stderr.read()
             raise RuntimeError(f"Xpra failed to start: {stderr.decode()}")
 
-        # Maximize app windows to fill the Xpra display (some apps start tiny)
-        if app_type != "chrome":  # Chrome handles its own --start-maximized
-            asyncio.create_task(self._resize_windows(display))
+        # Undecorate and maximize app windows to fill the Xpra display
+        asyncio.create_task(self._resize_windows(display))
 
         # Proxied URL: frontend iframe stays same-origin via /api/panel/{id}/proxy
         # The 'path' param tells Xpra HTML5 client where to connect its WebSocket
@@ -210,7 +210,7 @@ class PanelManager:
 
     @staticmethod
     async def _resize_windows(display: int):
-        """Wait for app windows to appear, then maximize them to fill the display."""
+        """Wait for app windows to appear, undecorate and maximize them."""
         env = {**os.environ, "DISPLAY": f":{display}"}
         for attempt in range(5):
             await asyncio.sleep(2)
@@ -239,6 +239,14 @@ class PanelManager:
                 if not wids:
                     continue
                 for wid in wids:
+                    # Remove window decorations via _MOTIF_WM_HINTS
+                    # Format: flags=2 (decorations flag), functions=0, decorations=0, input_mode=0, status=0
+                    await asyncio.create_subprocess_exec(
+                        "xprop", "-id", wid,
+                        "-f", "_MOTIF_WM_HINTS", "32c",
+                        "-set", "_MOTIF_WM_HINTS", "0x2, 0x0, 0x0, 0x0, 0x0",
+                        env=env,
+                    )
                     await asyncio.create_subprocess_exec(
                         "xdotool", "windowsize", wid, str(dw), str(dh),
                         env=env,
@@ -247,7 +255,7 @@ class PanelManager:
                         "xdotool", "windowmove", wid, "0", "0",
                         env=env,
                     )
-                log.info("Resized %d windows to %dx%d on display :%d", len(wids), dw, dh, display)
+                log.info("Undecorated and resized %d windows to %dx%d on display :%d", len(wids), dw, dh, display)
                 return
             except Exception as e:
                 log.warning("Window resize attempt %d failed: %s", attempt + 1, e)

@@ -681,7 +681,10 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
     // Hosted application panels
     panels: [],
     activePanelId: null,
-    addPanel: (panel) => set((s) => ({ panels: [...s.panels, panel], activePanelId: panel.id })),
+    addPanel: (panel) => set((s) => {
+      if (s.panels.some((p) => p.id === panel.id)) return { activePanelId: panel.id };
+      return { panels: [...s.panels, panel], activePanelId: panel.id };
+    }),
     removePanel: (panelId) => set((s) => ({
       panels: s.panels.filter((p) => p.id !== panelId),
       activePanelId: s.activePanelId === panelId ? (s.panels.length > 1 ? s.panels.find((p) => p.id !== panelId)?.id ?? null : null) : s.activePanelId,
