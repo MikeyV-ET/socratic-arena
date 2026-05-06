@@ -365,6 +365,7 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
       const clamped = Math.max(10, Math.min(24, size));
       localStorage.setItem("arena-font-size", String(clamped));
       document.documentElement.style.setProperty("--sa-font-size", `${clamped}px`);
+      document.documentElement.style.setProperty("--sa-zoom", String(clamped / 14));
       return { fontSize: clamped };
     }),
 

@@ -109,6 +109,18 @@ class PanelManager:
                 return port
         raise RuntimeError("No available ports for Xpra panel")
 
+    @staticmethod
+    def _kill_orphan_display(display: int):
+        """Stop any Xpra session lingering on a display from a previous backend run."""
+        try:
+            subprocess.run(
+                ["xpra", "stop", f":{display}"],
+                capture_output=True, timeout=5,
+            )
+            log.info("Cleaned up orphan Xpra on :%d", display)
+        except Exception:
+            pass
+
     def _allocate_display(self) -> int:
         used = {s.display for s in self._sessions.values()}
         for d in range(_DISPLAY_BASE, _DISPLAY_BASE + 100):
@@ -167,6 +179,9 @@ class PanelManager:
             "--exit-with-children=yes",
         ]
         xpra_shell = " ".join(shlex.quote(p) for p in xpra_parts)
+
+        # Clean up any orphaned Xpra on this display from a previous run
+        self._kill_orphan_display(display)
 
         log.info("Launching panel %s: %s (display :%d, port %d)", panel_id, app_label, display, port)
         log.info("Xpra cmd: %s", xpra_shell)

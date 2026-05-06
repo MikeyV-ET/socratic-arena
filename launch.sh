@@ -26,6 +26,13 @@ stop_all() {
         fi
         rm -f "$pf"
     done
+    # Kill anything still holding our ports (catches orphans from stale PID files)
+    for port in "${BACKEND_PORT}" "${FRONTEND_PORT}"; do
+        pid=$(lsof -ti :"$port" 2>/dev/null || true)
+        if [ -n "$pid" ]; then
+            kill $pid 2>/dev/null && echo "  killed orphan on :${port} (PID ${pid})"
+        fi
+    done
 }
 
 start_backend() {

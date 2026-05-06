@@ -10,6 +10,14 @@ type AgentInfo = {
   healthStatus: string | null;
 };
 
+type SessionInfo = {
+  sessionId: string;
+  size: number;
+  sizeHuman: string;
+  modifiedAt: number;
+  isCurrent: boolean;
+};
+
 export function Header() {
   const tree = useArenaStore((s) => s.tree);
   const switchBranch = useArenaStore((s) => s.switchBranch);
@@ -22,6 +30,7 @@ export function Header() {
   // Initialize CSS variable on mount
   useEffect(() => {
     document.documentElement.style.setProperty("--sa-font-size", `${fontSize}px`);
+    document.documentElement.style.setProperty("--sa-zoom", String(fontSize / 14));
   }, []);
   const currentAgent = useArenaStore((s) => s.currentAgent);
   const setCurrentAgent = useArenaStore((s) => s.setCurrentAgent);
@@ -30,6 +39,8 @@ export function Header() {
 
   const [switching, setSwitching] = useState(false);
   const [contextPct, setContextPct] = useState<number | null>(null);
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [selectedSession, setSelectedSession] = useState<string>("");
 
   const fetchContext = useCallback(() => {
     fetch(`${basePath}/api/agent/context`)
@@ -60,6 +71,23 @@ export function Header() {
     fetchAgents();
   }, [fetchAgents]);
 
+  // Fetch sessions when agent changes
+  const fetchSessions = useCallback((agentName: string) => {
+    fetch(`${basePath}/api/agent/${agentName}/sessions`)
+      .then((r) => r.json())
+      .then((d) => {
+        const list: SessionInfo[] = d.sessions ?? [];
+        setSessions(list);
+        const cur = list.find((s) => s.isCurrent);
+        setSelectedSession(cur?.sessionId ?? list[0]?.sessionId ?? "");
+      })
+      .catch(() => setSessions([]));
+  }, []);
+
+  useEffect(() => {
+    if (currentAgent) fetchSessions(currentAgent);
+  }, [currentAgent, fetchSessions]);
+
   const handleAgentSwitch = (agentName: string) => {
     if (agentName === currentAgent || switching) return;
     setSwitching(true);
@@ -79,12 +107,43 @@ export function Header() {
       .catch(() => setSwitching(false));
   };
 
+  const handleSessionSwitch = (sessionId: string) => {
+    if (!currentAgent || switching) return;
+    setSelectedSession(sessionId);
+    const session = sessions.find((s) => s.sessionId === sessionId);
+    // If switching to the current session, pass no sessionId (use registry)
+    const body: Record<string, string> = { agent: currentAgent };
+    if (session && !session.isCurrent) {
+      body.sessionId = sessionId;
+    }
+    setSwitching(true);
+    fetch(`${basePath}/api/agent/switch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.status === "ok") fetchContext();
+        setSwitching(false);
+      })
+      .catch(() => setSwitching(false));
+  };
+
   const branches = Object.values(tree.branches);
 
   const healthDot = (status: string | null) => {
     if (status === "working" || status === "active") return "bg-success";
     if (status === "ready") return "bg-blue-400";
     return "bg-muted-foreground";
+  };
+
+  const formatSessionLabel = (s: SessionInfo) => {
+    const date = new Date(s.modifiedAt * 1000);
+    const dateStr = date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    const prefix = s.sessionId.slice(0, 8);
+    const tag = s.isCurrent ? " (live)" : "";
+    return `${prefix} - ${dateStr} - ${s.sizeHuman}${tag}`;
   };
 
   return (
@@ -110,6 +169,23 @@ export function Header() {
             </option>
           ))}
         </select>
+
+        {/* Session selector (shown when agent has multiple sessions) */}
+        {sessions.length > 1 && (
+          <select
+            value={selectedSession}
+            onChange={(e) => handleSessionSwitch(e.target.value)}
+            disabled={switching}
+            className="bg-muted text-foreground text-[11px] px-1.5 py-1 rounded-md border border-border focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 max-w-[220px]"
+            title="Select session"
+          >
+            {sessions.map((s) => (
+              <option key={s.sessionId} value={s.sessionId}>
+                {formatSessionLabel(s)}
+              </option>
+            ))}
+          </select>
+        )}
 
         {/* Health indicator for current agent */}
         {currentAgent && agents.length > 0 && (() => {

@@ -52,19 +52,14 @@ body {
   overflow: hidden;
 }
 
-/* Panel font size (controlled by header A-/A+ buttons) */
+/* Global zoom (controlled by header A-/A+ buttons) */
 :root {
   --sa-font-size: 14px;
+  --sa-zoom: 1;
 }
 
 .sa-panel-content {
-  font-size: var(--sa-font-size);
-}
-
-/* CodeMirror font size override */
-.sa-panel-content .cm-editor .cm-content,
-.sa-panel-content .cm-editor .cm-gutters {
-  font-size: var(--sa-font-size);
+  zoom: var(--sa-zoom, 1);
 }
 
 /* Light mode overrides */

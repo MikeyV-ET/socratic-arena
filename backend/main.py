@@ -1693,12 +1693,76 @@ async def list_agents():
     return {"agents": agents, "current": _current_agent}
 
 
-def _build_agent_state(agent_name: str) -> StateSnapshot:
+def _human_size(nbytes: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if nbytes < 1024:
+            return f"{nbytes:.1f}{unit}" if nbytes != int(nbytes) else f"{nbytes}{unit}"
+        nbytes /= 1024
+    return f"{nbytes:.1f}TB"
+
+
+@app.get("/api/agent/{name}/sessions")
+async def list_agent_sessions(name: str):
+    """List all available sessions for an agent, sorted by recency."""
+    agent_dir = AGENTS_HOME / name
+    if not agent_dir.is_dir():
+        return {"status": "error", "message": f"agent {name} not found"}
+
+    cwd_encoded = _url_quote(str(agent_dir), safe="")
+    sessions_dir = SESSIONS_BASE / cwd_encoded
+    if not sessions_dir.is_dir():
+        return {"sessions": [], "current": None}
+
+    reg = _load_session_registry()
+    current_sid = reg.get(name, {}).get("session_id", "")
+
+    sessions = []
+    for d in sessions_dir.iterdir():
+        if not d.is_dir():
+            continue
+        updates = d / "updates.jsonl"
+        if not updates.exists():
+            continue
+        size = updates.stat().st_size
+        if size < 1000:
+            continue
+        mtime = updates.stat().st_mtime
+        sessions.append({
+            "sessionId": d.name,
+            "size": size,
+            "sizeHuman": _human_size(size),
+            "modifiedAt": mtime,
+            "isCurrent": d.name == current_sid,
+        })
+
+    sessions.sort(key=lambda s: s["modifiedAt"], reverse=True)
+    return {"sessions": sessions, "current": current_sid}
+
+
+def _get_updates_path_for_session(agent_name: str, session_id: str) -> Path | None:
+    """Find updates.jsonl for a specific session ID under an agent's CWD."""
+    agent_dir = AGENTS_HOME / agent_name
+    cwd_encoded = _url_quote(str(agent_dir), safe="")
+    candidate = SESSIONS_BASE / cwd_encoded / session_id / "updates.jsonl"
+    if candidate.exists():
+        return candidate
+    # Fallback: search all CWD dirs (session might be under a different CWD)
+    sdir = _find_session_dir(session_id)
+    if sdir:
+        p = sdir / "updates.jsonl"
+        return p if p.exists() else None
+    return None
+
+
+def _build_agent_state(agent_name: str, session_id: str | None = None) -> StateSnapshot:
     """Build a StateSnapshot for a named agent from their session data."""
     from updates_parser import build_state_from_updates
     from notebook_parser import build_notebook
 
-    updates_path = get_agent_updates_path(agent_name)
+    if session_id:
+        updates_path = _get_updates_path_for_session(agent_name, session_id)
+    else:
+        updates_path = get_agent_updates_path(agent_name)
     agent_dir = AGENTS_HOME / agent_name
     notebook_path = agent_dir / f"lab_notebook_{agent_name.lower()}.md"
 
@@ -1739,14 +1803,22 @@ async def switch_agent(body: dict):
     if not agent_dir.is_dir():
         return {"status": "error", "message": f"agent {agent_name} not found"}
 
-    log.info("Switching arena to agent: %s", agent_name)
+    session_id = body.get("sessionId")
+    log.info("Switching arena to agent: %s (session: %s)", agent_name, session_id or "current")
     _arena_node_ids.clear()
     _arena_turn_active = False
-    state = _build_agent_state(agent_name)
+    state = _build_agent_state(agent_name, session_id=session_id)
     _current_agent = agent_name
 
-    # Restart live tailer for the new agent
-    _start_live_tailer(agent_name)
+    # Restart live tailer for the new agent (only for current session)
+    if not session_id:
+        _start_live_tailer(agent_name)
+    else:
+        # Historical session — no live tailing
+        global _live_tailer, _live_task
+        if _live_task and not _live_task.done():
+            _live_task.cancel()
+        _live_tailer = None
 
     await broadcast({
         "type": "state.snapshot",
@@ -1754,7 +1826,7 @@ async def switch_agent(body: dict):
     })
     await broadcast({
         "type": "agent.switched",
-        "payload": {"agent": agent_name},
+        "payload": {"agent": agent_name, "sessionId": session_id},
     })
 
     return {"status": "ok", "agent": agent_name}
