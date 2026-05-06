@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useArenaStore } from "@/stores/arenaStore";
 
 const basePath = window.location.pathname.replace(/\/+$/, "");
@@ -27,18 +27,22 @@ export function PaneAgentSelector({ value, onChange, onDataLoaded, dataType, lab
 
   const isHistory = dataType === "history";
 
+  // Use a ref for onDataLoaded to avoid re-triggering effects when the
+  // parent passes a new closure each render.
+  const onDataLoadedRef = useRef(onDataLoaded);
+  onDataLoadedRef.current = onDataLoaded;
+
   const fetchData = useCallback((agentName: string, sessionId?: string) => {
-    if (!onDataLoaded) return;
     setLoading(true);
     const params = sessionId ? `?sessionId=${sessionId}` : "";
     fetch(`${basePath}/api/agent/${agentName}/${dataType}${params}`)
       .then((r) => r.json())
       .then((d) => {
-        if (d.status === "ok") onDataLoaded(d);
+        if (d.status === "ok") onDataLoadedRef.current?.(d);
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [dataType, onDataLoaded]);
+  }, [dataType]);
 
   const fetchSessions = useCallback((agentName: string) => {
     fetch(`${basePath}/api/agent/${agentName}/sessions`)
@@ -52,9 +56,11 @@ export function PaneAgentSelector({ value, onChange, onDataLoaded, dataType, lab
       .catch(() => setSessions([]));
   }, []);
 
-  // On mount and when value changes, fetch history and sessions
+  // Fetch once on mount and when agent value changes
+  const mountedAgent = useRef("");
   useEffect(() => {
-    if (!value) return;
+    if (!value || value === mountedAgent.current) return;
+    mountedAgent.current = value;
     if (isHistory) {
       fetchData(value);
       fetchSessions(value);
@@ -63,14 +69,14 @@ export function PaneAgentSelector({ value, onChange, onDataLoaded, dataType, lab
 
   const handleAgentChange = (agentName: string) => {
     onChange(agentName);
+    mountedAgent.current = agentName;
     if (isHistory) {
       fetchData(agentName);
       fetchSessions(agentName);
     } else {
-      // Notebook and other types: original behavior
       const currentAgent = useArenaStore.getState().currentAgent;
       if (agentName === currentAgent) {
-        onDataLoaded?.(null);
+        onDataLoadedRef.current?.(null);
       } else {
         fetchData(agentName);
       }
@@ -81,7 +87,6 @@ export function PaneAgentSelector({ value, onChange, onDataLoaded, dataType, lab
     setSelectedSession(sessionId);
     const session = sessions.find((s) => s.sessionId === sessionId);
     if (session?.isCurrent) {
-      // Current session: fetch without sessionId to use live data
       fetchData(value);
     } else {
       fetchData(value, sessionId);

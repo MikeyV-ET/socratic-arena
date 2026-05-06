@@ -77,15 +77,13 @@ export function Message({ node, readOnly = false }: MessageProps) {
             )}
           </div>
 
-          {!readOnly && (
-            <div className={`flex items-center gap-1 transition-opacity ${
-              node.flags.length > 0 ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-            }`}>
-              <ForkButton node={node} />
-              <CorrectionButton node={node} />
-              <FlagButton node={node} />
-            </div>
-          )}
+          <div className={`flex items-center gap-1 transition-opacity ${
+            node.flags.length > 0 ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+          }`}>
+            {!readOnly && <ForkButton node={node} />}
+            {!readOnly && <CorrectionButton node={node} />}
+            <FlagButton node={node} />
+          </div>
         </div>
 
         {/* Thinking toggle */}
