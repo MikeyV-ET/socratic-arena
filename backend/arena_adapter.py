@@ -45,7 +45,12 @@ ADAPTER_NAME = "arena"
 POLL_INTERVAL = 0.5  # seconds between polls
 HEARTBEAT_INTERVAL = 30  # seconds between heartbeat updates
 DEFAULT_ARENA_URL = "http://localhost:8000"
-DEFAULT_AGENTS_HOME = Path.home() / "agents"
+# Import shared config; fallback for standalone CLI use
+try:
+    from config import AGENTS_HOME as _CFG_AGENTS_HOME
+except ImportError:
+    _CFG_AGENTS_HOME = Path.home() / "agents"
+DEFAULT_AGENTS_HOME = _CFG_AGENTS_HOME
 
 
 # ============================================================================
@@ -110,7 +115,12 @@ def write_to_inbox(agents_home: Path, agent_name: str, content: str,
 
 def _find_updates_jsonl(agents_home: Path, agent_name: str) -> Path | None:
     """Find the agent's updates.jsonl via session registry or direct search."""
-    reg_path = agents_home / ".session_registry.json"
+    try:
+        from config import SESSION_REGISTRY, SESSIONS_BASE as _SESSIONS
+    except ImportError:
+        SESSION_REGISTRY = Path.home() / ".grok" / "session_registry.json"
+        _SESSIONS = Path.home() / ".grok" / "sessions"
+    reg_path = SESSION_REGISTRY
     if reg_path.exists():
         try:
             reg = json.loads(reg_path.read_text())
@@ -119,7 +129,7 @@ def _find_updates_jsonl(agents_home: Path, agent_name: str) -> Path | None:
             cwd = entry.get("cwd", "")
             if sid and cwd:
                 cwd_encoded = _url_quote(cwd, safe="")
-                p = Path.home() / ".grok" / "sessions" / cwd_encoded / sid / "updates.jsonl"
+                p = _SESSIONS / cwd_encoded / sid / "updates.jsonl"
                 if p.exists():
                     return p
         except Exception:
@@ -128,7 +138,7 @@ def _find_updates_jsonl(agents_home: Path, agent_name: str) -> Path | None:
     # Fallback: scan agent's CWD for grok session
     agent_cwd = agents_home / agent_name
     cwd_encoded = _url_quote(str(agent_cwd), safe="")
-    sessions_dir = Path.home() / ".grok" / "sessions" / cwd_encoded
+    sessions_dir = _SESSIONS / cwd_encoded
     if sessions_dir.exists():
         # Pick most recently modified session
         candidates = sorted(sessions_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)

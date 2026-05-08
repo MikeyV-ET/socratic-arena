@@ -26,8 +26,7 @@ _replayer: CheckpointReplayer | None = None
 # In-memory registry of running/completed replays
 _replays: dict[str, ReplayResult | list[ReplayResult]] = {}
 
-# Agent config from agents.json
-AGENTS_JSON = Path.home() / "projects" / "mikeyv-infra" / "live" / "comms" / "agents.json"
+from config import AGENTS_JSON
 
 
 def init_replayer(grok_binary: str = "grok", model: str = "coding-mix-latest"):

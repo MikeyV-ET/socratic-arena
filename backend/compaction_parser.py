@@ -14,8 +14,7 @@ from datetime import datetime, timezone
 
 log = logging.getLogger("compaction_parser")
 
-SESSIONS_BASE = Path.home() / ".grok" / "sessions"
-SESSION_REGISTRY = Path.home() / ".grok" / "session_registry.json"
+from config import SESSIONS_BASE, SESSION_REGISTRY
 
 
 def _find_session_dir(session_id: str) -> Path | None:

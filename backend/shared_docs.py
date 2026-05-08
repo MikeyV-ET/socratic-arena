@@ -282,7 +282,8 @@ async def save_doc_to_file(doc_id: str):
 files_router = APIRouter(prefix="/api/files", tags=["files"])
 
 _FILE_EXTS = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".toml", ".sh", ".csv", ".log"}
-_AGENT_HOME: Path = Path.home() / "agents"
+from config import AGENTS_HOME as _CFG_AH
+_AGENT_HOME: Path = _CFG_AH
 
 
 def set_agent_home(path: Path):

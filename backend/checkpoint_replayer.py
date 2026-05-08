@@ -39,9 +39,7 @@ REPLAY_PREAMBLE = (
     "following message based on your loaded context.]\n\n"
 )
 
-# Grok session directory base
-GROK_SESSIONS_BASE = Path.home() / ".grok" / "sessions"
-DOPPELGANGERS_BASE = Path.home() / "agents" / "doppelgangers"
+from config import AGENTS_HOME as _CFG_AGENTS_HOME, SESSIONS_BASE as GROK_SESSIONS_BASE, DOPPELGANGERS_BASE
 
 
 @dataclass
@@ -141,7 +139,7 @@ class CheckpointReplayer:
 
     def list_checkpoints(self, agent_name: str) -> list[dict]:
         """List all checkpoints for an agent, sorted by creation time."""
-        agent_home = Path.home() / "agents" / agent_name
+        agent_home = _CFG_AGENTS_HOME / agent_name
         encoded_path = url_quote(str(agent_home), safe="")
         cwd_dir = GROK_SESSIONS_BASE / encoded_path
 
@@ -666,7 +664,7 @@ class CheckpointReplayer:
 
 def get_chat_history_path(agent_name: str, session_id: str) -> str | None:
     """Find chat_history.jsonl for an agent's session."""
-    agent_home = Path.home() / "agents" / agent_name
+    agent_home = _CFG_AGENTS_HOME / agent_name
     encoded_path = url_quote(str(agent_home), safe="")
     path = GROK_SESSIONS_BASE / encoded_path / session_id / "chat_history.jsonl"
     return str(path) if path.exists() else None

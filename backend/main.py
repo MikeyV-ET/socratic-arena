@@ -18,13 +18,10 @@ from demo_dataset import build_demo_state
 from live_tailer import LiveTailer
 from replay_router import router as replay_router, init_replayer
 from urllib.parse import quote as _url_quote
-
-AGENTS_HOME = Path.home() / "agents"
-SESSION_REGISTRY = Path.home() / ".grok" / "session_registry.json"
-SESSIONS_BASE = Path.home() / ".grok" / "sessions"
+from config import AGENTS_HOME, SESSION_REGISTRY, SESSIONS_BASE, DEFAULT_AGENT
 
 # Track which agent is currently loaded
-_current_agent: str = os.environ.get("ARENA_AGENT", "Q")
+_current_agent: str = DEFAULT_AGENT
 
 
 def _load_session_registry() -> dict:
@@ -81,7 +78,7 @@ def get_session_updates_path() -> Path | None:
     if not sid:
         return None
     cwd_encoded = _url_quote(str(knight_dir), safe="")
-    sessions_dir = Path.home() / ".grok" / "sessions" / cwd_encoded
+    sessions_dir = SESSIONS_BASE / cwd_encoded
     p = sessions_dir / sid / "updates.jsonl"
     return p if p.exists() else None
 import asyncio
