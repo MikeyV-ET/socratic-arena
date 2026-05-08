@@ -42,14 +42,21 @@ export function NotebookPane() {
 
   // Scroll to bottom on initial load or agent switch
   const prevEntryCount = useRef(0);
+  const prevNotebookAgent = useRef(notebookAgent);
   useEffect(() => {
     if (entries.length === 0) return;
     const wasEmpty = prevEntryCount.current === 0;
+    const agentChanged = prevNotebookAgent.current !== notebookAgent;
     prevEntryCount.current = entries.length;
-    if (wasEmpty) {
+    prevNotebookAgent.current = notebookAgent;
+    if (wasEmpty || agentChanged) {
       virtualizer.scrollToIndex(entries.length - 1, { align: "end" });
+      requestAnimationFrame(() => {
+        const el = parentRef.current;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
     }
-  }, [entries.length, virtualizer]);
+  }, [entries.length, virtualizer, notebookAgent]);
 
   // Scroll to specific notebook entry (from workspace.navigate or moment navigation)
   useEffect(() => {

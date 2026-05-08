@@ -167,6 +167,11 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
 
     programmaticScroll.current = true;
     virtualizer.scrollToIndex(nodes.length - 1, { align: "end" });
+    // Virtualizer may not have measured items yet; force scroll to true bottom
+    requestAnimationFrame(() => {
+      const el = scrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    });
     requestAnimationFrame(() => {
       const el = parentRef.current;
       if (el) el.scrollTop = el.scrollHeight;
