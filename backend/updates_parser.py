@@ -293,6 +293,134 @@ def parse_updates_tail(filepath: str, tail_bytes: int = 102400, agent_label: str
     return entries
 
 
+def count_conversation_turns(filepath: str) -> tuple[int, int]:
+    """Fast count of conversation turns in an updates.jsonl file.
+
+    Returns (turn_count, file_size). Scans for user_message_chunk and
+    agent_message_chunk lines without full JSON parsing.
+    """
+    import os
+    file_size = os.path.getsize(filepath)
+    count = 0
+    with open(filepath, 'rb') as f:
+        for line in f:
+            if b'"user_message_chunk"' in line or b'"agent_message_chunk"' in line:
+                count += 1
+    return count, file_size
+
+
+def parse_updates_page(filepath: str, before_offset: int, limit: int = 50, agent_label: str | None = None) -> tuple[list[dict], int]:
+    """Parse a page of entries ending before the given byte offset.
+
+    Reads backwards from before_offset to find `limit` conversation turns.
+    Returns (entries, new_cursor_offset). Cursor of 0 means no more data.
+    """
+    import os
+    file_size = os.path.getsize(filepath)
+    if before_offset <= 0:
+        before_offset = file_size
+
+    # Read a chunk before the offset. Start with ~2MB per 50 entries (generous).
+    chunk_size = max(limit * 40_000, 1024 * 1024)
+    start = max(0, before_offset - chunk_size)
+
+    with open(filepath) as f:
+        f.seek(start)
+        if start > 0:
+            f.readline()  # discard partial line
+        content_start = f.tell()
+        lines = []
+        while f.tell() < before_offset:
+            line = f.readline()
+            if not line:
+                break
+            pos = f.tell()
+            if pos > before_offset:
+                break
+            stripped = line.strip()
+            if stripped:
+                try:
+                    lines.append((json.loads(stripped), pos))
+                except json.JSONDecodeError:
+                    pass
+
+    # Parse into entries using the same grouping logic
+    entries = []
+    current_agent = None
+    current_thinking = None
+
+    for event, _pos in lines:
+        params = event.get("params", {})
+        update = params.get("update", {})
+        su = update.get("sessionUpdate", "")
+        ts = event.get("timestamp", 0)
+        meta = params.get("_meta", {})
+        event_id = meta.get("eventId", "")
+
+        if su == "user_message_chunk":
+            if current_agent:
+                entries.append(current_agent)
+                current_agent = None
+            current_thinking = None
+            text = update.get("content", {}).get("text", "")
+            if not text.strip():
+                continue
+            entries.append({
+                "id": event_id or new_id(),
+                "role": "user",
+                "content": text,
+                "thinking": None,
+                "timestamp": ts * 1000,
+                "tools": [],
+                "model": None,
+            })
+        elif su == "agent_thought_chunk":
+            thinking_text = update.get("content", {}).get("text", "")
+            if thinking_text.strip():
+                current_thinking = (current_thinking or "") + thinking_text
+        elif su == "agent_message_chunk":
+            text = update.get("content", {}).get("text", "")
+            model = meta.get("modelId", "")
+            if current_agent and current_agent.get("_turn_ts") == ts:
+                current_agent["content"] += text
+            else:
+                if current_agent:
+                    entries.append(current_agent)
+                current_agent = {
+                    "id": event_id or new_id(),
+                    "role": "assistant",
+                    "content": text,
+                    "thinking": current_thinking,
+                    "timestamp": ts * 1000,
+                    "tools": [],
+                    "model": model,
+                    "agent_label": agent_label,
+                    "_turn_ts": ts,
+                }
+                current_thinking = None
+        elif su == "tool_call":
+            tool_id = update.get("toolCallId", "")
+            title = update.get("title", "")
+            if current_agent:
+                current_agent["tools"].append({"id": tool_id, "name": title})
+        elif su == "compaction_checkpoint":
+            if current_agent:
+                entries.append(current_agent)
+                current_agent = None
+
+    if current_agent:
+        entries.append(current_agent)
+    for e in entries:
+        e.pop("_turn_ts", None)
+
+    # Take only the last `limit` entries
+    if len(entries) > limit:
+        entries = entries[-limit:]
+
+    new_cursor = content_start if start > 0 else 0
+    return entries, new_cursor
+
+
 def build_state_from_updates(filepath: str, label: str = "Session", live_session_id: str | None = None, agent_label: str | None = None, tail_only: bool = False, tail_bytes: int = 102400) -> StateSnapshot:
     """Full pipeline: updates.jsonl -> StateSnapshot.
 

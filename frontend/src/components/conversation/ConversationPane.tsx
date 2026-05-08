@@ -59,6 +59,11 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   const historyAgent = useArenaStore((s) => s.historyAgent);
   const setHistoryAgent = useArenaStore((s) => s.setHistoryAgent);
   const setHistoryTree = useArenaStore((s) => s.setHistoryTree);
+  const historyCursor = useArenaStore((s) => s.historyCursor);
+  const historyLoading = useArenaStore((s) => s.historyLoading);
+  const setHistoryMeta = useArenaStore((s) => s.setHistoryMeta);
+  const prependHistoryNodes = useArenaStore((s) => s.prependHistoryNodes);
+  const setHistoryLoading = useArenaStore((s) => s.setHistoryLoading);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const userScrolling = useRef(false);
@@ -101,8 +106,14 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     const el = parentRef.current;
     if (!el) return;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+    const atTop = el.scrollTop < 100;
     userScrolledUp.current = !atBottom;
     setShowJumpButton(!atBottom && nodes.length > 20);
+
+    // Trigger lazy loading when scrolled near top in history pane
+    if (atTop && readOnly && historyCursor > 0 && !historyLoading) {
+      loadOlderHistory();
+    }
 
     // Find the node closest to viewport center (replaces IntersectionObserver)
     const viewportCenter = el.scrollTop + el.clientHeight / 2;
@@ -121,7 +132,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
         useArenaStore.getState().reportViewportFocus(paneId, node.id);
       }
     }
-  }, [selectNode, paneId, virtualizer]);
+  }, [selectNode, paneId, virtualizer, readOnly, historyCursor, historyLoading, loadOlderHistory]);
 
   // Auto-scroll to bottom on new content (live pane) or data load (both panes)
   const prevNodeCount = useRef(0);
@@ -164,8 +175,26 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
       setHistoryTree(null);
     } else if (d.tree) {
       setHistoryTree(d.tree);
+      if (d.cursor !== undefined) setHistoryMeta(d.cursor, d.totalNodes ?? 0);
     }
   };
+
+  // Lazy load older history when scrolling to top
+  const basePath = window.location.pathname.replace(/\/+$/, "");
+  const loadOlderHistory = useCallback(() => {
+    if (!readOnly || historyCursor <= 0 || historyLoading) return;
+    setHistoryLoading(true);
+    const params = new URLSearchParams({ before: String(historyCursor), limit: "50" });
+    fetch(`${basePath}/api/agent/${historyAgent}/history/page?${params}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.status === "ok" && d.tree) {
+          prependHistoryNodes(d.tree, d.cursor);
+        }
+        setHistoryLoading(false);
+      })
+      .catch(() => setHistoryLoading(false));
+  }, [readOnly, historyCursor, historyLoading, historyAgent, basePath, setHistoryLoading, prependHistoryNodes]);
 
   const jumpToLatest = useCallback(() => {
     if (nodes.length === 0) return;
@@ -218,6 +247,16 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
         </div>
       )}
       <div ref={parentRef} onScroll={handleScroll} className="flex-1 overflow-y-auto" style={{ zoom }} data-testid="conversation-messages">
+        {readOnly && historyLoading && (
+          <div className="px-4 py-2 text-center text-xs text-muted-foreground animate-pulse" data-testid="history-loading-older">
+            Loading older messages...
+          </div>
+        )}
+        {readOnly && historyCursor <= 0 && nodes.length > 0 && (
+          <div className="px-4 py-2 text-center text-[10px] text-muted-foreground/50">
+            Beginning of history
+          </div>
+        )}
         <div style={{ height: virtualizer.getTotalSize(), width: "100%", position: "relative" }}>
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const node = nodes[virtualRow.index];

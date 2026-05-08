@@ -1847,8 +1847,9 @@ async def get_agent_history(name: str, sessionId: str | None = None, tailMB: int
     Uses tail-based loading for performance (large files can be 800MB+).
     Optional sessionId query param loads a specific historical session.
     tailMB controls how much of the file to read (default 5MB = ~50+ turns).
+    Returns cursor (byte offset) for pagination and totalNodes estimate.
     """
-    from updates_parser import build_state_from_updates
+    from updates_parser import build_state_from_updates, count_conversation_turns
     if sessionId:
         updates_path = _get_updates_path_for_session(name, sessionId)
     else:
@@ -1862,9 +1863,42 @@ async def get_agent_history(name: str, sessionId: str | None = None, tailMB: int
         build_state_from_updates, str(updates_path), label=name,
         tail_only=use_tail, tail_bytes=tail_bytes
     )
+    # Cursor for pagination: byte offset where tail started
+    cursor = max(0, file_size - tail_bytes) if use_tail else 0
+    # Count total turns for virtualizer height (cached per session)
+    total_nodes = len(st.tree.nodes)
+    if use_tail:
+        total_nodes_est, _ = await asyncio.to_thread(count_conversation_turns, str(updates_path))
+        total_nodes = total_nodes_est
     return {
         "status": "ok", "agent": name, "tree": st.tree.model_dump(),
         "truncated": use_tail, "fileSize": file_size,
+        "cursor": cursor, "totalNodes": total_nodes,
+    }
+
+
+@app.get("/api/agent/{name}/history/page")
+async def get_agent_history_page(name: str, before: int, limit: int = 50, sessionId: str | None = None):
+    """Load a page of older history entries before the given byte offset.
+
+    Returns entries as flat nodes (not a full tree) + new cursor.
+    Cursor of 0 means beginning of file reached.
+    """
+    from updates_parser import parse_updates_page, build_tree_from_updates
+    if sessionId:
+        updates_path = _get_updates_path_for_session(name, sessionId)
+    else:
+        updates_path = get_agent_updates_path(name)
+    if not updates_path:
+        return {"status": "error", "message": f"No session data for {name}"}
+    entries, new_cursor = await asyncio.to_thread(
+        parse_updates_page, str(updates_path), before_offset=before,
+        limit=min(limit, 200), agent_label=name
+    )
+    tree = build_tree_from_updates(entries, label=name)
+    return {
+        "status": "ok", "agent": name, "tree": tree.model_dump(),
+        "cursor": new_cursor, "nodeCount": len(entries),
     }
 
 

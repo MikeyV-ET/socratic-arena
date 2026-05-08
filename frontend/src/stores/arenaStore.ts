@@ -101,12 +101,18 @@ interface ArenaState {
   momentsAgent: string;
   agents: { name: string; hasNotebook: boolean; hasSession: boolean; healthStatus: string | null }[];
   historyTree: ConversationTree | null;
+  historyCursor: number;
+  historyTotalNodes: number;
+  historyLoading: boolean;
   setCurrentAgent: (agent: string) => void;
   setHistoryAgent: (agent: string) => void;
   setNotebookAgent: (agent: string) => void;
   setMomentsAgent: (agent: string) => void;
   setAgents: (agents: ArenaState["agents"]) => void;
   setHistoryTree: (tree: ConversationTree | null) => void;
+  setHistoryMeta: (cursor: number, totalNodes: number) => void;
+  prependHistoryNodes: (tree: ConversationTree, newCursor: number) => void;
+  setHistoryLoading: (loading: boolean) => void;
   getHistoryBranchNodes: () => ConversationNode[];
 
   // Connection
@@ -281,12 +287,48 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
   momentsAgent: "",
   agents: [],
   historyTree: null,
-  setCurrentAgent: (agent) => set({ currentAgent: agent, historyAgent: agent, notebookAgent: agent, momentsAgent: agent, historyTree: null }),
+  historyCursor: 0,
+  historyTotalNodes: 0,
+  historyLoading: false,
+  setCurrentAgent: (agent) => set({ currentAgent: agent, historyAgent: agent, notebookAgent: agent, momentsAgent: agent, historyTree: null, historyCursor: 0, historyTotalNodes: 0 }),
   setHistoryAgent: (agent) => set({ historyAgent: agent }),
   setNotebookAgent: (agent) => set({ notebookAgent: agent }),
   setMomentsAgent: (agent) => set({ momentsAgent: agent }),
   setAgents: (agents) => set({ agents }),
   setHistoryTree: (tree) => set({ historyTree: tree }),
+  setHistoryMeta: (cursor, totalNodes) => set({ historyCursor: cursor, historyTotalNodes: totalNodes }),
+  setHistoryLoading: (loading) => set({ historyLoading: loading }),
+  prependHistoryNodes: (olderTree, newCursor) => set((state) => {
+    const existing = state.historyTree;
+    if (!existing) return { historyTree: olderTree, historyCursor: newCursor };
+    // Merge: older nodes go before existing nodes
+    const mergedNodes = { ...olderTree.nodes, ...existing.nodes };
+    // Find new root: olderTree's root is the oldest node
+    const olderRoot = olderTree.rootNodeId;
+    // Connect older tree's leaf to existing tree's root
+    const existingRoot = existing.rootNodeId;
+    if (mergedNodes[existingRoot] && olderRoot) {
+      // Find the last node in the older branch (deepest child along main branch)
+      let leaf = olderRoot;
+      const visited = new Set<string>();
+      while (mergedNodes[leaf] && mergedNodes[leaf].children.length > 0 && !visited.has(leaf)) {
+        visited.add(leaf);
+        leaf = mergedNodes[leaf].children[mergedNodes[leaf].children.length - 1];
+      }
+      if (leaf && mergedNodes[leaf] && !mergedNodes[leaf].children.includes(existingRoot)) {
+        mergedNodes[leaf] = { ...mergedNodes[leaf], children: [...mergedNodes[leaf].children, existingRoot] };
+      }
+      if (mergedNodes[existingRoot]) {
+        mergedNodes[existingRoot] = { ...mergedNodes[existingRoot], parentId: leaf };
+      }
+    }
+    const mergedTree: ConversationTree = {
+      ...existing,
+      nodes: mergedNodes,
+      rootNodeId: olderRoot || existing.rootNodeId,
+    };
+    return { historyTree: mergedTree, historyCursor: newCursor };
+  }),
 
   getHistoryBranchNodes: () => {
     const state = get();
