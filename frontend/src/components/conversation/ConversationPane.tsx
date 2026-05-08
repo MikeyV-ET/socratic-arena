@@ -61,6 +61,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   const setHistoryTree = useArenaStore((s) => s.setHistoryTree);
   const historyCursor = useArenaStore((s) => s.historyCursor);
   const historyLoading = useArenaStore((s) => s.historyLoading);
+  const historyTotalNodes = useArenaStore((s) => s.historyTotalNodes);
   const setHistoryMeta = useArenaStore((s) => s.setHistoryMeta);
   const prependHistoryNodes = useArenaStore((s) => s.prependHistoryNodes);
   const setHistoryLoading = useArenaStore((s) => s.setHistoryLoading);
@@ -354,6 +355,10 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
           <div className="px-4 py-2 text-center text-[10px] text-muted-foreground/50">
             Beginning of history
           </div>
+        )}
+        {/* Spacer for unloaded content above (R05: scrollbar accuracy) */}
+        {readOnly && historyTotalNodes > nodes.length && historyCursor > 0 && (
+          <div style={{ height: (historyTotalNodes - nodes.length) * 60, minHeight: 0 }} />
         )}
         <div style={{ height: virtualizer.getTotalSize(), width: "100%", position: "relative" }}>
           {virtualizer.getVirtualItems().map((virtualRow) => {

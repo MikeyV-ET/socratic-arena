@@ -30,10 +30,10 @@ function PanelTab({ panel, isActive, onSelect, onClose, agentControlled }: {
       <span className="truncate max-w-[120px]">{panel.label}</span>
       <button
         onClick={(e) => { e.stopPropagation(); onClose(); }}
-        className="ml-1 text-muted-foreground hover:text-destructive transition-colors text-[10px]"
+        className="ml-1 text-muted-foreground hover:text-destructive transition-colors text-base leading-none px-1 py-0.5"
         title="Close panel"
       >
-        x
+        &times;
       </button>
     </div>
   );

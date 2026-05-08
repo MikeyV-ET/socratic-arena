@@ -145,7 +145,7 @@ function TabBar({ activeTab, onSelect, splitControls }: {
           {openTabIds.length > 1 && (
             <button
               onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
-              className="ml-1 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive text-sm leading-none px-0.5 transition-opacity"
+              className="ml-1 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive text-lg leading-none px-1 py-0.5 transition-opacity"
               title="Close tab"
               data-testid={`close-tab-${tab.id}`}
             >
