@@ -123,20 +123,26 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     }
   }, [selectNode, paneId, virtualizer]);
 
-  // Auto-scroll to bottom when triggered, unless user scrolled up
-  // Only the live conversation pane auto-scrolls; history pane stays put
+  // Auto-scroll to bottom on new content (live pane) or data load (both panes)
+  const prevNodeCount = useRef(0);
   useEffect(() => {
-    if (readOnly) return;
     if (nodes.length === 0) return;
-    if (!userScrolledUp.current) {
-      programmaticScroll.current = true;
-      virtualizer.scrollToIndex(nodes.length - 1, { align: "end" });
-      requestAnimationFrame(() => {
-        const el = parentRef.current;
-        if (el) el.scrollTop = el.scrollHeight;
-        setTimeout(() => { programmaticScroll.current = false; }, 200);
-      });
-    }
+    // For readOnly (history): only scroll to bottom on initial load or data source change
+    // For live pane: scroll on every new node unless user scrolled up
+    const isInitialLoad = prevNodeCount.current === 0;
+    const isDataSourceChange = effectiveTree.rootNodeId !== prevRootId.current;
+    prevNodeCount.current = nodes.length;
+
+    if (readOnly && !isInitialLoad && !isDataSourceChange) return;
+    if (!readOnly && userScrolledUp.current) return;
+
+    programmaticScroll.current = true;
+    virtualizer.scrollToIndex(nodes.length - 1, { align: "end" });
+    requestAnimationFrame(() => {
+      const el = parentRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+      setTimeout(() => { programmaticScroll.current = false; }, 200);
+    });
   }, [readOnly, nodes.length, effectiveTree.rootNodeId, scrollTrigger, virtualizer]);
 
   // Scroll to specific node (cross-pane navigation)
@@ -234,14 +240,14 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
               >
-                <Message node={node} readOnly={readOnly} />
+                <Message node={node} />
               </div>
             );
           })}
         </div>
         <ActivityIndicator readOnly={readOnly} />
       </div>
-      {showJumpButton && !readOnly && (
+      {showJumpButton && (
         <button
           onClick={jumpToLatest}
           className="absolute bottom-20 right-4 z-10 px-3 py-1.5 rounded-full bg-primary text-primary-foreground text-xs font-medium shadow-lg hover:bg-primary/90 transition-colors"

@@ -4,17 +4,14 @@ import remarkGfm from "remark-gfm";
 import type { ConversationNode } from "@/types";
 import { useArenaStore } from "@/stores/arenaStore";
 import { FlagButton } from "./FlagButton";
-import { ForkButton } from "./ForkButton";
-import { CorrectionButton } from "./CorrectionButton";
 
 const proseClass = "text-sm text-foreground leading-relaxed prose prose-sm max-w-none prose-p:my-1.5 prose-li:my-0.5 prose-table:text-xs prose-th:text-left prose-td:px-2 prose-td:py-1 prose-th:px-2 prose-th:py-1";
 
 interface MessageProps {
   node: ConversationNode;
-  readOnly?: boolean;
 }
 
-export function Message({ node, readOnly = false }: MessageProps) {
+export function Message({ node }: MessageProps) {
   const [showThinking, setShowThinking] = useState(false);
   const tree = useArenaStore((s) => s.tree);
   const theme = useArenaStore((s) => s.theme);
@@ -80,8 +77,6 @@ export function Message({ node, readOnly = false }: MessageProps) {
           <div className={`flex items-center gap-1 transition-opacity ${
             node.flags.length > 0 ? "opacity-100" : "opacity-0 group-hover:opacity-100"
           }`}>
-            {!readOnly && <ForkButton node={node} />}
-            {!readOnly && <CorrectionButton node={node} />}
             <FlagButton node={node} />
           </div>
         </div>

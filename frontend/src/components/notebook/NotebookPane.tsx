@@ -40,6 +40,17 @@ export function NotebookPane() {
     overscan: 3,
   });
 
+  // Scroll to bottom on initial load or agent switch
+  const prevEntryCount = useRef(0);
+  useEffect(() => {
+    if (entries.length === 0) return;
+    const wasEmpty = prevEntryCount.current === 0;
+    prevEntryCount.current = entries.length;
+    if (wasEmpty) {
+      virtualizer.scrollToIndex(entries.length - 1, { align: "end" });
+    }
+  }, [entries.length, virtualizer]);
+
   // Scroll to specific notebook entry (from workspace.navigate or moment navigation)
   useEffect(() => {
     if (!notebookScrollTargetId) return;
