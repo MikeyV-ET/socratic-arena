@@ -549,11 +549,13 @@ async def websocket_endpoint(ws: WebSocket):
 ATTACHMENTS_DIR = Path(tempfile.gettempdir()) / "arena_attachments"
 
 
+INLINE_SIZE_LIMIT = 200  # bytes; larger files go to disk with notification
+
 def _process_attachments(attachments: list[dict]) -> tuple[str, list[str]]:
     """Process file attachments from conversation.send payload.
 
     Returns (text_to_append_to_prompt, list_of_saved_file_paths).
-    Text files are inlined; binary files are saved to disk.
+    Small text files (<=200 bytes) are inlined; everything else is saved to disk.
     """
     TEXT_TYPES = {"text/", "application/json", "application/xml", "application/javascript"}
     TEXT_EXTS = {".txt", ".md", ".py", ".json", ".jsonl", ".csv", ".tsv", ".xml",
@@ -578,7 +580,7 @@ def _process_attachments(attachments: list[dict]) -> tuple[str, list[str]]:
         ext = Path(name).suffix.lower()
         is_text = any(mime.startswith(t) for t in TEXT_TYPES) or ext in TEXT_EXTS
 
-        if is_text:
+        if is_text and len(raw) <= INLINE_SIZE_LIMIT:
             try:
                 text_content = raw.decode("utf-8")
             except UnicodeDecodeError:
@@ -589,8 +591,8 @@ def _process_attachments(attachments: list[dict]) -> tuple[str, list[str]]:
             filepath = ATTACHMENTS_DIR / f"{new_id()}_{name}"
             filepath.write_bytes(raw)
             saved_paths.append(str(filepath))
-            inline_parts.append(f"\n\n[Attached file saved to: {filepath}]")
-            log.info("Saved binary attachment: %s -> %s (%d bytes)", name, filepath, len(raw))
+            inline_parts.append(f"\n\n[Attached file: {name} ({len(raw):,} bytes) saved to: {filepath}]")
+            log.info("Saved attachment to disk: %s -> %s (%d bytes)", name, filepath, len(raw))
 
     return "".join(inline_parts), saved_paths
 
