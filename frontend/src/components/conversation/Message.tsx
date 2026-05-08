@@ -99,6 +99,17 @@ export function Message({ node }: MessageProps) {
           </div>
         )}
 
+        {/* Tool call indicators */}
+        {node.metadata?.toolCalls && node.metadata.toolCalls.length > 0 && (
+          <div className="flex flex-wrap gap-1 mb-1.5">
+            {node.metadata.toolCalls.map((tc, i) => (
+              <span key={tc.toolCallId || i} className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border/50">
+                {tc.title || "tool call"}
+              </span>
+            ))}
+          </div>
+        )}
+
         {/* Content */}
         <div className={`${proseClass}${theme === "dark" ? " prose-invert" : ""}`}>
           <Markdown remarkPlugins={[remarkGfm]}>{displayContent}</Markdown>

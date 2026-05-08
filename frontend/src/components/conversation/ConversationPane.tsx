@@ -202,6 +202,21 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     }
   }, [searchQuery, executeSearch]);
 
+  // Listen for agent-driven search
+  useEffect(() => {
+    if (!readOnly) return;
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.pane === "history" && detail?.query) {
+        setSearchActive(true);
+        setSearchQuery(detail.query);
+        executeSearch(detail.query);
+      }
+    };
+    window.addEventListener("sa-search", handler);
+    return () => window.removeEventListener("sa-search", handler);
+  }, [readOnly, executeSearch]);
+
   const handleHistoryDataLoaded = (d: any) => {
     if (d === null) {
       setHistoryTree(null);

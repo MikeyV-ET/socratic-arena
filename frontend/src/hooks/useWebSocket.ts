@@ -218,6 +218,15 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       break;
     }
 
+    case "workspace.search": {
+      const pane = msg.payload.pane as string;
+      const query = msg.payload.query as string;
+      if (pane && query) {
+        window.dispatchEvent(new CustomEvent("sa-search", { detail: { pane, query } }));
+      }
+      break;
+    }
+
     case "doc.created":
     case "doc.deleted":
       window.dispatchEvent(new CustomEvent("sa-docs-changed"));

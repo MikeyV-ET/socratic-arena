@@ -102,6 +102,20 @@ export function NotebookPane() {
     else if (e.key === "Escape") { setNbSearchActive(false); setNbSearchResults([]); setNbSearchQuery(""); }
   }, [nbSearchQuery, executeNbSearch]);
 
+  // Listen for agent-driven search
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.pane === "notebook" && detail?.query) {
+        setNbSearchActive(true);
+        setNbSearchQuery(detail.query);
+        executeNbSearch(detail.query);
+      }
+    };
+    window.addEventListener("sa-search", handler);
+    return () => window.removeEventListener("sa-search", handler);
+  }, [executeNbSearch]);
+
   return (
     <div className="flex flex-col h-full bg-card" data-testid="notebook-pane">
       <div className="px-3 py-2 border-b border-border">
