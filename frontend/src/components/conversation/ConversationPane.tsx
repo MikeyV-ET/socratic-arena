@@ -174,11 +174,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     };
     setTimeout(scrollToBottom, 100);
     setTimeout(scrollToBottom, 300);
-    requestAnimationFrame(() => {
-      const el = parentRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
-      setTimeout(() => { programmaticScroll.current = false; }, 200);
-    });
+    setTimeout(() => { programmaticScroll.current = false; }, 500);
   }, [readOnly, nodes.length, effectiveTree.rootNodeId, scrollTrigger, virtualizer]);
 
   // Scroll to specific node (cross-pane navigation)
