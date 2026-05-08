@@ -43,21 +43,30 @@ export function NotebookPane() {
   // Scroll to bottom on initial load or agent switch
   const prevEntryCount = useRef(0);
   const prevNotebookAgent = useRef(notebookAgent);
+  // Reset entry count tracking when agent changes so the new entries trigger scroll
+  useEffect(() => {
+    if (prevNotebookAgent.current !== notebookAgent) {
+      prevEntryCount.current = 0;
+      prevNotebookAgent.current = notebookAgent;
+    }
+  }, [notebookAgent]);
   useEffect(() => {
     if (entries.length === 0) return;
     const wasEmpty = prevEntryCount.current === 0;
-    const agentChanged = prevNotebookAgent.current !== notebookAgent;
     prevEntryCount.current = entries.length;
-    prevNotebookAgent.current = notebookAgent;
-    if (wasEmpty || agentChanged) {
-      virtualizer.scrollToIndex(entries.length - 1, { align: "end" });
-      const scrollToBottom = () => {
-        const el = parentRef.current;
-        if (el) el.scrollTop = el.scrollHeight;
-      };
-      setTimeout(scrollToBottom, 100);
-      setTimeout(scrollToBottom, 300);
-    }
+    if (!wasEmpty) return;
+    virtualizer.scrollToIndex(entries.length - 1, { align: "end" });
+    // Virtualizer measures large entries asynchronously; keep scrolling to
+    // bottom as measurements arrive (estimateSize=200 but real entries are
+    // often thousands of px tall, so scrollHeight keeps growing).
+    const start = performance.now();
+    const rafScroll = () => {
+      const el = scrollRef.current;
+      if (!el || performance.now() - start > 1500) return;
+      el.scrollTop = el.scrollHeight;
+      requestAnimationFrame(rafScroll);
+    };
+    requestAnimationFrame(rafScroll);
   }, [entries.length, virtualizer, notebookAgent]);
 
   // Scroll to specific notebook entry (from workspace.navigate or moment navigation)

@@ -177,6 +177,23 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     setTimeout(() => { programmaticScroll.current = false; }, 500);
   }, [readOnly, nodes.length, effectiveTree.rootNodeId, scrollTrigger, virtualizer]);
 
+  // Re-scroll after spacer renders (historyTotalNodes arrives in a separate state update,
+  // so the spacer div appears after scroll-to-bottom has already fired)
+  const prevTotalNodes = useRef(0);
+  useEffect(() => {
+    if (!readOnly || historyTotalNodes === prevTotalNodes.current) return;
+    prevTotalNodes.current = historyTotalNodes;
+    if (nodes.length === 0 || userScrolledUp.current) return;
+    programmaticScroll.current = true;
+    const el = parentRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    setTimeout(() => {
+      const el2 = parentRef.current;
+      if (el2) el2.scrollTop = el2.scrollHeight;
+      programmaticScroll.current = false;
+    }, 100);
+  }, [readOnly, historyTotalNodes, nodes.length]);
+
   // Scroll to specific node (cross-pane navigation)
   useEffect(() => {
     if (!scrollTargetId) return;
