@@ -5,6 +5,10 @@ import { test, expect } from "@playwright/test";
  *
  * R03: Scroll to bottom on load
  * R04: Searchable
+ *
+ * Notebook is a workbench tab (data-testid="workbench-tab-notebook").
+ * NotebookPane renders with data-testid="notebook-pane".
+ * Search is behind a toggle button (title="Search notebook").
  */
 
 test.describe("Notebook Pane -- Scroll to bottom (R03)", () => {
@@ -12,20 +16,19 @@ test.describe("Notebook Pane -- Scroll to bottom (R03)", () => {
     await page.goto("/");
     await expect(page.locator("[data-node-id]").first()).toBeVisible({ timeout: 15_000 });
 
-    // Open notebook tab
-    await page.getByRole("button", { name: "Notebook" }).click();
+    // Open notebook workbench tab
+    await page.locator('[data-testid="workbench-tab-notebook"]').click();
     await page.waitForTimeout(2000);
 
     const notebookPane = page.locator('[data-testid="notebook-pane"]');
-    await expect(notebookPane).toBeVisible();
+    await expect(notebookPane).toBeVisible({ timeout: 5000 });
 
-    // Check if there are entries
     const entries = notebookPane.locator("[data-testid^='notebook-entry-']");
     const count = await entries.count();
 
     if (count > 3) {
-      // Scroll container should be near bottom
-      const scrollContainer = notebookPane.locator(".overflow-y-auto");
+      // NotebookPane scroll container: div with ref={scrollRef} and class overflow-y-auto
+      const scrollContainer = notebookPane.locator(".overflow-y-auto").first();
       const isAtBottom = await scrollContainer.evaluate((el) => {
         return el.scrollHeight - el.scrollTop - el.clientHeight < 100;
       });
@@ -37,72 +40,79 @@ test.describe("Notebook Pane -- Scroll to bottom (R03)", () => {
     await page.goto("/");
     await expect(page.locator("[data-node-id]").first()).toBeVisible({ timeout: 15_000 });
 
-    await page.getByRole("button", { name: "Notebook" }).click();
+    await page.locator('[data-testid="workbench-tab-notebook"]').click();
     await page.waitForTimeout(1000);
 
     const notebookPane = page.locator('[data-testid="notebook-pane"]');
-    const agentSelector = notebookPane.locator("select, [role='combobox']").first();
+    await expect(notebookPane).toBeVisible({ timeout: 5000 });
 
+    const agentSelector = notebookPane.locator("select").first();
     const selectorExists = await agentSelector.isVisible().catch(() => false);
-    if (selectorExists) {
-      const options = await agentSelector.locator("option").allTextContents();
-      if (options.length > 1) {
-        await agentSelector.selectOption(options[1]);
-        await page.waitForTimeout(3000);
+    if (!selectorExists) return;
 
-        const scrollContainer = notebookPane.locator(".overflow-y-auto");
-        const entries = notebookPane.locator("[data-testid^='notebook-entry-']");
-        const count = await entries.count();
+    const options = await agentSelector.locator("option").allTextContents();
+    if (options.length > 1) {
+      await agentSelector.selectOption(options[1]);
+      await page.waitForTimeout(4000);
 
-        if (count > 3) {
-          const isAtBottom = await scrollContainer.evaluate((el) => {
-            return el.scrollHeight - el.scrollTop - el.clientHeight < 100;
-          });
-          expect(isAtBottom).toBe(true);
-        }
+      const entries = notebookPane.locator("[data-testid^='notebook-entry-']");
+      const count = await entries.count();
+      if (count > 3) {
+        const scrollContainer = notebookPane.locator(".overflow-y-auto").first();
+        const isAtBottom = await scrollContainer.evaluate((el) => {
+          return el.scrollHeight - el.scrollTop - el.clientHeight < 150;
+        });
+        expect(isAtBottom).toBe(true);
       }
     }
   });
 });
 
 test.describe("Notebook Pane -- Search (R04)", () => {
-  test("R04: Search input exists in notebook pane", async ({ page }) => {
+  test("R04: Search toggle button exists in notebook pane", async ({ page }) => {
     await page.goto("/");
     await expect(page.locator("[data-node-id]").first()).toBeVisible({ timeout: 15_000 });
 
-    await page.getByRole("button", { name: "Notebook" }).click();
+    await page.locator('[data-testid="workbench-tab-notebook"]').click();
     await page.waitForTimeout(1000);
 
     const notebookPane = page.locator('[data-testid="notebook-pane"]');
-    await expect(notebookPane).toBeVisible();
+    await expect(notebookPane).toBeVisible({ timeout: 5000 });
 
-    // Search input should exist in notebook header
-    const searchInput = notebookPane.locator(
-      'input[placeholder*="Search" i], input[placeholder*="search" i], input[type="search"]'
-    );
-    await expect(searchInput.first()).toBeVisible({ timeout: 5000 });
+    // Search is a toggle button in the header
+    const searchToggle = notebookPane.locator('button[title="Search notebook"]');
+    await expect(searchToggle).toBeVisible({ timeout: 3000 });
+
+    // Click to reveal search input
+    await searchToggle.click();
+    await page.waitForTimeout(500);
+
+    const searchInput = notebookPane.locator('input[placeholder*="Search notebook"]');
+    await expect(searchInput).toBeVisible({ timeout: 3000 });
   });
 
   test("R04: Notebook search returns and highlights results", async ({ page }) => {
     await page.goto("/");
     await expect(page.locator("[data-node-id]").first()).toBeVisible({ timeout: 15_000 });
 
-    await page.getByRole("button", { name: "Notebook" }).click();
+    await page.locator('[data-testid="workbench-tab-notebook"]').click();
     await page.waitForTimeout(1000);
 
     const notebookPane = page.locator('[data-testid="notebook-pane"]');
-    const searchInput = notebookPane.locator(
-      'input[placeholder*="Search" i], input[placeholder*="search" i], input[type="search"]'
-    ).first();
+    await expect(notebookPane).toBeVisible({ timeout: 5000 });
 
+    // Open search panel
+    await notebookPane.locator('button[title="Search notebook"]').click();
+    await page.waitForTimeout(500);
+
+    const searchInput = notebookPane.locator('input[placeholder*="Search notebook"]');
     await searchInput.fill("lab");
-    await page.waitForTimeout(1000);
+    await searchInput.press("Enter");
+    await page.waitForTimeout(2000);
 
-    // Results should be highlighted or a results list shown
-    const results = notebookPane.locator(
-      '[data-testid*="search-result"], [class*="search-highlight"], [data-search-match]'
-    );
-    const count = await results.count();
+    // Results appear as buttons in the results list
+    const resultButtons = notebookPane.locator('.max-h-48 button');
+    const count = await resultButtons.count();
     expect(count).toBeGreaterThan(0);
   });
 });

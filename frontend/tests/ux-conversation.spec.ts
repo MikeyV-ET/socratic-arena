@@ -70,7 +70,9 @@ test.describe("Conversation Pane -- Scroll behavior", () => {
     // Give virtualizer time to settle
     await page.waitForTimeout(1000);
 
-    const container = page.locator('[data-testid="conversation-messages"]');
+    // Scope to live conversation pane (not history pane which also uses ConversationPane)
+    const container = page.locator('[data-pane-id="conversation"] [data-testid="conversation-messages"]');
+    await expect(container).toBeVisible({ timeout: 10_000 });
     const isAtBottom = await container.evaluate((el) => {
       return el.scrollHeight - el.scrollTop - el.clientHeight < 50;
     });

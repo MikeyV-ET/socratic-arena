@@ -94,6 +94,23 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     }
   }, [effectiveTree.rootNodeId]);
 
+  // basePath + loadOlderHistory must be declared before handleScroll (which uses them)
+  const basePath = window.location.pathname.replace(/\/+$/, "");
+  const loadOlderHistory = useCallback(() => {
+    if (!readOnly || historyCursor <= 0 || historyLoading) return;
+    setHistoryLoading(true);
+    const params = new URLSearchParams({ before: String(historyCursor), limit: "50" });
+    fetch(`${basePath}/api/agent/${historyAgent}/history/page?${params}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.status === "ok" && d.tree) {
+          prependHistoryNodes(d.tree, d.cursor);
+        }
+        setHistoryLoading(false);
+      })
+      .catch(() => setHistoryLoading(false));
+  }, [readOnly, historyCursor, historyLoading, historyAgent, basePath, setHistoryLoading, prependHistoryNodes]);
+
   // Scroll handler: track user scroll state + find centered visible node
   const handleScroll = useCallback(() => {
     if (programmaticScroll.current) return;
@@ -226,23 +243,6 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
       if (d.cursor !== undefined) setHistoryMeta(d.cursor, d.totalNodes ?? 0);
     }
   };
-
-  // Lazy load older history when scrolling to top
-  const basePath = window.location.pathname.replace(/\/+$/, "");
-  const loadOlderHistory = useCallback(() => {
-    if (!readOnly || historyCursor <= 0 || historyLoading) return;
-    setHistoryLoading(true);
-    const params = new URLSearchParams({ before: String(historyCursor), limit: "50" });
-    fetch(`${basePath}/api/agent/${historyAgent}/history/page?${params}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.status === "ok" && d.tree) {
-          prependHistoryNodes(d.tree, d.cursor);
-        }
-        setHistoryLoading(false);
-      })
-      .catch(() => setHistoryLoading(false));
-  }, [readOnly, historyCursor, historyLoading, historyAgent, basePath, setHistoryLoading, prependHistoryNodes]);
 
   const jumpToLatest = useCallback(() => {
     if (nodes.length === 0) return;
