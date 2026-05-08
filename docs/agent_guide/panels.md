@@ -61,6 +61,96 @@ Release when done:
 POST /api/panel/{id}/agent-release
 ```
 
+## Using Chrome
+
+Once connected via Selenium, common patterns:
+
+### Navigation
+```python
+driver.get("https://docs.google.com")
+driver.back()
+driver.refresh()
+```
+
+### Finding and clicking elements
+```python
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+
+# Wait for element to appear, then click
+btn = WebDriverWait(driver, 10).until(
+    EC.element_to_be_clickable((By.CSS_SELECTOR, "button.submit"))
+)
+btn.click()
+
+# Find by text
+link = driver.find_element(By.LINK_TEXT, "Sign in")
+
+# Find by XPath
+elem = driver.find_element(By.XPATH, "//div[@role='button' and contains(text(), 'New')]")
+```
+
+### Reading page content
+```python
+# Full page text
+text = driver.find_element(By.TAG_NAME, "body").text
+
+# Specific element
+title = driver.find_element(By.CSS_SELECTOR, "h1").text
+
+# Get attribute
+href = driver.find_element(By.CSS_SELECTOR, "a.main-link").get_attribute("href")
+
+# Execute JavaScript
+count = driver.execute_script("return document.querySelectorAll('li').length")
+```
+
+### Typing and forms
+```python
+from selenium.webdriver.common.keys import Keys
+
+search_box = driver.find_element(By.CSS_SELECTOR, "input[type='text']")
+search_box.clear()
+search_box.send_keys("search query")
+search_box.send_keys(Keys.RETURN)
+```
+
+### Screenshots
+```python
+driver.save_screenshot("/tmp/page.png")
+# Or a specific element
+elem.screenshot("/tmp/element.png")
+```
+
+### Waiting for page loads
+```python
+# Wait for specific element to confirm page loaded
+WebDriverWait(driver, 15).until(
+    EC.presence_of_element_located((By.CSS_SELECTOR, ".content-loaded"))
+)
+
+# Wait for URL change
+WebDriverWait(driver, 10).until(EC.url_contains("/dashboard"))
+```
+
+### Multiple tabs
+```python
+# Open new tab
+driver.execute_script("window.open('https://example.com', '_blank')")
+driver.switch_to.window(driver.window_handles[-1])
+
+# Switch back
+driver.switch_to.window(driver.window_handles[0])
+```
+
+### Tips
+- The human sees everything you do in real time -- clicking, typing, navigating
+- Use `WebDriverWait` instead of `time.sleep` -- it's faster and more reliable
+- Claim the panel before starting (`POST /api/panel/{id}/agent-claim`) so the human knows you're driving
+- Update your status as you work (`POST /api/panel/{id}/agent-status {"status": "Filling out form..."}`)
+- If a page has Cloudflare or bot detection, it may block headless-style interactions. The Chrome panel runs with a real display, which helps.
+
 ## Asymmetric Interaction
 
 The human and you interact with the same app through different channels:
