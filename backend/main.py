@@ -1902,6 +1902,55 @@ async def get_agent_history_page(name: str, before: int, limit: int = 50, sessio
     }
 
 
+@app.get("/api/agent/{name}/history/search")
+async def search_agent_history(name: str, q: str, limit: int = 50, sessionId: str | None = None):
+    """Search an agent's conversation history for matching messages."""
+    from updates_parser import search_updates
+    if not q or len(q.strip()) < 2:
+        return {"status": "error", "message": "Query must be at least 2 characters"}
+    if sessionId:
+        updates_path = _get_updates_path_for_session(name, sessionId)
+    else:
+        updates_path = get_agent_updates_path(name)
+    if not updates_path:
+        return {"status": "error", "message": f"No session data for {name}"}
+    results = await asyncio.to_thread(
+        search_updates, str(updates_path), q.strip(),
+        limit=min(limit, 100), agent_label=name
+    )
+    return {"status": "ok", "agent": name, "query": q, "results": results, "count": len(results)}
+
+
+@app.get("/api/agent/{name}/notebook/search")
+async def search_agent_notebook(name: str, q: str, limit: int = 50):
+    """Search an agent's lab notebook entries for matching text."""
+    from notebook_parser import build_notebook
+    if not q or len(q.strip()) < 2:
+        return {"status": "error", "message": "Query must be at least 2 characters"}
+    notebook_path = AGENTS_HOME / name / f"lab_notebook_{name.lower()}.md"
+    if not notebook_path.exists():
+        return {"status": "error", "message": f"No notebook for {name}"}
+    nb = await asyncio.to_thread(build_notebook, str(notebook_path))
+    query_lower = q.strip().lower()
+    results = []
+    for entry in nb.entries:
+        text = (entry.title or "") + " " + (entry.content or "")
+        if query_lower in text.lower():
+            idx = text.lower().index(query_lower)
+            start = max(0, idx - 40)
+            end = min(len(text), idx + len(q) + 40)
+            snippet = ("..." if start > 0 else "") + text[start:end] + ("..." if end < len(text) else "")
+            results.append({
+                "id": entry.id,
+                "title": entry.title,
+                "snippet": snippet,
+                "timestamp": entry.timestamp,
+            })
+            if len(results) >= limit:
+                break
+    return {"status": "ok", "agent": name, "query": q, "results": results, "count": len(results)}
+
+
 # --- Adapter bridge endpoints (asdaaas arena adapter uses these) ---
 
 _pending_user_messages: list[dict] = []

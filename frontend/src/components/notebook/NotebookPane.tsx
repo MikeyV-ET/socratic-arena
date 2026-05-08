@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -78,18 +78,87 @@ export function NotebookPane() {
     if (entry.eventIdRange[0]) scrollToNode(entry.eventIdRange[0]);
   }, [reportWorkbenchFocus, scrollToNode]);
 
+  // Notebook search
+  const basePath = window.location.pathname.replace(/\/+$/, "");
+  const [nbSearchQuery, setNbSearchQuery] = useState("");
+  const [nbSearchResults, setNbSearchResults] = useState<{ id: string; title: string; snippet: string }[]>([]);
+  const [nbSearchActive, setNbSearchActive] = useState(false);
+  const [nbSearching, setNbSearching] = useState(false);
+
+  const executeNbSearch = useCallback((query: string) => {
+    if (query.length < 2) { setNbSearchResults([]); return; }
+    setNbSearching(true);
+    fetch(`${basePath}/api/agent/${notebookAgent}/notebook/search?q=${encodeURIComponent(query)}&limit=50`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.status === "ok") setNbSearchResults(d.results ?? []);
+        setNbSearching(false);
+      })
+      .catch(() => setNbSearching(false));
+  }, [notebookAgent, basePath]);
+
+  const handleNbSearchKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && nbSearchQuery.length >= 2) executeNbSearch(nbSearchQuery);
+    else if (e.key === "Escape") { setNbSearchActive(false); setNbSearchResults([]); setNbSearchQuery(""); }
+  }, [nbSearchQuery, executeNbSearch]);
+
   return (
     <div className="flex flex-col h-full bg-card" data-testid="notebook-pane">
-      <div className="px-3 py-2 border-b border-border flex items-center justify-between">
-        <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-          Lab Notebook
-        </h2>
-        <PaneAgentSelector
-          value={notebookAgent}
-          onChange={setNotebookAgent}
-          dataType="notebook"
-          onDataLoaded={(d: any) => { if (d.notebook) setNotebook(d.notebook); }}
-        />
+      <div className="px-3 py-2 border-b border-border">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            Lab Notebook
+          </h2>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => { setNbSearchActive(!nbSearchActive); if (nbSearchActive) { setNbSearchResults([]); setNbSearchQuery(""); } }}
+              className={`px-1.5 py-0.5 rounded text-[10px] border transition-colors ${nbSearchActive ? "bg-accent/20 text-accent border-accent/40" : "text-muted-foreground border-border hover:text-foreground hover:bg-muted"}`}
+              title="Search notebook"
+            >
+              Search
+            </button>
+            <PaneAgentSelector
+              value={notebookAgent}
+              onChange={setNotebookAgent}
+              dataType="notebook"
+              onDataLoaded={(d: any) => { if (d.notebook) setNotebook(d.notebook); }}
+            />
+          </div>
+        </div>
+        {nbSearchActive && (
+          <div className="px-3 py-1 border-t border-border/30">
+            <input
+              type="text"
+              value={nbSearchQuery}
+              onChange={(e) => setNbSearchQuery(e.target.value)}
+              onKeyDown={handleNbSearchKeyDown}
+              placeholder="Search notebook... (Enter to search)"
+              className="w-full bg-muted text-foreground text-xs px-2 py-1 rounded border border-border focus:outline-none focus:ring-1 focus:ring-ring"
+              autoFocus
+            />
+            {nbSearching && <div className="text-[10px] text-muted-foreground mt-1 animate-pulse">Searching...</div>}
+            {!nbSearching && nbSearchResults.length > 0 && (
+              <div className="mt-1 max-h-48 overflow-y-auto space-y-1">
+                {nbSearchResults.map((r, i) => (
+                  <button
+                    key={`${r.id}-${i}`}
+                    onClick={() => {
+                      const idx = entries.findIndex((e) => e.id === r.id);
+                      if (idx !== -1) virtualizer.scrollToIndex(idx, { align: "center" });
+                    }}
+                    className="w-full text-left px-2 py-1 rounded text-[10px] hover:bg-muted/50 transition-colors"
+                  >
+                    <span className="font-medium text-foreground">{r.title}</span>
+                    <span className="text-muted-foreground ml-1">{r.snippet}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {!nbSearching && nbSearchQuery.length >= 2 && nbSearchResults.length === 0 && (
+              <div className="text-[10px] text-muted-foreground mt-1">No results</div>
+            )}
+          </div>
+        )}
       </div>
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3">
         {entries.length === 0 ? (

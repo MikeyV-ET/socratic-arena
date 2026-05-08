@@ -421,6 +421,103 @@ def parse_updates_page(filepath: str, before_offset: int, limit: int = 50, agent
     return entries, new_cursor
 
 
+def search_updates(filepath: str, query: str, limit: int = 50, agent_label: str | None = None) -> list[dict]:
+    """Search updates.jsonl for messages matching query string.
+
+    Returns list of {id, role, snippet, offset, timestamp} for matching messages.
+    Case-insensitive substring search across message content.
+    """
+    import os
+    query_lower = query.lower()
+    results = []
+
+    with open(filepath) as f:
+        current_agent = None
+
+        while True:
+            line_offset = f.tell()
+            line = f.readline()
+            if not line:
+                break
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                event = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+
+            params = event.get("params", {})
+            update = params.get("update", {})
+            su = update.get("sessionUpdate", "")
+            ts = event.get("timestamp", 0)
+            meta = params.get("_meta", {})
+            event_id = meta.get("eventId", "")
+
+            if su == "user_message_chunk":
+                # Flush pending agent
+                if current_agent and query_lower in current_agent["content"].lower():
+                    results.append(current_agent)
+                    if len(results) >= limit:
+                        break
+                current_agent = None
+
+                text = update.get("content", {}).get("text", "")
+                if text.strip() and query_lower in text.lower():
+                    # Find snippet around match
+                    idx = text.lower().index(query_lower)
+                    start = max(0, idx - 40)
+                    end = min(len(text), idx + len(query) + 40)
+                    snippet = ("..." if start > 0 else "") + text[start:end] + ("..." if end < len(text) else "")
+                    results.append({
+                        "id": event_id or new_id(),
+                        "role": "user",
+                        "snippet": snippet,
+                        "offset": line_offset,
+                        "timestamp": ts * 1000,
+                    })
+                    if len(results) >= limit:
+                        break
+
+            elif su == "agent_message_chunk":
+                text = update.get("content", {}).get("text", "")
+                if current_agent and current_agent.get("_turn_ts") == ts:
+                    current_agent["content"] += text
+                else:
+                    if current_agent and query_lower in current_agent["content"].lower():
+                        results.append(current_agent)
+                        if len(results) >= limit:
+                            break
+                    content = text
+                    idx = content.lower().find(query_lower)
+                    current_agent = {
+                        "id": event_id or new_id(),
+                        "role": "assistant",
+                        "content": content,
+                        "offset": line_offset,
+                        "timestamp": ts * 1000,
+                        "_turn_ts": ts,
+                    }
+                    current_agent_offset = line_offset
+
+        # Flush final agent
+        if current_agent and query_lower in current_agent["content"].lower() and len(results) < limit:
+            results.append(current_agent)
+
+    # Build snippets for agent messages and clean up
+    for r in results:
+        if "content" in r and "snippet" not in r:
+            text = r["content"]
+            idx = text.lower().index(query_lower)
+            start = max(0, idx - 40)
+            end = min(len(text), idx + len(query) + 40)
+            r["snippet"] = ("..." if start > 0 else "") + text[start:end] + ("..." if end < len(text) else "")
+        r.pop("content", None)
+        r.pop("_turn_ts", None)
+
+    return results
+
+
 def build_state_from_updates(filepath: str, label: str = "Session", live_session_id: str | None = None, agent_label: str | None = None, tail_only: bool = False, tail_bytes: int = 102400) -> StateSnapshot:
     """Full pipeline: updates.jsonl -> StateSnapshot.
 

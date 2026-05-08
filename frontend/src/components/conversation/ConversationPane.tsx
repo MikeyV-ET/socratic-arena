@@ -170,6 +170,38 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     clearScrollTarget();
   }, [scrollTargetId, clearScrollTarget, readOnly, activeTab, nodes, virtualizer]);
 
+  // Search state for history pane
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<{ id: string; role: string; snippet: string; offset: number; timestamp: number }[]>([]);
+  const [searchActive, setSearchActive] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const savedScrollPos = useRef(0);
+
+  const executeSearch = useCallback((query: string) => {
+    if (!readOnly || query.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    setSearching(true);
+    fetch(`${basePath}/api/agent/${historyAgent}/history/search?q=${encodeURIComponent(query)}&limit=50`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.status === "ok") setSearchResults(d.results ?? []);
+        setSearching(false);
+      })
+      .catch(() => setSearching(false));
+  }, [readOnly, historyAgent, basePath]);
+
+  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && searchQuery.length >= 2) {
+      executeSearch(searchQuery);
+    } else if (e.key === "Escape") {
+      setSearchActive(false);
+      setSearchResults([]);
+      setSearchQuery("");
+    }
+  }, [searchQuery, executeSearch]);
+
   const handleHistoryDataLoaded = (d: any) => {
     if (d === null) {
       setHistoryTree(null);
@@ -210,14 +242,65 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   }, [nodes.length, virtualizer]);
 
   const historyHeader = readOnly ? (
-    <div className="flex items-center px-2 py-0.5 border-b border-border/50">
-      <PaneAgentSelector
-        value={historyAgent}
-        onChange={setHistoryAgent}
-        dataType="history"
-        onDataLoaded={handleHistoryDataLoaded}
-        label="Agent"
-      />
+    <div className="border-b border-border/50">
+      <div className="flex items-center px-2 py-0.5 gap-2">
+        <PaneAgentSelector
+          value={historyAgent}
+          onChange={setHistoryAgent}
+          dataType="history"
+          onDataLoaded={handleHistoryDataLoaded}
+          label="Agent"
+        />
+        <div className="flex-1" />
+        <button
+          onClick={() => { setSearchActive(!searchActive); if (searchActive) { setSearchResults([]); setSearchQuery(""); } }}
+          className={`px-1.5 py-0.5 rounded text-[10px] border transition-colors ${searchActive ? "bg-accent/20 text-accent border-accent/40" : "text-muted-foreground border-border hover:text-foreground hover:bg-muted"}`}
+          title="Search history"
+        >
+          Search
+        </button>
+      </div>
+      {searchActive && (
+        <div className="px-2 py-1 border-t border-border/30">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
+            placeholder="Search history... (Enter to search, Esc to close)"
+            className="w-full bg-muted text-foreground text-xs px-2 py-1 rounded border border-border focus:outline-none focus:ring-1 focus:ring-ring"
+            autoFocus
+          />
+          {searching && <div className="text-[10px] text-muted-foreground mt-1 animate-pulse">Searching...</div>}
+          {!searching && searchResults.length > 0 && (
+            <div className="mt-1 max-h-48 overflow-y-auto space-y-1">
+              {searchResults.map((r, i) => (
+                <button
+                  key={`${r.id}-${i}`}
+                  onClick={() => {
+                    // TODO: scroll to result -- for now, find it in loaded nodes
+                    const idx = nodes.findIndex((n) => n.id === r.id);
+                    if (idx !== -1) {
+                      programmaticScroll.current = true;
+                      virtualizer.scrollToIndex(idx, { align: "center" });
+                      setTimeout(() => { programmaticScroll.current = false; }, 400);
+                    }
+                  }}
+                  className="w-full text-left px-2 py-1 rounded text-[10px] hover:bg-muted/50 transition-colors"
+                >
+                  <span className={`font-medium ${r.role === "user" ? "text-accent" : "text-success"}`}>
+                    {r.role === "user" ? "Eric" : "Agent"}
+                  </span>
+                  <span className="text-muted-foreground ml-1">{r.snippet}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {!searching && searchQuery.length >= 2 && searchResults.length === 0 && (
+            <div className="text-[10px] text-muted-foreground mt-1">No results</div>
+          )}
+        </div>
+      )}
     </div>
   ) : null;
 
