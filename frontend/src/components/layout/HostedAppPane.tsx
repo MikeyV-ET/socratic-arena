@@ -249,7 +249,7 @@ export function HostedAppPane() {
               src={p.url}
               className={`absolute inset-0 w-full h-full border-0 ${p.id === activePanelId ? "" : "invisible"}`}
               title={p.label}
-              sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+              sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-clipboard-write allow-clipboard-read"
             />
           ))}
         </div>
