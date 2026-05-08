@@ -16,6 +16,66 @@ Presets:
 
 Response includes `panel_id` and `cdp_port` (for Chrome panels).
 
+## Agent-Friendly Browser (Recommended)
+
+The snapshot/act API gives you a compact accessibility tree instead of raw HTML. Each element gets a stable ref like `@e5`. Much more token-efficient than Selenium.
+
+### Workflow
+
+```
+1. GET /api/panel/{id}/snapshot  → see the page as structured text
+2. Find the ref you want (e.g., @e7 is a "Learn more" link)
+3. POST /api/panel/{id}/act      → interact by ref
+4. GET /api/panel/{id}/snapshot  → see result
+```
+
+### Snapshot
+
+```
+GET /api/panel/{id}/snapshot
+```
+
+Returns:
+```json
+{
+  "url": "https://example.com/",
+  "title": "Example Domain",
+  "tree": "@e1 RootWebArea \"Example Domain\" [focused]\n  @e2 heading...",
+  "element_count": 9,
+  "interactive_count": 6,
+  "refs": {"@e7": {"role": "link", "name": "Learn more"}, ...}
+}
+```
+
+The `tree` field is the full page structure. The `refs` dict lists interactive/named elements only (for quick scanning).
+
+### Act
+
+```
+POST /api/panel/{id}/act
+{"ref": "@e7", "action": "click"}
+```
+
+Actions:
+- `click` — click the element
+- `type` — type text: `{"ref": "@e34", "action": "type", "value": "search query"}`
+- `clear` — clear a text field (Ctrl+A, Backspace)
+- `focus` — focus the element
+- `scroll` — scroll element into view
+- `hover` — move mouse over element
+
+### Navigate
+
+```
+POST /api/panel/{id}/navigate
+{"url": "https://www.google.com"}
+```
+
+### Tips
+- Refs are ephemeral — they change when the page changes. Always snapshot before acting.
+- First snapshot after panel launch may be empty (Chrome still loading). Wait 2-3 seconds or use navigate first.
+- The tree compresses pages ~50x (200KB HTML → 4KB tree text).
+
 ## Controlling Chrome via Selenium
 
 Chrome panels get a CDP debugging port (93xx range). Connect with Selenium:

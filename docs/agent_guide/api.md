@@ -60,6 +60,9 @@ Backend runs on port 8000 by default. All endpoints are under `/api/`.
 | `/api/panel/{id}/agent-claim` | POST | Claim for agent control |
 | `/api/panel/{id}/agent-release` | POST | Release agent control |
 | `/api/panel/{id}/agent-status` | POST | Update status text |
+| `/api/panel/{id}/snapshot` | GET | Accessibility tree with element refs |
+| `/api/panel/{id}/act` | POST | Act on element `{"ref": "@e5", "action": "click"}` |
+| `/api/panel/{id}/navigate` | POST | Navigate Chrome `{"url": "https://..."}` |
 
 ## Moments & Corrections
 
