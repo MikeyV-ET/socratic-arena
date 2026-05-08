@@ -169,7 +169,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     virtualizer.scrollToIndex(nodes.length - 1, { align: "end" });
     // Virtualizer measures asynchronously; retry scroll after measurement settles
     const scrollToBottom = () => {
-      const el = scrollRef.current;
+      const el = parentRef.current;
       if (el) { programmaticScroll.current = true; el.scrollTop = el.scrollHeight; }
     };
     setTimeout(scrollToBottom, 100);
