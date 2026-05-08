@@ -2183,6 +2183,87 @@ async def panel_agent_state(panel_id: str):
     return {"controlled": False}
 
 
+# --- Agent-friendly browser (CDP accessibility tree) ---
+
+import panel_browser as _panel_browser
+
+
+@app.get("/api/panel/{panel_id}/snapshot")
+async def panel_snapshot(panel_id: str):
+    """Get the accessibility tree of a Chrome panel's active page.
+
+    Returns a compact, ref-assigned representation of the page.
+    Each interactive element gets a stable ref like @e5.
+    Agent can then use /act to interact by ref.
+    """
+    session = panel_manager.get(panel_id)
+    if not session:
+        return {"status": "error", "message": f"panel {panel_id} not found"}
+    if not session.selenium_port:
+        return {"status": "error", "message": f"panel {panel_id} has no CDP port (not Chrome)"}
+    try:
+        result = await _panel_browser.snapshot(session.selenium_port)
+        return {"status": "ok", **result}
+    except Exception as e:
+        log.error("Panel %s snapshot failed: %s", panel_id, e)
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/panel/{panel_id}/act")
+async def panel_act(panel_id: str, body: dict):
+    """Perform an action on an element in a Chrome panel.
+
+    Body: {
+        "ref": "@e5",           // element ref from snapshot
+        "action": "click",      // click|type|clear|scroll|focus|hover
+        "value": "hello"        // for type action
+    }
+    """
+    session = panel_manager.get(panel_id)
+    if not session:
+        return {"status": "error", "message": f"panel {panel_id} not found"}
+    if not session.selenium_port:
+        return {"status": "error", "message": f"panel {panel_id} has no CDP port (not Chrome)"}
+
+    ref = body.get("ref", "")
+    action = body.get("action", "")
+    value = body.get("value", "")
+
+    if not ref or not action:
+        return {"status": "error", "message": "ref and action are required"}
+
+    try:
+        result = await _panel_browser.act(session.selenium_port, ref, action, value)
+        return {"status": "ok" if result.get("ok") else "error", **result}
+    except Exception as e:
+        log.error("Panel %s act failed: %s", panel_id, e)
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/panel/{panel_id}/navigate")
+async def panel_navigate(panel_id: str, body: dict):
+    """Navigate a Chrome panel to a URL.
+
+    Body: {"url": "https://example.com"}
+    """
+    session = panel_manager.get(panel_id)
+    if not session:
+        return {"status": "error", "message": f"panel {panel_id} not found"}
+    if not session.selenium_port:
+        return {"status": "error", "message": f"panel {panel_id} has no CDP port (not Chrome)"}
+
+    url = body.get("url", "")
+    if not url:
+        return {"status": "error", "message": "url is required"}
+
+    try:
+        result = await _panel_browser.navigate(session.selenium_port, url)
+        return {"status": "ok", **result}
+    except Exception as e:
+        log.error("Panel %s navigate failed: %s", panel_id, e)
+        return {"status": "error", "message": str(e)}
+
+
 # --- Panel proxy (same-origin Xpra access) ---
 
 import httpx as _httpx
