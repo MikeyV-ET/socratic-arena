@@ -72,41 +72,52 @@ test.describe("Attachment -- 200 byte inline/pointer threshold", () => {
     await expect(page.locator("[data-node-id]").first()).toBeVisible({ timeout: 15_000 });
   });
 
+  /**
+   * Helper: send a file attachment and wait for the user message containing
+   * the filename to appear in the live conversation pane. Returns the
+   * matching node's textContent.
+   *
+   * Backend format:
+   *   inlined:  "--- Attached file: {name} ---"
+   *   pointer:  "[Attached file: {name} (...) saved to: ...]"
+   * Both contain the filename, so we wait for a node whose text includes it.
+   */
+  async function sendFileAndGetMessage(
+    page: import("@playwright/test").Page,
+    files: Parameters<import("@playwright/test").Locator["setInputFiles"]>[0],
+    filename: string,
+  ): Promise<string> {
+    const container = page.locator('[data-testid="conversation-messages"]');
+    const nodesBefore = await container.locator("[data-node-id]").count();
+
+    const fileInput = page.locator('input[type="file"]');
+    await fileInput.setInputFiles(files);
+    await page.locator('[data-testid="conversation-send"]').click();
+
+    // Wait for a NEW node containing the filename (backend echoes it back)
+    const msgNode = container.locator("[data-node-id]", { hasText: filename });
+    await expect(msgNode.first()).toBeVisible({ timeout: 15_000 });
+    return (await msgNode.first().textContent()) ?? "";
+  }
+
   test("R16: Small text file (<=200 bytes) is inlined in conversation", async ({ page }) => {
     const smallContent = "This is a small file under 200 bytes.";
-    const fileInput = page.locator('input[type="file"]');
-    await fileInput.setInputFiles({
+    const text = await sendFileAndGetMessage(page, {
       name: "small.txt",
       mimeType: "text/plain",
       buffer: Buffer.from(smallContent),
-    });
-    // Send the attachment
-    await page.locator('[data-testid="conversation-send"]').click();
-    // Wait for the message to appear in conversation
-    await page.waitForTimeout(3000);
-    // The inlined content should appear as "--- Attached file: small.txt ---" with the text
-    const messages = page.locator('[data-pane-id="conversation"] [data-node-id]');
-    const lastMessage = messages.last();
-    const text = await lastMessage.textContent();
-    expect(text).toContain("small.txt");
+    }, "small.txt");
+    expect(text).toContain("--- Attached file: small.txt ---");
     expect(text).toContain(smallContent);
   });
 
   test("R16: Large text file (>200 bytes) gets pointer, not inlined content", async ({ page }) => {
-    // Create content well over 200 bytes
     const largeContent = "x".repeat(300);
-    const fileInput = page.locator('input[type="file"]');
-    await fileInput.setInputFiles({
+    const text = await sendFileAndGetMessage(page, {
       name: "large.txt",
       mimeType: "text/plain",
       buffer: Buffer.from(largeContent),
-    });
-    await page.locator('[data-testid="conversation-send"]').click();
-    await page.waitForTimeout(3000);
-    const messages = page.locator('[data-pane-id="conversation"] [data-node-id]');
-    const lastMessage = messages.last();
-    const text = await lastMessage.textContent();
-    // Should reference the file but NOT contain the full 300 bytes of x's
+    }, "large.txt");
     expect(text).toContain("large.txt");
     expect(text).toContain("saved to");
     expect(text).not.toContain("x".repeat(250));
@@ -114,53 +125,31 @@ test.describe("Attachment -- 200 byte inline/pointer threshold", () => {
 
   test("R16: Exactly 200 byte file is inlined (boundary)", async ({ page }) => {
     const exactContent = "a".repeat(200);
-    const fileInput = page.locator('input[type="file"]');
-    await fileInput.setInputFiles({
+    const text = await sendFileAndGetMessage(page, {
       name: "exact200.txt",
       mimeType: "text/plain",
       buffer: Buffer.from(exactContent),
-    });
-    await page.locator('[data-testid="conversation-send"]').click();
-    await page.waitForTimeout(3000);
-    const messages = page.locator('[data-pane-id="conversation"] [data-node-id]');
-    const lastMessage = messages.last();
-    const text = await lastMessage.textContent();
-    expect(text).toContain("exact200.txt");
-    // 200 bytes should be inlined (<=200 threshold)
-    expect(text).toContain("a".repeat(50)); // at least some of the content visible
+    }, "exact200.txt");
+    expect(text).toContain("--- Attached file: exact200.txt ---");
+    expect(text).toContain("a".repeat(50));
   });
 
   test("R16: 201 byte file gets pointer (boundary)", async ({ page }) => {
-    const overContent = "b".repeat(201);
-    const fileInput = page.locator('input[type="file"]');
-    await fileInput.setInputFiles({
+    const text = await sendFileAndGetMessage(page, {
       name: "over201.txt",
       mimeType: "text/plain",
-      buffer: Buffer.from(overContent),
-    });
-    await page.locator('[data-testid="conversation-send"]').click();
-    await page.waitForTimeout(3000);
-    const messages = page.locator('[data-pane-id="conversation"] [data-node-id]');
-    const lastMessage = messages.last();
-    const text = await lastMessage.textContent();
+      buffer: Buffer.from("b".repeat(201)),
+    }, "over201.txt");
     expect(text).toContain("over201.txt");
     expect(text).toContain("saved to");
   });
 
   test("R16: Binary file always gets pointer regardless of size", async ({ page }) => {
-    // A 50-byte PNG-like file (binary, not text)
-    const binaryData = Buffer.alloc(50, 0x89);
-    const fileInput = page.locator('input[type="file"]');
-    await fileInput.setInputFiles({
+    const text = await sendFileAndGetMessage(page, {
       name: "icon.png",
       mimeType: "image/png",
-      buffer: binaryData,
-    });
-    await page.locator('[data-testid="conversation-send"]').click();
-    await page.waitForTimeout(3000);
-    const messages = page.locator('[data-pane-id="conversation"] [data-node-id]');
-    const lastMessage = messages.last();
-    const text = await lastMessage.textContent();
+      buffer: Buffer.alloc(50, 0x89),
+    }, "icon.png");
     expect(text).toContain("icon.png");
     expect(text).toContain("saved to");
   });
@@ -171,14 +160,15 @@ test.describe("Attachment -- 200 byte inline/pointer threshold", () => {
       { name: "a.txt", mimeType: "text/plain", buffer: Buffer.from("file a") },
       { name: "b.txt", mimeType: "text/plain", buffer: Buffer.from("file b") },
     ]);
-    // Both chips visible
     await expect(page.locator("span.truncate", { hasText: "a.txt" })).toBeVisible();
     await expect(page.locator("span.truncate", { hasText: "b.txt" })).toBeVisible();
     await page.locator('[data-testid="conversation-send"]').click();
-    await page.waitForTimeout(3000);
-    const messages = page.locator('[data-pane-id="conversation"] [data-node-id]');
-    const lastMessage = messages.last();
-    const text = await lastMessage.textContent();
+
+    // Both filenames should appear in the conversation (may be same or separate nodes)
+    const container = page.locator('[data-testid="conversation-messages"]');
+    await expect(container.locator("[data-node-id]", { hasText: "a.txt" }).first()).toBeVisible({ timeout: 15_000 });
+    const node = container.locator("[data-node-id]", { hasText: "a.txt" }).first();
+    const text = (await node.textContent()) ?? "";
     expect(text).toContain("a.txt");
     expect(text).toContain("b.txt");
   });

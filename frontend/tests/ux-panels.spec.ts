@@ -1,10 +1,11 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * UX tests for Panel UI (SA_UX_SPEC.md R12, R13)
+ * UX tests for Panel UI (SA_UX_SPEC.md R12, R13, R17)
  *
  * R12: Pane close button ~1.5x size
  * R13: App sub-panel close button ~2x size
+ * R17: Clipboard paste works into hosted app iframe
  */
 
 test.describe("Panel close button sizing (R12, R13)", () => {
@@ -61,6 +62,41 @@ test.describe("Panel close button sizing (R12, R13)", () => {
           }
         }
       }
+    }
+  });
+});
+
+test.describe("Clipboard paste in hosted app iframe (R17)", () => {
+  test("R17: App panel iframe sandbox includes clipboard permissions", async ({ page, request }) => {
+    await page.goto("/");
+    await expect(page.locator("[data-node-id]").first()).toBeVisible({ timeout: 15_000 });
+
+    // Launch a terminal panel via the API (lighter than Chrome)
+    const base = new URL(page.url()).origin;
+    const launchResp = await request.post(`${base}/api/panel/launch`, {
+      data: { appType: "terminal", label: "Clipboard Test" },
+    });
+    const launchData = await launchResp.json();
+    expect(launchData.status).toBe("ok");
+    const panelId = launchData.panel.id;
+
+    try {
+      // Switch to the Apps tab (it's a <div>, not a button)
+      await page.locator('[data-testid="workbench-tab-apps"]').click();
+
+      // Wait for the iframe to be in the DOM (may be invisible if not active panel)
+      const iframe = page.locator("iframe").first();
+      await expect(iframe).toBeAttached({ timeout: 30_000 });
+
+      // Verify sandbox attribute includes clipboard permissions
+      const sandbox = await iframe.getAttribute("sandbox");
+      expect(sandbox).toBeTruthy();
+      expect(sandbox).toContain("allow-clipboard-write");
+      expect(sandbox).toContain("allow-clipboard-read");
+      expect(sandbox).toContain("allow-scripts");
+      expect(sandbox).toContain("allow-same-origin");
+    } finally {
+      await request.delete(`${base}/api/panel/${panelId}`);
     }
   });
 });
