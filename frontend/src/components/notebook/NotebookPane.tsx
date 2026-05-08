@@ -51,10 +51,12 @@ export function NotebookPane() {
     prevNotebookAgent.current = notebookAgent;
     if (wasEmpty || agentChanged) {
       virtualizer.scrollToIndex(entries.length - 1, { align: "end" });
-      requestAnimationFrame(() => {
+      const scrollToBottom = () => {
         const el = parentRef.current;
         if (el) el.scrollTop = el.scrollHeight;
-      });
+      };
+      setTimeout(scrollToBottom, 100);
+      setTimeout(scrollToBottom, 300);
     }
   }, [entries.length, virtualizer, notebookAgent]);
 
