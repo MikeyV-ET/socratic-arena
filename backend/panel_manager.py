@@ -49,7 +49,7 @@ def _detect_file_manager() -> str:
 APP_PRESETS: dict[str, dict] = {
     "chrome": {
         "label": "Chrome Browser",
-        "cmd": "google-chrome {url} --no-first-run --disable-default-apps --user-data-dir=/tmp/xpra-chrome-{display} --start-maximized",
+        "cmd": "google-chrome {url} --no-first-run --disable-default-apps --disable-gpu --user-data-dir=/tmp/xpra-chrome-{display} --start-maximized",
         "default_url": "https://www.google.com",
     },
     "terminal": {
