@@ -147,6 +147,10 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       store.addFlag(msg.payload.flag as never);
       break;
 
+    case "flag.deleted":
+      store.removeFlag(msg.payload.flagId as string);
+      break;
+
     case "notebook.data":
       store.setNotebook(msg.payload.notebook as never);
       break;

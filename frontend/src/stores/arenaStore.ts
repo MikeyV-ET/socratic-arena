@@ -660,8 +660,31 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
         },
       };
     }
+    // Propagate flag changes from snapshot to historyTree so the
+    // history pane re-renders when flags are created/deleted.
+    let historyTreeUpdate: Record<string, unknown> = {};
+    if (payload.tree && state.historyTree) {
+      const incomingNodes = payload.tree.nodes;
+      const histNodes = { ...state.historyTree.nodes };
+      let flagsChanged = false;
+      for (const nodeId of Object.keys(incomingNodes)) {
+        if (histNodes[nodeId]) {
+          const inFlags = (incomingNodes[nodeId] as { flags?: { id: string }[] }).flags || [];
+          const hFlags = (histNodes[nodeId] as { flags?: { id: string }[] }).flags || [];
+          if (inFlags.length !== hFlags.length || inFlags.some((f, i) => f.id !== hFlags[i]?.id)) {
+            histNodes[nodeId] = { ...histNodes[nodeId], flags: inFlags } as typeof histNodes[string];
+            flagsChanged = true;
+          }
+        }
+      }
+      if (flagsChanged) {
+        historyTreeUpdate = { historyTree: { ...state.historyTree, nodes: histNodes } };
+      }
+    }
+
     return {
       ...treeUpdate,
+      ...historyTreeUpdate,
       ...(payload.notebook ? { notebook: payload.notebook } : {}),
       ...(payload.prompts ? { prompts: payload.prompts } : {}),
       ...(payload.artifacts ? { artifacts: payload.artifacts } : {}),
@@ -695,35 +718,52 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
   addFlag: (flag) =>
     set((state) => {
       const node = state.tree.nodes[flag.nodeId];
-      if (!node) return state;
-      return {
-        tree: {
+      const histNode = state.historyTree?.nodes?.[flag.nodeId];
+      if (!node && !histNode) return state;
+      const update: Partial<ArenaState> = {};
+      if (node) {
+        const updatedNode = { ...node, flags: [...node.flags, flag] };
+        update.tree = {
           ...state.tree,
+          nodes: { ...state.tree.nodes, [flag.nodeId]: updatedNode },
+        };
+      }
+      if (histNode) {
+        update.historyTree = {
+          ...state.historyTree!,
           nodes: {
-            ...state.tree.nodes,
-            [flag.nodeId]: {
-              ...node,
-              flags: [...node.flags, flag],
-            },
+            ...state.historyTree!.nodes,
+            [flag.nodeId]: { ...histNode, flags: [...(histNode.flags || []), flag] },
           },
-        },
-      };
+        };
+      }
+      return update;
     }),
 
   removeFlag: (flagId) =>
     set((state) => {
+      const update: Partial<ArenaState> = {};
+      // Remove from tree
       const newNodes = { ...state.tree.nodes };
       for (const [nodeId, node] of Object.entries(newNodes)) {
-        const flagIdx = node.flags.findIndex((f) => f.id === flagId);
-        if (flagIdx !== -1) {
-          newNodes[nodeId] = {
-            ...node,
-            flags: node.flags.filter((f) => f.id !== flagId),
-          };
+        if (node.flags.some((f) => f.id === flagId)) {
+          newNodes[nodeId] = { ...node, flags: node.flags.filter((f) => f.id !== flagId) };
           break;
         }
       }
-      return { tree: { ...state.tree, nodes: newNodes } };
+      update.tree = { ...state.tree, nodes: newNodes };
+      // Remove from historyTree
+      if (state.historyTree) {
+        const histNodes = { ...state.historyTree.nodes };
+        for (const [nodeId, node] of Object.entries(histNodes)) {
+          if (node.flags?.some((f) => f.id === flagId)) {
+            histNodes[nodeId] = { ...node, flags: node.flags.filter((f) => f.id !== flagId) };
+            update.historyTree = { ...state.historyTree, nodes: histNodes };
+            break;
+          }
+        }
+      }
+      return update;
     }),
 
   selectPrompt: (promptId) => set({ selectedPromptId: promptId }),

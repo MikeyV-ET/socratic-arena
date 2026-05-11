@@ -22,6 +22,7 @@ from config import AGENTS_HOME, SESSION_REGISTRY, SESSIONS_BASE, DEFAULT_AGENT
 
 # Track which agent is currently loaded
 _current_agent: str = DEFAULT_AGENT
+_orphan_flags: dict[str, list] = {}  # flags for nodes not in the 100KB tail
 
 
 def _load_session_registry() -> dict:
@@ -753,8 +754,15 @@ async def handle_flag_create(ws: WebSocket, payload: dict):
                 entry.flags.append(flag)
                 _create_moment_from_flag(entry_id, entry.title, entry.title.split(" ")[0] if entry.title else "", note, source="notebook")
                 break
+    elif node_id:
+        # Node not in memory (older than 100KB tail) — store as orphan
+        _orphan_flags.setdefault(node_id, []).append(flag)
 
     _save_flags()
+    await broadcast({
+        "type": "flag.created",
+        "payload": {"flag": flag.model_dump()},
+    })
     await broadcast({
         "type": "state.snapshot",
         "payload": state.model_dump(),
@@ -771,7 +779,15 @@ async def handle_flag_delete(payload: dict):
         node.flags = [f for f in node.flags if f.id != flag_id]
     for entry in state.notebook.entries:
         entry.flags = [f for f in entry.flags if f.id != flag_id]
+    for nid in list(_orphan_flags):
+        _orphan_flags[nid] = [f for f in _orphan_flags[nid] if f.id != flag_id]
+        if not _orphan_flags[nid]:
+            del _orphan_flags[nid]
     _save_flags()
+    await broadcast({
+        "type": "flag.deleted",
+        "payload": {"flagId": flag_id},
+    })
     await broadcast({
         "type": "state.snapshot",
         "payload": state.model_dump(),
@@ -925,6 +941,13 @@ def _save_flags():
                 "targetType": "entry",
                 "flag": flag.model_dump(),
             })
+    for flags in _orphan_flags.values():
+        for flag in flags:
+            current_flags.append({
+                "agent": _current_agent,
+                "targetType": "node",
+                "flag": flag.model_dump() if hasattr(flag, "model_dump") else flag,
+            })
     # Preserve flags from other agents
     other_flags = []
     if FLAGS_FILE.exists():
@@ -966,6 +989,12 @@ def _load_flags():
             node = state.tree.nodes[flag.node_id]
             if not any(f.id == flag.id for f in node.flags):
                 node.flags.append(flag)
+                count += 1
+        elif target_type == "node" and flag.node_id:
+            # Node not in memory — store as orphan
+            existing = _orphan_flags.setdefault(flag.node_id, [])
+            if not any(f.id == flag.id for f in existing):
+                existing.append(flag)
                 count += 1
         elif target_type == "entry":
             for entry in state.notebook.entries:
