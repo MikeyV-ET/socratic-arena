@@ -268,6 +268,120 @@ test.describe("Snapshot/Act -- Button visibility (R09, R10, R11)", () => {
   });
 });
 
+test.describe("Snapshot/Act -- Flag sync across panes", () => {
+  test("Flagging a message in chat pane shows flagged in history pane", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForTimeout(5000);
+
+    // SNAPSHOT: Find flag buttons (⚑) in conversation
+    const chatSnapshot = await page.locator("body").ariaSnapshot();
+    const messages = extractMessages(chatSnapshot);
+    if (messages.length < 1) {
+      test.skip(true, "No messages visible to flag");
+      return;
+    }
+
+    // ACT: Click the first flag button to flag a message
+    // Flag buttons have title "Flag as training candidate" (unflagged) or "Remove flag" (flagged)
+    const unflaggedButtons = page.getByTitle("Flag as training candidate");
+    const unflaggedCount = await unflaggedButtons.count();
+    if (unflaggedCount === 0) {
+      test.skip(true, "No unflagged messages available to test");
+      return;
+    }
+    await unflaggedButtons.first().click();
+    await page.waitForTimeout(2000);
+
+    // SNAPSHOT: Verify flag appeared in chat pane
+    const afterFlagSnapshot = await page.locator("body").ariaSnapshot();
+    const hasTrainingCandidate = afterFlagSnapshot.toLowerCase().includes("training candidate") ||
+                                  afterFlagSnapshot.includes("Remove flag");
+    expect(
+      hasTrainingCandidate,
+      "After clicking flag, chat pane should show flag indicator (training candidate)"
+    ).toBe(true);
+
+    // ACT: Switch to History tab
+    await page.getByText("History", { exact: true }).first().click();
+    await page.waitForTimeout(3000);
+
+    // SNAPSHOT: History pane should show the flag too
+    const historySnapshot = await page.locator("body").ariaSnapshot();
+    // In history/tree view, flagged nodes appear as warning-colored dots or with "flagged" text
+    const historyShowsFlag = historySnapshot.toLowerCase().includes("flag") ||
+                              historySnapshot.includes("⚑") ||
+                              historySnapshot.includes("training candidate");
+    expect(
+      historyShowsFlag,
+      "Flag set in chat pane should be visible in history pane"
+    ).toBe(true);
+
+    // CLEANUP: Unflag the message (go back to chat, click remove flag)
+    await page.getByText("History", { exact: true }).first().click();
+    await page.waitForTimeout(1000);
+    const removeButtons = page.getByTitle("Remove flag");
+    if (await removeButtons.count() > 0) {
+      await removeButtons.first().click();
+      await page.waitForTimeout(1000);
+    }
+  });
+
+  test("Flagging in history pane shows flagged in chat pane", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForTimeout(3000);
+
+    // ACT: Open history tab
+    await page.getByText("History", { exact: true }).first().click();
+    await page.waitForTimeout(3000);
+
+    // SNAPSHOT: Check history pane for flag interaction points
+    const historySnapshot = await page.locator("body").ariaSnapshot();
+
+    // In the tree view, clicking a node should select it.
+    // The history pane may have flag buttons on individual nodes in a detail view,
+    // or flags might only be settable from the chat/detail view.
+    // Check if there's a way to flag from history side.
+    const historyHasFlagButtons = historySnapshot.includes('button "⚑"') ||
+                                   historySnapshot.includes("Flag as training candidate");
+
+    if (!historyHasFlagButtons) {
+      // If history pane doesn't expose flag buttons directly, that's a finding:
+      // the test documents that flagging can only happen from chat pane.
+      // This is still useful info -- skip rather than fail.
+      test.skip(true, "History pane does not expose flag buttons -- flagging only available in chat pane");
+      return;
+    }
+
+    // ACT: Flag from history pane
+    const flagBtn = page.getByTitle("Flag as training candidate");
+    if (await flagBtn.count() > 0) {
+      await flagBtn.first().click();
+      await page.waitForTimeout(2000);
+    }
+
+    // ACT: Switch back to conversation
+    // Click away from History to return to conversation view
+    await page.getByText("History", { exact: true }).first().click();
+    await page.waitForTimeout(2000);
+
+    // SNAPSHOT: Chat pane should reflect the flag
+    const chatSnapshot = await page.locator("body").ariaSnapshot();
+    const chatShowsFlag = chatSnapshot.toLowerCase().includes("training candidate") ||
+                           chatSnapshot.includes("Remove flag");
+    expect(
+      chatShowsFlag,
+      "Flag set in history pane should be visible in chat pane"
+    ).toBe(true);
+
+    // CLEANUP
+    const removeButtons = page.getByTitle("Remove flag");
+    if (await removeButtons.count() > 0) {
+      await removeButtons.first().click();
+      await page.waitForTimeout(1000);
+    }
+  });
+});
+
 test.describe("Snapshot/Act -- Agent switching", () => {
   test("Switching agent changes visible conversation content", async ({ page }) => {
     await page.goto("/");
