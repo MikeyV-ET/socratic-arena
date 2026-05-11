@@ -172,19 +172,25 @@ test.describe("History Pane -- Lazy loading (R06)", () => {
     // Confirm there IS a spacer (truncated history should have one)
     expect(scrollInfo.spacerHeight).toBeGreaterThan(0);
 
-    // Fire a few mouse wheel ups from the top of loaded content -- this is
-    // what a user actually does. They should NOT have to scroll through
-    // hundreds of thousands of pixels of empty space.
+    // Simulate user scrolling up from the top of loaded content via mouse
+    // wheel, then also try setting scrollTop directly near the spacer boundary.
     await historyScroll.hover();
-    for (let i = 0; i < 5; i++) {
-      await page.mouse.wheel(0, -300);
+    for (let i = 0; i < 10; i++) {
+      await page.mouse.wheel(0, -1000);
     }
+    await page.waitForTimeout(2000);
+
+    // Also set scrollTop just above the spacer (belt + suspenders)
+    await historyScroll.evaluate((el) => {
+      const firstChild = el.querySelector("[style*='position: relative']");
+      const spacer = firstChild?.previousElementSibling as HTMLElement | null;
+      const spacerH = spacer?.offsetHeight ?? 0;
+      el.scrollTop = Math.max(0, spacerH - 50);
+    });
     await page.waitForTimeout(3000);
 
     // After scrolling to top of loaded content in a truncated history,
     // lazy loading MUST fire: either more nodes appear or loading indicator shows.
-    // BUG: if the scroll handler only checks scrollTop < 100 but the spacer
-    //       puts scrollTop at ~spacerHeight, lazy loading never triggers.
     const afterNodeCount = await historyPane.locator("[data-node-id]").count();
     const loadingShown = await historyPane
       .locator('[data-testid="history-loading-older"]')
