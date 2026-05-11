@@ -80,6 +80,63 @@ test.describe("Conversation Pane -- Scroll behavior", () => {
   });
 });
 
+test.describe("Conversation Pane -- Chat panel lazy loading (R20)", () => {
+  test("R20: Chat panel loads full agent history, not just live session", async ({ page, request }) => {
+    await page.goto("/");
+    await expect(page.locator("[data-node-id]").first()).toBeVisible({ timeout: 15_000 });
+
+    // Check how many total nodes the default agent has
+    const base = new URL(page.url()).origin;
+    const resp = await request.get(`${base}/api/agent/Q/history`);
+    test.skip(!resp.ok(), "Q history not available");
+    const data = await resp.json();
+    test.skip(data.status !== "ok" || !data.truncated, "Q history not truncated -- nothing to lazy-load");
+
+    const totalNodes = data.totalNodes;
+    const loadedApiNodes = Object.keys(data.tree?.nodes ?? {}).length;
+
+    // The conversation pane (left side, readOnly=false) should have awareness
+    // of the full history, not just the live WebSocket session. Verify by
+    // checking that the conversation pane has a spacer div or totalNodes
+    // indicator when the agent has truncated history.
+    const convPane = page.locator('[data-pane-id="conversation"] [data-testid="conversation-messages"]');
+    await expect(convPane).toBeVisible({ timeout: 10_000 });
+
+    // Count currently visible nodes in the conversation pane
+    const convNodeCount = await page.locator('[data-pane-id="conversation"] [data-node-id]').count();
+
+    // The conversation pane should show significant history, not just a few
+    // live-session nodes. If totalNodes is 9000+ but we only see 10-20,
+    // the chat panel is NOT loading all history.
+    // For a properly working lazy-load chat panel, we expect either:
+    // (a) a spacer div indicating more content above, OR
+    // (b) a node count comparable to what the API loads (~100+ from 5MB tail)
+    const hasSpacerOrManyNodes = await convPane.evaluate((el) => {
+      const nodes = el.querySelectorAll("[data-node-id]");
+      // Check for a spacer div (sign of lazy-load awareness)
+      const allDivs = el.querySelectorAll("div");
+      let hasLargeSpacer = false;
+      for (const d of allDivs) {
+        const h = d.getBoundingClientRect().height;
+        if (h > 5000 && d.children.length === 0) {
+          hasLargeSpacer = true;
+          break;
+        }
+      }
+      return { nodeCount: nodes.length, hasLargeSpacer };
+    });
+
+    // ASSERTION: Chat panel must lazy-load history.
+    // Either it has a spacer (aware of unloaded content) or loads many nodes.
+    // If neither, the chat panel only shows the live session -- which is the bug
+    // Eric identified: "the chat panel should lazy load all of it"
+    expect(
+      hasSpacerOrManyNodes.hasLargeSpacer || hasSpacerOrManyNodes.nodeCount >= loadedApiNodes,
+      `Chat panel shows ${hasSpacerOrManyNodes.nodeCount} nodes but API has ${loadedApiNodes} loaded (${totalNodes} total). Chat panel should lazy-load all history.`
+    ).toBe(true);
+  });
+});
+
 test.describe("Conversation Pane -- Full text output (R08)", () => {
   test("R08: Messages render markdown content", async ({ page }) => {
     await page.goto("/");
