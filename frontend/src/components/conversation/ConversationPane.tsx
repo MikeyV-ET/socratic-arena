@@ -124,7 +124,10 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     const el = parentRef.current;
     if (!el) return;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
-    const atTop = el.scrollTop < 100;
+    // Spacer div for unloaded content pushes scrollTop up by its height
+    const spacerH = readOnly && historyTotalNodes > nodes.length && historyCursor > 0
+      ? (historyTotalNodes - nodes.length) * 60 : 0;
+    const atTop = el.scrollTop < spacerH + 100;
     userScrolledUp.current = !atBottom;
     setShowJumpButton(!atBottom && nodes.length > 20);
 
@@ -150,7 +153,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
         useArenaStore.getState().reportViewportFocus(paneId, node.id);
       }
     }
-  }, [selectNode, paneId, virtualizer, readOnly, historyCursor, historyLoading, loadOlderHistory]);
+  }, [selectNode, paneId, virtualizer, readOnly, historyCursor, historyLoading, historyTotalNodes, nodes.length, loadOlderHistory]);
 
   // Auto-scroll to bottom on new content (live pane) or data load (both panes)
   const prevNodeCount = useRef(0);
