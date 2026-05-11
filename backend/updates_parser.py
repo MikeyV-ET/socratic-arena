@@ -151,6 +151,10 @@ def build_tree_from_updates(entries: list[dict], label: str = "Session", live_se
             continue  # Skip compaction markers as nodes
 
         node_id = e["id"]
+        # Deduplicate: eventId sequential counters reset after compaction,
+        # so a long tail spanning multiple epochs can have collisions.
+        if node_id in nodes:
+            node_id = new_id()
         node = ConversationNode(
             id=node_id,
             parent_id=prev_id,

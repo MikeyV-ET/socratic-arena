@@ -320,8 +320,17 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
     const olderRoot = historyTree.rootNodeId;
     const newBranches = { ...wsTree.branches };
     const activeBranch = newBranches[wsTree.activeBranchId];
-    if (activeBranch && olderRoot) {
-      newBranches[wsTree.activeBranchId] = { ...activeBranch, rootNodeId: olderRoot };
+    if (olderRoot) {
+      if (activeBranch) {
+        newBranches[wsTree.activeBranchId] = { ...activeBranch, rootNodeId: olderRoot };
+      } else {
+        // History fetched before first state.snapshot — create the branch entry.
+        // Use historyTree's branch if available, otherwise synthesize one.
+        const histBranch = historyTree.branches?.[historyTree.activeBranchId ?? wsTree.activeBranchId];
+        newBranches[wsTree.activeBranchId] = histBranch
+          ? { ...histBranch, rootNodeId: olderRoot }
+          : { id: wsTree.activeBranchId, rootNodeId: olderRoot, label: "main", parentNodeId: "" };
+      }
     }
     return {
       tree: {
@@ -622,13 +631,43 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
   setNotebook: (notebook) => set({ notebook }),
   setPrompts: (prompts) => set({ prompts }),
   setArtifacts: (artifacts) => set({ artifacts }),
-  applySnapshot: (payload) => set((state) => ({
-    ...(payload.tree ? { tree: payload.tree } : {}),
-    ...(payload.notebook ? { notebook: payload.notebook } : {}),
-    ...(payload.prompts ? { prompts: payload.prompts } : {}),
-    ...(payload.artifacts ? { artifacts: payload.artifacts } : {}),
-    scrollTrigger: state.scrollTrigger + 1,
-  })),
+  applySnapshot: (payload) => set((state) => {
+    let treeUpdate: Partial<{ tree: ConversationTree }> = {};
+    if (payload.tree) {
+      // Merge: preserve client-side history nodes that aren't in the snapshot.
+      // The backend snapshot only has the recent tail; initLiveHistory/prependLiveNodes
+      // added older nodes that must survive snapshot updates.
+      const incoming = payload.tree;
+      const existing = state.tree;
+      const mergedNodes = { ...existing.nodes, ...incoming.nodes };
+      // Keep existing branch rootNodeId if it points to a node still in the tree
+      // (history prepend set it to an older root that the snapshot doesn't know about).
+      const newBranches = { ...incoming.branches };
+      const existingBranch = existing.branches[existing.activeBranchId];
+      const incomingBranch = newBranches[incoming.activeBranchId];
+      // Prefer existingBranch.rootNodeId; fall back to existing.rootNodeId
+      // (initLiveHistory may have set rootNodeId before any branch entry existed).
+      const preservedRoot = existingBranch?.rootNodeId ?? existing.rootNodeId;
+      if (incomingBranch && preservedRoot && mergedNodes[preservedRoot]) {
+        newBranches[incoming.activeBranchId] = { ...incomingBranch, rootNodeId: preservedRoot };
+      }
+      treeUpdate = {
+        tree: {
+          ...incoming,
+          nodes: mergedNodes,
+          branches: newBranches,
+          rootNodeId: mergedNodes[existing.rootNodeId] ? existing.rootNodeId : incoming.rootNodeId,
+        },
+      };
+    }
+    return {
+      ...treeUpdate,
+      ...(payload.notebook ? { notebook: payload.notebook } : {}),
+      ...(payload.prompts ? { prompts: payload.prompts } : {}),
+      ...(payload.artifacts ? { artifacts: payload.artifacts } : {}),
+      scrollTrigger: state.scrollTrigger + 1,
+    };
+  }),
 
   switchBranch: (branchId) => {
     set((state) => ({

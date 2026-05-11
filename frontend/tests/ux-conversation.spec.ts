@@ -111,31 +111,24 @@ test.describe("Conversation Pane -- Chat panel lazy loading (R20)", () => {
     // For a properly working lazy-load chat panel, we expect either:
     // (a) a spacer div indicating more content above, OR
     // (b) a node count comparable to what the API loads (~100+ from 5MB tail)
-    const hasSpacerOrManyNodes = await convPane.evaluate((el) => {
+    const hasHistoryLoaded = await convPane.evaluate((el) => {
       const nodes = el.querySelectorAll("[data-node-id]");
-      // Check for a spacer div (sign of lazy-load awareness)
-      const allDivs = el.querySelectorAll("div");
-      let hasLargeSpacer = false;
-      for (const d of allDivs) {
-        const h = d.getBoundingClientRect().height;
-        if (h > 5000 && d.children.length === 0) {
-          hasLargeSpacer = true;
-          break;
-        }
-      }
-      return { nodeCount: nodes.length, hasLargeSpacer };
+      // The spacer is now integrated into the virtualizer's paddingStart.
+      // Check if scrollHeight >> viewport (indicates history padding above).
+      const scrollH = el.scrollHeight;
+      const clientH = el.clientHeight;
+      return { nodeCount: nodes.length, scrollHeight: scrollH, clientHeight: clientH, hasLargeScroll: scrollH > clientH * 5 };
     });
 
     // ASSERTION: Chat panel must be aware of full history and load enough to fill the window.
-    // Eric's spec: startup loads "just enough to fill the window," not the full 5MB tail.
-    // Must have a spacer (indicating more content above) AND enough nodes to fill viewport.
+    // The virtualizer's paddingStart creates scroll space for unloaded history.
     expect(
-      hasSpacerOrManyNodes.hasLargeSpacer,
-      `Chat panel has ${totalNodes} total nodes but no spacer -- not lazy-loading. Shows ${hasSpacerOrManyNodes.nodeCount} nodes.`
+      hasHistoryLoaded.hasLargeScroll,
+      `Chat panel has ${totalNodes} total nodes but scrollHeight (${hasHistoryLoaded.scrollHeight}) is not much bigger than viewport (${hasHistoryLoaded.clientHeight}). Shows ${hasHistoryLoaded.nodeCount} nodes.`
     ).toBe(true);
     expect(
-      hasSpacerOrManyNodes.nodeCount,
-      `Chat panel should load enough nodes to fill the window on startup. Only ${hasSpacerOrManyNodes.nodeCount} nodes visible.`
+      hasHistoryLoaded.nodeCount,
+      `Chat panel should load enough nodes to fill the window on startup. Only ${hasHistoryLoaded.nodeCount} nodes visible.`
     ).toBeGreaterThanOrEqual(5);
   });
 
@@ -161,32 +154,25 @@ test.describe("Conversation Pane -- Chat panel lazy loading (R20)", () => {
     const initialBranchNodes = Number(await convPane.getAttribute("data-branch-nodes") ?? "0");
     expect(initialBranchNodes).toBeGreaterThan(0);
 
-    // Scroll to the top of loaded content (at spacer boundary)
+    // The virtualizer's paddingStart creates the spacer space.
+    // Scroll up toward the top (where lazy loading triggers).
     const scrollInfo = await convPane.evaluate((el) => {
-      const firstChild = el.querySelector("[style*='position: relative']");
-      const spacer = firstChild?.previousElementSibling as HTMLElement | null;
-      const spacerH = spacer?.offsetHeight ?? 0;
-      el.scrollTop = spacerH;
-      return { spacerHeight: spacerH, scrollTop: el.scrollTop };
+      const scrollH = el.scrollHeight;
+      const clientH = el.clientHeight;
+      // Scroll to approximately 10% of scroll height (near history boundary)
+      const target = Math.max(0, scrollH * 0.1);
+      el.scrollTop = target;
+      return { scrollHeight: scrollH, clientHeight: clientH, scrollTop: el.scrollTop, hasPadding: scrollH > clientH * 5 };
     });
 
-    expect(scrollInfo.spacerHeight).toBeGreaterThan(0);
+    expect(scrollInfo.hasPadding).toBe(true);
 
-    // Mouse wheel up from the spacer boundary
+    // Mouse wheel up from near the top
     await convPane.hover();
     for (let i = 0; i < 10; i++) {
       await page.mouse.wheel(0, -1000);
     }
-    await page.waitForTimeout(2000);
-
-    // Also set scrollTop directly near spacer boundary
-    await convPane.evaluate((el) => {
-      const firstChild = el.querySelector("[style*='position: relative']");
-      const spacer = firstChild?.previousElementSibling as HTMLElement | null;
-      const spacerH = spacer?.offsetHeight ?? 0;
-      el.scrollTop = Math.max(0, spacerH - 50);
-    });
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(5000);
 
     // After scrolling up, lazy loading should increase branch node count or show loading
     const afterBranchNodes = Number(await convPane.getAttribute("data-branch-nodes") ?? "0");

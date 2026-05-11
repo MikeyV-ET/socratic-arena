@@ -93,20 +93,35 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
 
+  // Spacer height for unloaded history above the virtualizer.
+  // The virtualizer needs to know about this offset (scrollMargin) so it maps
+  // scroll positions correctly — otherwise it thinks scrollTop=X is within its
+  // own range and renders the wrong items.
+  const spacerHeight = paneTotalNodes > nodes.length && paneCursor > 0
+    ? (paneTotalNodes - nodes.length) * 60
+    : 0;
+
   const virtualizer = useVirtualizer({
     count: nodes.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 200,
     overscan: 5,
+    paddingStart: spacerHeight,
   });
 
-  // Reset scroll tracking when data source changes
+  // Reset scroll tracking when data source is REPLACED (agent/session switch),
+  // but NOT when it's extended by prepend (older history loaded).
+  // On prepend, the old root still exists in the tree as a non-root node.
+  // On replace, the old root is gone entirely (different agent/session).
   useEffect(() => {
     if (effectiveTree.rootNodeId !== prevRootId.current) {
+      const oldRoot = prevRootId.current;
       prevRootId.current = effectiveTree.rootNodeId;
-      userScrolledUp.current = false;
+      if (oldRoot && !effectiveTree.nodes[oldRoot]) {
+        userScrolledUp.current = false;
+      }
     }
-  }, [effectiveTree.rootNodeId]);
+  }, [effectiveTree.rootNodeId, effectiveTree.nodes]);
 
   const basePath = window.location.pathname.replace(/\/+$/, "");
 
@@ -416,10 +431,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
             Beginning of history
           </div>
         )}
-        {/* Spacer for unloaded content above (R05: scrollbar accuracy) */}
-        {paneTotalNodes > nodes.length && paneCursor > 0 && (
-          <div style={{ height: (paneTotalNodes - nodes.length) * 60, minHeight: 0 }} />
-        )}
+        {/* Spacer for unloaded content handled by virtualizer paddingStart */}
         <div style={{ height: virtualizer.getTotalSize(), width: "100%", position: "relative" }}>
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const node = nodes[virtualRow.index];
