@@ -208,6 +208,25 @@
 
 ---
 
+### R16 -- Flag notes: add a note when flagging [P0]
+
+**Current state:** Clicking the flag button (⚑) immediately creates a flag with no note. The `Flag` data model already supports a `note` field (backend + frontend), and auto-flagged moments include notes, but manual flags from FlagButton and EntryFlagButton send no note.
+
+**Expected behavior:** When the user clicks the flag button, a small input appears (inline popover or expandable field) where they can type a short note explaining why they flagged this turn. The note helps when reviewing flags later. Submitting the note (Enter or a confirm button) creates the flag with the note attached. The note should be visible when hovering or viewing the flag.
+
+**Acceptance criteria:**
+- [ ] Clicking the flag button opens a note input (popover, inline, or modal -- lightweight)
+- [ ] User can type a note and submit (Enter or confirm button)
+- [ ] Flag is created with the note via `flag.create` payload including `note` field
+- [ ] Submitting with an empty note creates the flag without a note (preserves quick-flag workflow)
+- [ ] Pressing Escape or clicking away cancels without flagging
+- [ ] Existing flag notes are visible (tooltip on hover, or displayed near the flag indicator)
+- [ ] Flag notes appear in both chat and history panes (synced like the flag itself)
+- [ ] Flag notes are persisted (survive page reload via flags.json)
+- [ ] EntryFlagButton in notebook pane also supports notes
+
+---
+
 ## Test Infrastructure
 
 Tests use **Playwright** (already configured in `frontend/playwright.config.ts`).
@@ -221,3 +240,4 @@ New tests will be added as `frontend/tests/ux-*.spec.ts` files, one per requirem
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-05-08 | Trip | Initial spec from Eric's requirements (Batch 1-2) |
+| 2026-05-11 | Trip | R16: Flag notes (Eric's request via TUI) |

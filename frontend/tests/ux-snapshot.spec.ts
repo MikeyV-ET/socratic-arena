@@ -606,3 +606,242 @@ test.describe("Snapshot/Act -- History scroll-to-bottom on load (R01)", () => {
     ).toBeGreaterThan(0);
   });
 });
+
+test.describe("Snapshot/Act -- Flag notes (R16)", () => {
+  test("Clicking flag button opens a note input before creating the flag", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForTimeout(5000);
+
+    const messages = extractMessages(await page.locator("body").ariaSnapshot());
+    if (messages.length < 1) {
+      test.skip(true, "No messages visible to flag");
+      return;
+    }
+
+    // Count current flags
+    const unflaggedBefore = await page.getByTitle("Flag as training candidate").count();
+    if (unflaggedBefore === 0) {
+      test.skip(true, "No unflagged messages available");
+      return;
+    }
+
+    // ACT: Click a flag button via DOM (opacity-0 elements)
+    const clicked = await page.evaluate(() => {
+      const btns = document.querySelectorAll('button[title="Flag as training candidate"]');
+      for (let i = btns.length - 1; i >= 0; i--) {
+        const r = btns[i].getBoundingClientRect();
+        if (r.y >= 0 && r.y + r.height <= window.innerHeight) {
+          (btns[i] as HTMLElement).click();
+          return true;
+        }
+      }
+      return false;
+    });
+    if (!clicked) {
+      test.skip(true, "No flag buttons visible in viewport");
+      return;
+    }
+    await page.waitForTimeout(1000);
+
+    // VERIFY: A note input should appear (textbox, textarea, or input with placeholder)
+    const noteInput = page.getByPlaceholder(/note|reason|why/i)
+      .or(page.getByRole("textbox", { name: /note/i }))
+      .or(page.locator('[data-flag-note-input]'));
+    const noteVisible = await noteInput.first().isVisible().catch(() => false);
+    expect(
+      noteVisible,
+      "After clicking flag, a note input should appear for the user to annotate why"
+    ).toBe(true);
+
+    // ACT: Press Escape to cancel without flagging
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(500);
+
+    // VERIFY: Flag should NOT have been created (cancel = no flag)
+    const removeFlagAfterCancel = await page.getByTitle("Remove flag").count();
+    // The count should not have increased (no new flag)
+    expect(
+      removeFlagAfterCancel,
+      "Pressing Escape should cancel flagging -- no flag created"
+    ).toBe(0);
+  });
+
+  test("Submitting a note creates a flag with the note attached", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForTimeout(5000);
+
+    const unflaggedBefore = await page.getByTitle("Flag as training candidate").count();
+    if (unflaggedBefore === 0) {
+      test.skip(true, "No unflagged messages available");
+      return;
+    }
+
+    // ACT: Click a flag button
+    const clicked = await page.evaluate(() => {
+      const btns = document.querySelectorAll('button[title="Flag as training candidate"]');
+      for (let i = btns.length - 1; i >= 0; i--) {
+        const r = btns[i].getBoundingClientRect();
+        if (r.y >= 0 && r.y + r.height <= window.innerHeight) {
+          (btns[i] as HTMLElement).click();
+          return true;
+        }
+      }
+      return false;
+    });
+    if (!clicked) {
+      test.skip(true, "No flag buttons visible in viewport");
+      return;
+    }
+    await page.waitForTimeout(1000);
+
+    // ACT: Type a note and submit
+    const testNote = `test-note-${Date.now()}`;
+    const noteInput = page.getByPlaceholder(/note|reason|why/i)
+      .or(page.getByRole("textbox", { name: /note/i }))
+      .or(page.locator('[data-flag-note-input]'));
+    await noteInput.first().fill(testNote);
+    await noteInput.first().press("Enter");
+    await page.waitForTimeout(3000);
+
+    // VERIFY: Flag was created
+    const removeFlagCount = await page.getByTitle("Remove flag").count();
+    expect(
+      removeFlagCount,
+      "After submitting note, flag should be created"
+    ).toBeGreaterThan(0);
+
+    // VERIFY: Note is visible (tooltip or displayed text)
+    const snapshot = await page.locator("body").ariaSnapshot();
+    const noteVisible = snapshot.includes(testNote) ||
+      await page.getByText(testNote).isVisible().catch(() => false);
+    // If note isn't in snapshot, check via hover tooltip
+    if (!noteVisible) {
+      const flagBtn = page.getByTitle("Remove flag").first();
+      await flagBtn.hover();
+      await page.waitForTimeout(500);
+      const hoverSnapshot = await page.locator("body").ariaSnapshot();
+      expect(
+        hoverSnapshot.includes(testNote) ||
+        await page.getByText(testNote).isVisible().catch(() => false),
+        "Flag note should be visible on hover or in the UI"
+      ).toBe(true);
+    }
+
+    // CLEANUP
+    await page.evaluate(() => {
+      const btn = document.querySelector('button[title="Remove flag"]');
+      if (btn) (btn as HTMLElement).click();
+    });
+    await page.waitForTimeout(1000);
+  });
+
+  test("Empty note submission creates flag without a note (quick-flag)", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForTimeout(5000);
+
+    const unflaggedBefore = await page.getByTitle("Flag as training candidate").count();
+    if (unflaggedBefore === 0) {
+      test.skip(true, "No unflagged messages available");
+      return;
+    }
+
+    // ACT: Click flag, then immediately submit empty note
+    const clicked = await page.evaluate(() => {
+      const btns = document.querySelectorAll('button[title="Flag as training candidate"]');
+      for (let i = btns.length - 1; i >= 0; i--) {
+        const r = btns[i].getBoundingClientRect();
+        if (r.y >= 0 && r.y + r.height <= window.innerHeight) {
+          (btns[i] as HTMLElement).click();
+          return true;
+        }
+      }
+      return false;
+    });
+    if (!clicked) {
+      test.skip(true, "No flag buttons visible in viewport");
+      return;
+    }
+    await page.waitForTimeout(1000);
+
+    // ACT: Submit with empty note (just press Enter)
+    const noteInput = page.getByPlaceholder(/note|reason|why/i)
+      .or(page.getByRole("textbox", { name: /note/i }))
+      .or(page.locator('[data-flag-note-input]'));
+    await noteInput.first().press("Enter");
+    await page.waitForTimeout(3000);
+
+    // VERIFY: Flag was still created (empty note = quick flag)
+    const removeFlagCount = await page.getByTitle("Remove flag").count();
+    expect(
+      removeFlagCount,
+      "Empty note should still create flag (preserves quick-flag workflow)"
+    ).toBeGreaterThan(0);
+
+    // CLEANUP
+    await page.evaluate(() => {
+      const btn = document.querySelector('button[title="Remove flag"]');
+      if (btn) (btn as HTMLElement).click();
+    });
+    await page.waitForTimeout(1000);
+  });
+
+  test("Flag notes sync across chat and history panes", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForTimeout(5000);
+
+    const unflaggedBefore = await page.getByTitle("Flag as training candidate").count();
+    if (unflaggedBefore === 0) {
+      test.skip(true, "No unflagged messages available");
+      return;
+    }
+
+    // ACT: Flag with a note from chat pane
+    const testNote = `sync-note-${Date.now()}`;
+    const clicked = await page.evaluate(() => {
+      const btns = document.querySelectorAll('button[title="Flag as training candidate"]');
+      for (let i = btns.length - 1; i >= 0; i--) {
+        const r = btns[i].getBoundingClientRect();
+        if (r.y >= 0 && r.y + r.height <= window.innerHeight) {
+          (btns[i] as HTMLElement).click();
+          return true;
+        }
+      }
+      return false;
+    });
+    if (!clicked) {
+      test.skip(true, "No flag buttons visible in viewport");
+      return;
+    }
+    await page.waitForTimeout(1000);
+
+    // Type note and submit
+    const noteInput = page.getByPlaceholder(/note|reason|why/i)
+      .or(page.getByRole("textbox", { name: /note/i }))
+      .or(page.locator('[data-flag-note-input]'));
+    await noteInput.first().fill(testNote);
+    await noteInput.first().press("Enter");
+    await page.waitForTimeout(3000);
+
+    // ACT: Switch to history tab
+    await page.getByText("History", { exact: true }).first().click();
+    await page.waitForTimeout(3000);
+
+    // VERIFY: The note should be visible in history pane too
+    const historySnapshot = await page.locator("body").ariaSnapshot();
+    const noteInHistory = historySnapshot.includes(testNote) ||
+      await page.getByText(testNote).isVisible().catch(() => false);
+    expect(
+      noteInHistory,
+      "Flag note created in chat pane should be visible in history pane"
+    ).toBe(true);
+
+    // CLEANUP: Switch back and unflag
+    await page.getByText("History", { exact: true }).first().click();
+    await page.waitForTimeout(1000);
+    await page.evaluate(() => {
+      const btn = document.querySelector('button[title="Remove flag"]');
+      if (btn) (btn as HTMLElement).click();
+    });
+    await page.waitForTimeout(1000);
+  });
+});
