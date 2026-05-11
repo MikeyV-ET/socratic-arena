@@ -273,52 +273,54 @@ test.describe("Snapshot/Act -- Flag sync across panes", () => {
     await page.goto("/");
     await page.waitForTimeout(5000);
 
-    // SNAPSHOT: Find flag buttons (⚑) in conversation
-    const chatSnapshot = await page.locator("body").ariaSnapshot();
-    const messages = extractMessages(chatSnapshot);
+    const messages = extractMessages(await page.locator("body").ariaSnapshot());
     if (messages.length < 1) {
       test.skip(true, "No messages visible to flag");
       return;
     }
 
-    // ACT: Click the first flag button to flag a message
-    // Flag buttons have title "Flag as training candidate" (unflagged) or "Remove flag" (flagged)
-    const unflaggedButtons = page.getByTitle("Flag as training candidate");
-    const unflaggedCount = await unflaggedButtons.count();
-    if (unflaggedCount === 0) {
+    // Count unflagged buttons before
+    const unflaggedBefore = await page.getByTitle("Flag as training candidate").count();
+    if (unflaggedBefore === 0) {
       test.skip(true, "No unflagged messages available to test");
       return;
     }
-    await unflaggedButtons.first().click();
-    await page.waitForTimeout(2000);
 
-    // SNAPSHOT: Verify flag appeared in chat pane
-    const afterFlagSnapshot = await page.locator("body").ariaSnapshot();
-    const hasTrainingCandidate = afterFlagSnapshot.toLowerCase().includes("training candidate") ||
-                                  afterFlagSnapshot.includes("Remove flag");
+    // ACT: Hover the message to reveal flag button, then click it
+    const firstFlag = page.getByTitle("Flag as training candidate").first();
+    await firstFlag.hover();
+    await page.waitForTimeout(500);
+    await firstFlag.click({ force: true });
+    await page.waitForTimeout(5000);
+
+    // VERIFY: The clicked button should now say "Remove flag" (title changes on flag).
+    // NOTE: This requires WebSocket to be connected -- flag.create goes via WS,
+    // backend broadcasts state.snapshot back, frontend updates store.
+    const removeFlagCount = await page.getByTitle("Remove flag").count();
     expect(
-      hasTrainingCandidate,
-      "After clicking flag, chat pane should show flag indicator (training candidate)"
-    ).toBe(true);
+      removeFlagCount,
+      "After clicking flag, should see 'Remove flag'. Requires live WebSocket connection."
+    ).toBeGreaterThan(0);
 
-    // ACT: Switch to History tab
+    // ACT: Switch to History tab to check sync
     await page.getByText("History", { exact: true }).first().click();
     await page.waitForTimeout(3000);
 
-    // SNAPSHOT: History pane should show the flag too
+    // VERIFY: History pane should reflect the flag.
+    // History shows flags via ⚑ buttons on messages in the detail view,
+    // and/or via the tree view where flagged nodes get warning color.
+    // Check for "Remove flag" buttons OR flag indicators in history.
     const historySnapshot = await page.locator("body").ariaSnapshot();
-    // In history/tree view, flagged nodes appear as warning-colored dots or with "flagged" text
-    const historyShowsFlag = historySnapshot.toLowerCase().includes("flag") ||
-                              historySnapshot.includes("⚑") ||
-                              historySnapshot.includes("training candidate");
+    const historyHasRemoveFlag = await page.getByTitle("Remove flag").count();
+    const historyShowsFlag = historyHasRemoveFlag > 0 ||
+                              historySnapshot.toLowerCase().includes("flag") ||
+                              historySnapshot.includes("⚑");
     expect(
       historyShowsFlag,
       "Flag set in chat pane should be visible in history pane"
     ).toBe(true);
 
-    // CLEANUP: Unflag the message (go back to chat, click remove flag)
-    await page.getByText("History", { exact: true }).first().click();
-    await page.waitForTimeout(1000);
+    // CLEANUP: Unflag
     const removeButtons = page.getByTitle("Remove flag");
     if (await removeButtons.count() > 0) {
       await removeButtons.first().click();
@@ -334,44 +336,37 @@ test.describe("Snapshot/Act -- Flag sync across panes", () => {
     await page.getByText("History", { exact: true }).first().click();
     await page.waitForTimeout(3000);
 
-    // SNAPSHOT: Check history pane for flag interaction points
-    const historySnapshot = await page.locator("body").ariaSnapshot();
-
-    // In the tree view, clicking a node should select it.
-    // The history pane may have flag buttons on individual nodes in a detail view,
-    // or flags might only be settable from the chat/detail view.
-    // Check if there's a way to flag from history side.
-    const historyHasFlagButtons = historySnapshot.includes('button "⚑"') ||
-                                   historySnapshot.includes("Flag as training candidate");
-
-    if (!historyHasFlagButtons) {
-      // If history pane doesn't expose flag buttons directly, that's a finding:
-      // the test documents that flagging can only happen from chat pane.
-      // This is still useful info -- skip rather than fail.
-      test.skip(true, "History pane does not expose flag buttons -- flagging only available in chat pane");
+    // Check if history exposes flag buttons
+    const historyUnflagged = await page.getByTitle("Flag as training candidate").count();
+    if (historyUnflagged === 0) {
+      test.skip(true, "History pane does not expose unflagged flag buttons");
       return;
     }
 
-    // ACT: Flag from history pane
-    const flagBtn = page.getByTitle("Flag as training candidate");
-    if (await flagBtn.count() > 0) {
-      await flagBtn.first().click();
-      await page.waitForTimeout(2000);
-    }
+    // ACT: Hover and flag from history pane
+    const histFlag = page.getByTitle("Flag as training candidate").first();
+    await histFlag.hover();
+    await page.waitForTimeout(500);
+    await histFlag.click({ force: true });
+    await page.waitForTimeout(5000);
 
-    // ACT: Switch back to conversation
-    // Click away from History to return to conversation view
+    // VERIFY: Flag took effect in history
+    const historyRemoveCount = await page.getByTitle("Remove flag").count();
+    expect(
+      historyRemoveCount,
+      "After flagging in history, should see 'Remove flag' button"
+    ).toBeGreaterThan(0);
+
+    // ACT: Switch back to conversation to check sync
     await page.getByText("History", { exact: true }).first().click();
     await page.waitForTimeout(2000);
 
-    // SNAPSHOT: Chat pane should reflect the flag
-    const chatSnapshot = await page.locator("body").ariaSnapshot();
-    const chatShowsFlag = chatSnapshot.toLowerCase().includes("training candidate") ||
-                           chatSnapshot.includes("Remove flag");
+    // VERIFY: Chat pane should reflect the flag
+    const chatRemoveCount = await page.getByTitle("Remove flag").count();
     expect(
-      chatShowsFlag,
-      "Flag set in history pane should be visible in chat pane"
-    ).toBe(true);
+      chatRemoveCount,
+      "Flag set in history pane should show 'Remove flag' in chat pane"
+    ).toBeGreaterThan(0);
 
     // CLEANUP
     const removeButtons = page.getByTitle("Remove flag");
