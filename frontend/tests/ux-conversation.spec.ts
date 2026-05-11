@@ -135,6 +135,75 @@ test.describe("Conversation Pane -- Chat panel lazy loading (R20)", () => {
       `Chat panel shows ${hasSpacerOrManyNodes.nodeCount} nodes but API has ${loadedApiNodes} loaded (${totalNodes} total). Chat panel should lazy-load all history.`
     ).toBe(true);
   });
+
+  test("R20: Chat panel scrolling up triggers lazy loading of older content", async ({ page, request }) => {
+    await page.goto("/");
+    await expect(page.locator("[data-node-id]").first()).toBeVisible({ timeout: 15_000 });
+
+    const base = new URL(page.url()).origin;
+    const resp = await request.get(`${base}/api/agent/Q/history`);
+    test.skip(!resp.ok(), "Q history not available");
+    const data = await resp.json();
+    test.skip(data.status !== "ok" || !data.truncated, "Q history not truncated -- nothing to lazy-load");
+
+    const convPane = page.locator('[data-pane-id="conversation"] [data-testid="conversation-messages"]');
+    await expect(convPane).toBeVisible({ timeout: 10_000 });
+
+    // Wait for live history to finish loading (Q's implementation sets data-live-history="loaded")
+    await expect(convPane).toHaveAttribute("data-live-history", "loaded", { timeout: 15_000 });
+    await page.waitForTimeout(2000);
+
+    // Count initial nodes
+    const initialCount = await page.locator('[data-pane-id="conversation"] [data-node-id]').count();
+    expect(initialCount).toBeGreaterThan(0);
+
+    // Scroll to the top of loaded content (at spacer boundary), same approach as R06
+    const scrollInfo = await convPane.evaluate((el) => {
+      const children = Array.from(el.children);
+      let spacerH = 0;
+      for (const c of children) {
+        const h = (c as HTMLElement).getBoundingClientRect().height;
+        const style = c.getAttribute("style") || "";
+        if (h > 1000 && style.includes("height") && c.children.length === 0) {
+          spacerH = h;
+          break;
+        }
+      }
+      if (spacerH === 0) {
+        const firstChild = el.querySelector("[style*='position: relative']");
+        const spacer = firstChild?.previousElementSibling as HTMLElement | null;
+        spacerH = spacer?.offsetHeight ?? 0;
+      }
+      el.scrollTop = spacerH;
+      return { spacerHeight: spacerH, scrollTop: el.scrollTop };
+    });
+
+    // If there's no spacer, the chat pane isn't tracking unloaded content
+    expect(scrollInfo.spacerHeight).toBeGreaterThan(0);
+
+    // Mouse wheel up from the spacer boundary
+    await convPane.hover();
+    for (let i = 0; i < 10; i++) {
+      await page.mouse.wheel(0, -1000);
+    }
+    await page.waitForTimeout(2000);
+
+    // Also set scrollTop directly near spacer boundary
+    await convPane.evaluate((el) => {
+      const firstChild = el.querySelector("[style*='position: relative']");
+      const spacer = firstChild?.previousElementSibling as HTMLElement | null;
+      const spacerH = spacer?.offsetHeight ?? 0;
+      el.scrollTop = Math.max(0, spacerH - 50);
+    });
+    await page.waitForTimeout(3000);
+
+    // After scrolling up, more nodes should load
+    const afterCount = await page.locator('[data-pane-id="conversation"] [data-node-id]').count();
+    expect(
+      afterCount,
+      `Chat panel scroll-up: started with ${initialCount} nodes, now ${afterCount}. Lazy loading should have loaded more.`
+    ).toBeGreaterThan(initialCount);
+  });
 });
 
 test.describe("Conversation Pane -- Full text output (R08)", () => {
