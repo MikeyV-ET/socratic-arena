@@ -115,28 +115,84 @@ test.describe("History Pane -- Search (R02)", () => {
 });
 
 test.describe("History Pane -- Lazy loading (R06)", () => {
-  test("R06: Scrolling up in history triggers older content load", async ({ page }) => {
+  test("R06: Scrolling up in truncated history loads older content", async ({ page, request }) => {
     await page.goto("/");
     await expect(page.locator("[data-node-id]").first()).toBeVisible({ timeout: 15_000 });
 
+    // Find an agent whose history is truncated (cursor > 0 = more data exists)
+    const base = new URL(page.url()).origin;
+    const agents = ["Q", "Jr", "Sr", "Trip", "Cinco"];
+    let targetAgent: string | null = null;
+    let cursor = 0;
+    for (const agent of agents) {
+      const resp = await request.get(`${base}/api/agent/${agent}/history`);
+      if (resp.ok()) {
+        const data = await resp.json();
+        if (data.status === "ok" && data.cursor > 0) {
+          targetAgent = agent;
+          cursor = data.cursor;
+          break;
+        }
+      }
+    }
+    // Skip if no agent has truncated history (nothing to lazy-load)
+    test.skip(!targetAgent, "No agent with truncated history found");
+
+    // Switch history pane to the target agent
     await page.locator('[data-testid="workbench-tab-history"]').click();
     await page.waitForTimeout(2000);
+    const historyPane = page.locator('[data-pane-id="history"]');
+    const agentSelector = historyPane.locator("select").first();
+    if (await agentSelector.isVisible()) {
+      const opts = await agentSelector.locator("option").allTextContents();
+      const match = opts.find((o) => o.includes(targetAgent!));
+      if (match) await agentSelector.selectOption({ label: match });
+      await page.waitForTimeout(3000);
+    }
 
-    const historyScroll = page.locator('[data-pane-id="history"] [data-testid="conversation-messages"]');
-    const isVisible = await historyScroll.isVisible().catch(() => false);
-    if (!isVisible) return;
+    const historyScroll = historyPane.locator('[data-testid="conversation-messages"]');
+    await expect(historyScroll).toBeVisible({ timeout: 10_000 });
 
-    const initialNodeCount = await page.locator('[data-pane-id="history"] [data-node-id]').count();
+    const initialNodeCount = await historyPane.locator("[data-node-id]").count();
+    expect(initialNodeCount).toBeGreaterThan(0);
 
-    // Scroll to top to trigger lazy loading
-    await historyScroll.evaluate((el) => { el.scrollTop = 0; });
-    await page.waitForTimeout(2000);
+    // The scroll container has a spacer div at the top representing unloaded
+    // content: (totalNodes - loadedNodes) * 60px. A real user scrolling up
+    // reaches the top of LOADED content (scrollTop ≈ spacerHeight), not
+    // scrollTop=0. Simulate that: scroll to just above the first real node.
+    const scrollInfo = await historyScroll.evaluate((el) => {
+      // Find the spacer: first child div with large height and no text
+      const firstChild = el.querySelector("[style*='position: relative']");
+      const spacer = firstChild?.previousElementSibling as HTMLElement | null;
+      const spacerH = spacer?.offsetHeight ?? 0;
+      // Scroll to the spacer boundary (top of loaded content)
+      el.scrollTop = spacerH;
+      return { spacerHeight: spacerH, scrollTop: el.scrollTop, scrollHeight: el.scrollHeight };
+    });
+    // Confirm there IS a spacer (truncated history should have one)
+    expect(scrollInfo.spacerHeight).toBeGreaterThan(0);
 
-    const afterNodeCount = await page.locator('[data-pane-id="history"] [data-node-id]').count();
-    const loadingIndicator = page.locator('[data-testid="history-loading-older"]');
-    const loadingShown = await loadingIndicator.isVisible().catch(() => false);
+    // Fire a few mouse wheel ups from the top of loaded content -- this is
+    // what a user actually does. They should NOT have to scroll through
+    // hundreds of thousands of pixels of empty space.
+    await historyScroll.hover();
+    for (let i = 0; i < 5; i++) {
+      await page.mouse.wheel(0, -300);
+    }
+    await page.waitForTimeout(3000);
 
-    // Lazy loading: either more nodes loaded, loading indicator shown, or we had few nodes to start
-    expect(afterNodeCount > initialNodeCount || loadingShown || initialNodeCount < 50).toBe(true);
+    // After scrolling to top of loaded content in a truncated history,
+    // lazy loading MUST fire: either more nodes appear or loading indicator shows.
+    // BUG: if the scroll handler only checks scrollTop < 100 but the spacer
+    //       puts scrollTop at ~spacerHeight, lazy loading never triggers.
+    const afterNodeCount = await historyPane.locator("[data-node-id]").count();
+    const loadingShown = await historyPane
+      .locator('[data-testid="history-loading-older"]')
+      .isVisible()
+      .catch(() => false);
+
+    expect(
+      afterNodeCount > initialNodeCount || loadingShown,
+    ).toBe(true);
   });
 });
