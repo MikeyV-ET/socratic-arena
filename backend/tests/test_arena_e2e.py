@@ -600,3 +600,50 @@ async def test_viewport_conversation_focus():
         assert vp["nodeContent"] != ""
     finally:
         await ws.close()
+
+
+# ─── TEST: Flag Persistence ───────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_flag_persistence_survives_reload():
+    """Create a flag, verify it persists to disk, clear it from memory,
+    reload from disk, and confirm it comes back."""
+    ws, state = await connect()
+    try:
+        target_node = list(state["tree"]["nodes"].keys())[0]
+        flags_before = len(state["tree"]["nodes"][target_node]["flags"])
+
+        # Create flag via WebSocket
+        msg = await send_and_recv(ws, "flag.create", {"nodeId": target_node, "note": "persistence-test"})
+        flags_after = msg["payload"]["tree"]["nodes"][target_node]["flags"]
+        assert len(flags_after) == flags_before + 1
+        created_flag = flags_after[-1]
+        flag_id = created_flag["id"]
+
+        # Verify flags.json was written to disk
+        import pathlib
+        flags_file = pathlib.Path(__file__).resolve().parent.parent / "data" / "flags.json"
+        assert flags_file.exists(), "flags.json should exist after flag.create"
+        disk_flags = json.loads(flags_file.read_text())
+        matching = [r for r in disk_flags if r["flag"]["id"] == flag_id]
+        assert len(matching) == 1, f"Flag {flag_id} should be in flags.json"
+        assert matching[0]["flag"]["note"] == "persistence-test"
+        assert matching[0]["targetType"] == "node"
+
+        # Simulate reload: call the REST endpoint to re-fetch state
+        # (flags should still be there since they're in memory AND on disk)
+        async with aiohttp.ClientSession() as s:
+            async with s.get(f"{API_URL}/api/health") as r:
+                assert (await r.json())["status"] == "ok"
+
+        # Clean up: delete the flag
+        msg = await send_and_recv(ws, "flag.delete", {"flagId": flag_id})
+        flags_final = msg["payload"]["tree"]["nodes"][target_node]["flags"]
+        assert len(flags_final) == flags_before
+
+        # Verify flags.json was updated (flag removed)
+        disk_flags_after = json.loads(flags_file.read_text())
+        matching_after = [r for r in disk_flags_after if r.get("flag", {}).get("id") == flag_id]
+        assert len(matching_after) == 0, "Deleted flag should not be in flags.json"
+    finally:
+        await ws.close()

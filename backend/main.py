@@ -754,6 +754,7 @@ async def handle_flag_create(ws: WebSocket, payload: dict):
                 _create_moment_from_flag(entry_id, entry.title, entry.title.split(" ")[0] if entry.title else "", note, source="notebook")
                 break
 
+    _save_flags()
     await broadcast({
         "type": "state.snapshot",
         "payload": state.model_dump(),
@@ -770,6 +771,7 @@ async def handle_flag_delete(payload: dict):
         node.flags = [f for f in node.flags if f.id != flag_id]
     for entry in state.notebook.entries:
         entry.flags = [f for f in entry.flags if f.id != flag_id]
+    _save_flags()
     await broadcast({
         "type": "state.snapshot",
         "payload": state.model_dump(),
@@ -860,6 +862,7 @@ def _to_snake(name: str) -> str:
 PROMPTS_FILE = Path(__file__).resolve().parent / "data" / "prompts.json"
 DELETED_MOMENTS_FILE = Path(__file__).resolve().parent / "data" / "deleted_moments.json"
 USER_MOMENTS_FILE = Path(__file__).resolve().parent / "data" / "user_moments.json"
+FLAGS_FILE = Path(__file__).resolve().parent / "data" / "flags.json"
 
 
 def _save_prompts():
@@ -903,6 +906,76 @@ def _load_user_moments():
         with open(USER_MOMENTS_FILE) as f:
             user_moments = json.load(f)
         log.info("Loaded %d user moments from disk", len(user_moments))
+
+
+def _save_flags():
+    """Persist all flags for the current agent, preserving other agents' flags."""
+    current_flags = []
+    for node in state.tree.nodes.values():
+        for flag in node.flags:
+            current_flags.append({
+                "agent": _current_agent,
+                "targetType": "node",
+                "flag": flag.model_dump(),
+            })
+    for entry in state.notebook.entries:
+        for flag in entry.flags:
+            current_flags.append({
+                "agent": _current_agent,
+                "targetType": "entry",
+                "flag": flag.model_dump(),
+            })
+    # Preserve flags from other agents
+    other_flags = []
+    if FLAGS_FILE.exists():
+        try:
+            with open(FLAGS_FILE) as f:
+                other_flags = [r for r in json.load(f) if r.get("agent") != _current_agent]
+        except (json.JSONDecodeError, KeyError):
+            pass
+    FLAGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(FLAGS_FILE, "w") as f:
+        json.dump(other_flags + current_flags, f, indent=2)
+
+
+def _load_flags():
+    """Load persisted flags and reattach to matching nodes/entries."""
+    if not FLAGS_FILE.exists():
+        return
+    try:
+        with open(FLAGS_FILE) as f:
+            all_flags = json.load(f)
+    except (json.JSONDecodeError, KeyError):
+        return
+    count = 0
+    for record in all_flags:
+        if record.get("agent") != _current_agent:
+            continue
+        fd = record.get("flag", {})
+        target_type = record.get("targetType")
+        flag = Flag(
+            id=fd.get("id", ""),
+            node_id=fd.get("nodeId", ""),
+            type=fd.get("type", "training_candidate"),
+            note=fd.get("note"),
+            created_at=fd.get("createdAt", 0),
+        )
+        if not flag.id:
+            continue
+        if target_type == "node" and flag.node_id in state.tree.nodes:
+            node = state.tree.nodes[flag.node_id]
+            if not any(f.id == flag.id for f in node.flags):
+                node.flags.append(flag)
+                count += 1
+        elif target_type == "entry":
+            for entry in state.notebook.entries:
+                if entry.id == flag.node_id:
+                    if not any(f.id == flag.id for f in entry.flags):
+                        entry.flags.append(flag)
+                        count += 1
+                    break
+    if count:
+        log.info("Loaded %d flags for agent %s from disk", count, _current_agent)
 
 
 _FIELD_ALIASES = {"user_prompt": "context_prompt"}
@@ -1565,6 +1638,8 @@ async def load_persisted_data():
         state = _build_agent_state(_current_agent)
         log.info("Startup: loaded state for agent %s", _current_agent)
 
+    _load_flags()
+
     # Start live tailer to stream session updates
     _start_live_tailer(_current_agent)
 
@@ -1808,6 +1883,7 @@ async def switch_agent(body: dict):
     _arena_turn_active = False
     state = _build_agent_state(agent_name, session_id=session_id)
     _current_agent = agent_name
+    _load_flags()
 
     # Restart live tailer for the new agent (only for current session)
     if not session_id:

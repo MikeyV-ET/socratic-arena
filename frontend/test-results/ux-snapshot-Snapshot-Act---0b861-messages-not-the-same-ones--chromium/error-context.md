@@ -12,12 +12,12 @@
 # Error details
 
 ```
-Error: Scrolled up but see the same 7 messages. Before: 12, After: 12. Scroll may have snapped back.
+Error: Scrolled up but see the same 5 messages. Before: 12, After: 12. Scroll may have snapped back.
 
 expect(received).toBeGreaterThan(expected)
 
-Expected: > 7
-Received:   7
+Expected: > 5
+Received:   5
 ```
 
 # Page snapshot
@@ -28,23 +28,23 @@ Received:   7
     - generic [ref=e4]:
       - heading "Socratic Arena" [level=1] [ref=e5]
       - combobox [ref=e6]:
-        - option "Cinco"
-        - option "Jr" [selected]
+        - option "Cinco" [selected]
+        - option "Jr"
         - option "Q"
         - option "Sr"
         - option "Trip"
       - generic [ref=e9]: active
     - generic [ref=e10]:
       - combobox [ref=e11]:
-        - option "Jr" [selected]
+        - option "Cinco" [selected]
       - generic [ref=e12]:
         - button "A-" [ref=e13]
         - generic [ref=e14]: "14"
         - button "A+" [ref=e15]
       - button "☀" [ref=e16]
       - generic [ref=e17]:
-        - 'generic "Jr context: 68% used" [ref=e18]'
-        - generic [ref=e20]: 68%
+        - 'generic "Cinco context: 65% used" [ref=e18]'
+        - generic [ref=e20]: 65%
       - generic [ref=e23]: Live
   - generic [ref=e24]:
     - generic [ref=e27]:
@@ -54,260 +54,145 @@ Received:   7
       - generic [ref=e34]:
         - generic [ref=e37]:
           - generic [ref=e38]:
-            - generic [ref=e40]: Jr
+            - generic [ref=e40]: Cinco
             - button "⚑" [ref=e42]
           - button "▶ thinking" [ref=e43]:
             - generic [ref=e44]: ▶
             - text: thinking
-          - paragraph [ref=e46]: Clean A/B. Grok calls "one inch deep" "irrelevant flavor text," gives canonical 7 trips. Opus nails it -- "One trip -- they just wade across together."
+          - paragraph [ref=e46]: Let me flush the lab notebook with today's findings before sleeping.
         - generic [ref=e49]:
           - generic [ref=e50]:
-            - generic [ref=e52]: Jr
+            - generic [ref=e52]: Cinco
             - button "⚑" [ref=e54]
-          - paragraph [ref=e56]: May 9. Acked, sleeping until event.
+          - paragraph [ref=e56]: Notebook flushed with today's findings. Sleeping until event.
         - generic [ref=e59]:
           - generic [ref=e60]:
             - generic [ref=e62]: Eric
             - button "⚑" [ref=e64]
-          - paragraph [ref=e66]: "[clock (id=date_a763a096, ts=1778396401.2084527, reply_via=clock outbox)] [clock] Date changed: it is now Sunday, May 10, 2026."
+          - paragraph [ref=e66]: "[clock (id=date_f41d9cad, ts=1778396401.2103028, reply_via=clock outbox)] [clock] Date changed: it is now Sunday, May 10, 2026."
         - generic [ref=e69]:
           - generic [ref=e70]:
-            - generic [ref=e72]: Jr
+            - generic [ref=e72]: Cinco
             - button "⚑" [ref=e74]
-          - paragraph [ref=e76]: May 10. Acked, sleeping.
+          - paragraph [ref=e76]: Noted.
         - generic [ref=e79]:
           - generic [ref=e80]:
             - generic [ref=e82]: Eric
             - button "⚑" [ref=e84]
-          - paragraph [ref=e86]: "[clock (id=date_2e2b8f99, ts=1778482801.610206, reply_via=clock outbox)] [clock] Date changed: it is now Monday, May 11, 2026."
-          - generic [ref=e89]:
-            - generic [ref=e90]: ⚑
-            - generic [ref=e91]: Training candidate
-            - button "Develop prompt" [ref=e92]
-        - generic [ref=e95]:
-          - generic [ref=e96]:
-            - generic [ref=e98]: Jr
-            - button "⚑" [ref=e100]
-          - paragraph [ref=e102]: May 11. Acked, sleeping. Context at 35k -- should flush notes before it gets tighter if Eric doesn't return soon.
-      - button "Jump to latest" [ref=e103]
-      - generic [ref=e105]:
-        - button "Attach file" [ref=e106]:
-          - img [ref=e107]
-        - textbox "Type a message..." [ref=e109]
-        - button "Send" [disabled] [ref=e110]
-    - separator [ref=e111]
-    - generic [ref=e114]:
-      - generic [ref=e115]:
+          - paragraph [ref=e86]: "[clock (id=date_d408cf4e, ts=1778482801.6106389, reply_via=clock outbox)] [clock] Date changed: it is now Monday, May 11, 2026."
+        - generic [ref=e89]:
+          - generic [ref=e90]:
+            - generic [ref=e92]: Cinco
+            - button "⚑" [ref=e94]
+          - paragraph [ref=e96]: Noted.
+      - button "Jump to latest" [ref=e97]
+      - generic [ref=e99]:
+        - button "Attach file" [ref=e100]:
+          - img [ref=e101]
+        - textbox "Type a message..." [ref=e103]
+        - button "Send" [disabled] [ref=e104]
+    - separator [ref=e105]
+    - generic [ref=e108]:
+      - generic [ref=e109]:
+        - generic [ref=e110] [cursor=pointer]:
+          - generic [ref=e111]: History
+          - button "×" [ref=e112]
+        - generic [ref=e113] [cursor=pointer]:
+          - generic [ref=e114]: Moments
+          - button "×" [ref=e115]
         - generic [ref=e116] [cursor=pointer]:
-          - generic [ref=e117]: History
+          - generic [ref=e117]: Notebook
           - button "×" [ref=e118]
         - generic [ref=e119] [cursor=pointer]:
-          - generic [ref=e120]: Moments
+          - generic [ref=e120]: Prompt Dev
           - button "×" [ref=e121]
         - generic [ref=e122] [cursor=pointer]:
-          - generic [ref=e123]: Notebook
+          - generic [ref=e123]: Prompt Test
           - button "×" [ref=e124]
         - generic [ref=e125] [cursor=pointer]:
-          - generic [ref=e126]: Prompt Dev
+          - generic [ref=e126]: Inspector
           - button "×" [ref=e127]
         - generic [ref=e128] [cursor=pointer]:
-          - generic [ref=e129]: Prompt Test
+          - generic [ref=e129]: Artifact
           - button "×" [ref=e130]
         - generic [ref=e131] [cursor=pointer]:
-          - generic [ref=e132]: Inspector
+          - generic [ref=e132]: Apps
           - button "×" [ref=e133]
         - generic [ref=e134] [cursor=pointer]:
-          - generic [ref=e135]: Artifact
+          - generic [ref=e135]: Boundaries
           - button "×" [ref=e136]
         - generic [ref=e137] [cursor=pointer]:
-          - generic [ref=e138]: Apps
+          - generic [ref=e138]: Corrections
           - button "×" [ref=e139]
         - generic [ref=e140] [cursor=pointer]:
-          - generic [ref=e141]: Boundaries
+          - generic [ref=e141]: Episodes
           - button "×" [ref=e142]
-        - generic [ref=e143] [cursor=pointer]:
-          - generic [ref=e144]: Corrections
-          - button "×" [ref=e145]
-        - generic [ref=e146] [cursor=pointer]:
-          - generic [ref=e147]: Episodes
-          - button "×" [ref=e148]
-        - button "+" [ref=e150]
-        - generic [ref=e151]:
-          - button "A-" [ref=e152]
-          - button "A+" [ref=e153]
-        - button "┅" [ref=e154]
-        - button "┇" [ref=e155]
-      - generic [ref=e156]:
-        - generic [ref=e158]:
-          - generic [ref=e160]:
-            - generic [ref=e161]:
-              - generic [ref=e162]: Agent
-              - combobox [ref=e163]:
-                - option "Cinco"
-                - option "Jr" [selected]
+        - button "+" [ref=e144]
+        - generic [ref=e145]:
+          - button "A-" [ref=e146]
+          - button "A+" [ref=e147]
+        - button "┅" [ref=e148]
+        - button "┇" [ref=e149]
+      - generic [ref=e150]:
+        - generic [ref=e152]:
+          - generic [ref=e154]:
+            - generic [ref=e155]:
+              - generic [ref=e156]: Agent
+              - combobox [ref=e157]:
+                - option "Cinco" [selected]
+                - option "Jr"
                 - option "Q"
                 - option "Sr"
                 - option "Trip"
-              - combobox "Select session" [ref=e164]:
-                - option "019de4e1 - May 11 - 10.8MB (live)" [selected]
-                - option "Jr - May 8 - 182.2MB"
-                - option "019d0a24 - May 8 - 182.2MB"
-                - option "019dfa0d - May 5 - 52.2KB"
-                - option "019dd5f1 - Apr 28 - 23.8KB"
-                - option "019dd5f1 - Apr 28 - 22.9KB"
-                - option "019dd5f1 - Apr 28 - 22.6KB"
-                - option "019dd5da - Apr 28 - 22.2KB"
-                - option "019dd5d3 - Apr 28 - 24.0KB"
-                - option "019dd5d3 - Apr 28 - 22.8KB"
-                - option "019dd57e - Apr 28 - 24.7KB"
-                - option "019dd57e - Apr 28 - 23.4KB"
-                - option "019dd57d - Apr 28 - 23.9KB"
-                - option "019dd57d - Apr 28 - 21.2KB"
-                - option "019dd57b - Apr 28 - 24.0KB"
-                - option "019dd57b - Apr 28 - 21.9KB"
-                - option "019dd57a - Apr 28 - 20.5KB"
-                - option "019dc80e - Apr 25 - 19.7KB"
-                - option "019dc80e - Apr 25 - 20.5KB"
-                - option "019dc216 - Apr 24 - 18.9KB"
-                - option "019dc216 - Apr 24 - 17.7KB"
-                - option "019dc216 - Apr 24 - 38.5KB"
-                - option "019dc216 - Apr 24 - 16.9KB"
-                - option "019dc216 - Apr 24 - 17.6KB"
-                - option "019dc216 - Apr 24 - 18.6KB"
-                - option "019dc184 - Apr 24 - 21.4KB"
-                - option "019dc184 - Apr 24 - 19.1KB"
-                - option "019dc184 - Apr 24 - 55.5KB"
-                - option "019dc184 - Apr 24 - 19.9KB"
-                - option "019dc184 - Apr 24 - 16.6KB"
-                - option "019dc184 - Apr 24 - 18.4KB"
-                - option "019dc183 - Apr 24 - 17.0KB"
-                - option "019dc180 - Apr 24 - 170.4KB"
-                - option "019dc180 - Apr 24 - 35.3KB"
-                - option "019dc180 - Apr 24 - 19.0KB"
-                - option "019dc180 - Apr 24 - 18.2KB"
-                - option "019dc180 - Apr 24 - 17.8KB"
-                - option "019dc180 - Apr 24 - 20.0KB"
-                - option "019dc17d - Apr 24 - 182.4KB"
-                - option "019dc17d - Apr 24 - 58.0KB"
-                - option "019dc17d - Apr 24 - 34.8KB"
-                - option "019dc17b - Apr 24 - 92.6KB"
-                - option "019dc17b - Apr 24 - 47.9KB"
-                - option "019dc179 - Apr 24 - 236.7KB"
-                - option "019dc179 - Apr 24 - 49.2KB"
-                - option "019dc176 - Apr 24 - 88.0KB"
-                - option "019dc176 - Apr 24 - 135.5KB"
-                - option "019dc176 - Apr 24 - 122.6KB"
-                - option "019dc176 - Apr 24 - 74.7KB"
-                - option "019dc171 - Apr 24 - 417.8KB"
-                - option "019dc171 - Apr 24 - 65.2KB"
-                - option "019dc171 - Apr 24 - 24.6KB"
-                - option "019dc171 - Apr 24 - 29.7KB"
-                - option "019dc170 - Apr 24 - 87.0KB"
-                - option "019dc170 - Apr 24 - 27.0KB"
-                - option "019dc139 - Apr 24 - 14.7KB"
-                - option "019dc139 - Apr 24 - 15.2KB"
-                - option "019dc138 - Apr 24 - 14.0KB"
-                - option "019dc138 - Apr 24 - 14.5KB"
-                - option "019dbc80 - Apr 23 - 6.7KB"
-            - button "Search" [ref=e165]
-          - generic [ref=e168]:
-            - generic [ref=e171]:
-              - generic [ref=e172]:
-                - generic [ref=e174]: Eric
-                - button "⚑" [ref=e176]
-              - paragraph [ref=e178]: "[clock (id=date_558c8f02, ts=1778310001.4696288, reply_via=clock outbox)] [clock] Date changed: it is now Saturday, May 09, 2026."
-            - generic [ref=e181]:
-              - generic [ref=e182]:
-                - generic [ref=e184]: Jr
-                - button "⚑" [ref=e186]
-              - paragraph [ref=e188]: May 9. Acked, sleeping until event.
-            - generic [ref=e191]:
-              - generic [ref=e192]:
-                - generic [ref=e194]: Eric
-                - button "⚑" [ref=e196]
-              - paragraph [ref=e198]: "[clock (id=date_a763a096, ts=1778396401.2084527, reply_via=clock outbox)] [clock] Date changed: it is now Sunday, May 10, 2026."
-            - generic [ref=e201]:
-              - generic [ref=e202]:
-                - generic [ref=e204]: Jr
-                - button "⚑" [ref=e206]
-              - paragraph [ref=e208]: May 10. Acked, sleeping.
-            - generic [ref=e211]:
-              - generic [ref=e212]:
-                - generic [ref=e214]: Eric
-                - button "⚑" [ref=e216]
-              - paragraph [ref=e218]: "[clock (id=date_2e2b8f99, ts=1778482801.610206, reply_via=clock outbox)] [clock] Date changed: it is now Monday, May 11, 2026."
-            - generic [ref=e221]:
-              - generic [ref=e222]:
-                - generic [ref=e224]: Jr
-                - button "⚑" [ref=e226]
-              - paragraph [ref=e228]: May 11. Acked, sleeping. Context at 35k -- should flush notes before it gets tighter if Eric doesn't return soon.
-        - option "Cinco"
-        - option "Jr" [selected]
+              - combobox "Select session" [ref=e158]:
+                - option "cinco - May 11 - 51.9MB"
+                - option "019d1ec0 - May 11 - 51.9MB (live)" [selected]
+                - option "019dbc75 - Apr 23 - 6.7KB"
+            - button "Search" [ref=e159]
+          - generic [ref=e162]:
+            - generic [ref=e165]:
+              - generic [ref=e166]:
+                - generic [ref=e168]: Cinco
+                - button "⚑" [ref=e170]
+              - button "▶ thinking" [ref=e171]:
+                - generic [ref=e172]: ▶
+                - text: thinking
+              - paragraph [ref=e174]: Let me flush the lab notebook with today's findings before sleeping.
+            - generic [ref=e177]:
+              - generic [ref=e178]:
+                - generic [ref=e180]: Cinco
+                - button "⚑" [ref=e182]
+              - paragraph [ref=e184]: Notebook flushed with today's findings. Sleeping until event.
+            - generic [ref=e187]:
+              - generic [ref=e188]:
+                - generic [ref=e190]: Eric
+                - button "⚑" [ref=e192]
+              - paragraph [ref=e194]: "[clock (id=date_f41d9cad, ts=1778396401.2103028, reply_via=clock outbox)] [clock] Date changed: it is now Sunday, May 10, 2026."
+            - generic [ref=e197]:
+              - generic [ref=e198]:
+                - generic [ref=e200]: Cinco
+                - button "⚑" [ref=e202]
+              - paragraph [ref=e204]: Noted.
+            - generic [ref=e207]:
+              - generic [ref=e208]:
+                - generic [ref=e210]: Eric
+                - button "⚑" [ref=e212]
+              - paragraph [ref=e214]: "[clock (id=date_d408cf4e, ts=1778482801.6106389, reply_via=clock outbox)] [clock] Date changed: it is now Monday, May 11, 2026."
+            - generic [ref=e217]:
+              - generic [ref=e218]:
+                - generic [ref=e220]: Cinco
+                - button "⚑" [ref=e222]
+              - paragraph [ref=e224]: Noted.
+        - option "Cinco" [selected]
+        - option "Jr"
         - option "Q"
         - option "Sr"
         - option "Trip"
-        - option "019de4e1 - May 11 - 10.8MB (live)" [selected]
-        - option "Jr - May 8 - 182.2MB"
-        - option "019d0a24 - May 8 - 182.2MB"
-        - option "019dfa0d - May 5 - 52.2KB"
-        - option "019dd5f1 - Apr 28 - 23.8KB"
-        - option "019dd5f1 - Apr 28 - 22.9KB"
-        - option "019dd5f1 - Apr 28 - 22.6KB"
-        - option "019dd5da - Apr 28 - 22.2KB"
-        - option "019dd5d3 - Apr 28 - 24.0KB"
-        - option "019dd5d3 - Apr 28 - 22.8KB"
-        - option "019dd57e - Apr 28 - 24.7KB"
-        - option "019dd57e - Apr 28 - 23.4KB"
-        - option "019dd57d - Apr 28 - 23.9KB"
-        - option "019dd57d - Apr 28 - 21.2KB"
-        - option "019dd57b - Apr 28 - 24.0KB"
-        - option "019dd57b - Apr 28 - 21.9KB"
-        - option "019dd57a - Apr 28 - 20.5KB"
-        - option "019dc80e - Apr 25 - 19.7KB"
-        - option "019dc80e - Apr 25 - 20.5KB"
-        - option "019dc216 - Apr 24 - 18.9KB"
-        - option "019dc216 - Apr 24 - 17.7KB"
-        - option "019dc216 - Apr 24 - 38.5KB"
-        - option "019dc216 - Apr 24 - 16.9KB"
-        - option "019dc216 - Apr 24 - 17.6KB"
-        - option "019dc216 - Apr 24 - 18.6KB"
-        - option "019dc184 - Apr 24 - 21.4KB"
-        - option "019dc184 - Apr 24 - 19.1KB"
-        - option "019dc184 - Apr 24 - 55.5KB"
-        - option "019dc184 - Apr 24 - 19.9KB"
-        - option "019dc184 - Apr 24 - 16.6KB"
-        - option "019dc184 - Apr 24 - 18.4KB"
-        - option "019dc183 - Apr 24 - 17.0KB"
-        - option "019dc180 - Apr 24 - 170.4KB"
-        - option "019dc180 - Apr 24 - 35.3KB"
-        - option "019dc180 - Apr 24 - 19.0KB"
-        - option "019dc180 - Apr 24 - 18.2KB"
-        - option "019dc180 - Apr 24 - 17.8KB"
-        - option "019dc180 - Apr 24 - 20.0KB"
-        - option "019dc17d - Apr 24 - 182.4KB"
-        - option "019dc17d - Apr 24 - 58.0KB"
-        - option "019dc17d - Apr 24 - 34.8KB"
-        - option "019dc17b - Apr 24 - 92.6KB"
-        - option "019dc17b - Apr 24 - 47.9KB"
-        - option "019dc179 - Apr 24 - 236.7KB"
-        - option "019dc179 - Apr 24 - 49.2KB"
-        - option "019dc176 - Apr 24 - 88.0KB"
-        - option "019dc176 - Apr 24 - 135.5KB"
-        - option "019dc176 - Apr 24 - 122.6KB"
-        - option "019dc176 - Apr 24 - 74.7KB"
-        - option "019dc171 - Apr 24 - 417.8KB"
-        - option "019dc171 - Apr 24 - 65.2KB"
-        - option "019dc171 - Apr 24 - 24.6KB"
-        - option "019dc171 - Apr 24 - 29.7KB"
-        - option "019dc170 - Apr 24 - 87.0KB"
-        - option "019dc170 - Apr 24 - 27.0KB"
-        - option "019dc139 - Apr 24 - 14.7KB"
-        - option "019dc139 - Apr 24 - 15.2KB"
-        - option "019dc138 - Apr 24 - 14.0KB"
-        - option "019dc138 - Apr 24 - 14.5KB"
-        - option "019dbc80 - Apr 23 - 6.7KB"
-        - option "Cinco"
-        - option "Jr" [selected]
+        - option "cinco - May 11 - 51.9MB"
+        - option "019d1ec0 - May 11 - 51.9MB (live)" [selected]
+        - option "019dbc75 - Apr 23 - 6.7KB"
+        - option "Cinco" [selected]
+        - option "Jr"
         - option "Q"
         - option "Sr"
         - option "Trip"
@@ -475,7 +360,7 @@ Received:   7
   85  |         totalUnique,
   86  |         `Scrolled up but see the same ${overlap} messages. Before: ${beforeMessages.length}, After: ${afterMessages.length}. Scroll may have snapped back.`
 > 87  |       ).toBeGreaterThan(beforeTexts.size);
-      |         ^ Error: Scrolled up but see the same 7 messages. Before: 12, After: 12. Scroll may have snapped back.
+      |         ^ Error: Scrolled up but see the same 5 messages. Before: 12, After: 12. Scroll may have snapped back.
   88  |     }
   89  |   });
   90  | 
