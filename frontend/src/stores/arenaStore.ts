@@ -104,6 +104,11 @@ interface ArenaState {
   historyCursor: number;
   historyTotalNodes: number;
   historyLoading: boolean;
+
+  // Live pane history (parallels history pane state but operates on tree)
+  liveCursor: number;
+  liveTotalNodes: number;
+  liveHistoryLoading: boolean;
   setCurrentAgent: (agent: string) => void;
   setHistoryAgent: (agent: string) => void;
   setNotebookAgent: (agent: string) => void;
@@ -114,6 +119,12 @@ interface ArenaState {
   prependHistoryNodes: (tree: ConversationTree, newCursor: number) => void;
   setHistoryLoading: (loading: boolean) => void;
   getHistoryBranchNodes: () => ConversationNode[];
+
+  // Live pane history actions
+  setLiveMeta: (cursor: number, totalNodes: number) => void;
+  setLiveHistoryLoading: (loading: boolean) => void;
+  initLiveHistory: (historyTree: ConversationTree, cursor: number, totalNodes: number) => void;
+  prependLiveNodes: (olderTree: ConversationTree, newCursor: number) => void;
 
   // Connection
   connected: boolean;
@@ -290,7 +301,10 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
   historyCursor: 0,
   historyTotalNodes: 0,
   historyLoading: false,
-  setCurrentAgent: (agent) => set({ currentAgent: agent, historyAgent: agent, notebookAgent: agent, momentsAgent: agent, historyTree: null, historyCursor: 0, historyTotalNodes: 0 }),
+  liveCursor: 0,
+  liveTotalNodes: 0,
+  liveHistoryLoading: false,
+  setCurrentAgent: (agent) => set({ currentAgent: agent, historyAgent: agent, notebookAgent: agent, momentsAgent: agent, historyTree: null, historyCursor: 0, historyTotalNodes: 0, liveCursor: 0, liveTotalNodes: 0 }),
   setHistoryAgent: (agent) => set({ historyAgent: agent }),
   setNotebookAgent: (agent) => set({ notebookAgent: agent }),
   setMomentsAgent: (agent) => set({ momentsAgent: agent }),
@@ -298,6 +312,51 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
   setHistoryTree: (tree) => set({ historyTree: tree }),
   setHistoryMeta: (cursor, totalNodes) => set({ historyCursor: cursor, historyTotalNodes: totalNodes }),
   setHistoryLoading: (loading) => set({ historyLoading: loading }),
+  setLiveMeta: (cursor, totalNodes) => set({ liveCursor: cursor, liveTotalNodes: totalNodes }),
+  setLiveHistoryLoading: (loading) => set({ liveHistoryLoading: loading }),
+  initLiveHistory: (historyTree, cursor, totalNodes) => set((state) => {
+    const wsTree = state.tree;
+    // History tree is the base (full chain). WS tree nodes win where overlapping (live content).
+    const mergedNodes = { ...historyTree.nodes, ...wsTree.nodes };
+    return {
+      tree: {
+        ...wsTree,
+        nodes: mergedNodes,
+        rootNodeId: historyTree.rootNodeId || wsTree.rootNodeId,
+      },
+      liveCursor: cursor,
+      liveTotalNodes: totalNodes,
+    };
+  }),
+  prependLiveNodes: (olderTree, newCursor) => set((state) => {
+    const existing = state.tree;
+    if (!existing) return { tree: olderTree, liveCursor: newCursor };
+    const mergedNodes = { ...olderTree.nodes, ...existing.nodes };
+    const olderRoot = olderTree.rootNodeId;
+    const existingRoot = existing.rootNodeId;
+    if (mergedNodes[existingRoot] && olderRoot) {
+      let leaf = olderRoot;
+      const visited = new Set<string>();
+      while (mergedNodes[leaf] && mergedNodes[leaf].children.length > 0 && !visited.has(leaf)) {
+        visited.add(leaf);
+        leaf = mergedNodes[leaf].children[mergedNodes[leaf].children.length - 1];
+      }
+      if (leaf && mergedNodes[leaf] && !mergedNodes[leaf].children.includes(existingRoot)) {
+        mergedNodes[leaf] = { ...mergedNodes[leaf], children: [...mergedNodes[leaf].children, existingRoot] };
+      }
+      if (mergedNodes[existingRoot]) {
+        mergedNodes[existingRoot] = { ...mergedNodes[existingRoot], parentId: leaf };
+      }
+    }
+    return {
+      tree: {
+        ...existing,
+        nodes: mergedNodes,
+        rootNodeId: olderRoot || existing.rootNodeId,
+      },
+      liveCursor: newCursor,
+    };
+  }),
   prependHistoryNodes: (olderTree, newCursor) => set((state) => {
     const existing = state.historyTree;
     if (!existing) return { historyTree: olderTree, historyCursor: newCursor };

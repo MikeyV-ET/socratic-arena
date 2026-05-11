@@ -293,19 +293,26 @@ def parse_updates_tail(filepath: str, tail_bytes: int = 102400, agent_label: str
     return entries
 
 
+_turn_count_cache: dict[str, tuple[int, int]] = {}
+
 def count_conversation_turns(filepath: str) -> tuple[int, int]:
     """Fast count of conversation turns in an updates.jsonl file.
 
     Returns (turn_count, file_size). Scans for user_message_chunk and
     agent_message_chunk lines without full JSON parsing.
+    Results cached by (filepath, file_size) to avoid redundant 900MB+ scans.
     """
     import os
     file_size = os.path.getsize(filepath)
+    cached = _turn_count_cache.get(filepath)
+    if cached and cached[1] == file_size:
+        return cached
     count = 0
     with open(filepath, 'rb') as f:
         for line in f:
             if b'"user_message_chunk"' in line or b'"agent_message_chunk"' in line:
                 count += 1
+    _turn_count_cache[filepath] = (count, file_size)
     return count, file_size
 
 

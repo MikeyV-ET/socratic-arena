@@ -102,8 +102,8 @@ test.describe("Conversation Pane -- Chat panel lazy loading (R20)", () => {
     const convPane = page.locator('[data-pane-id="conversation"] [data-testid="conversation-messages"]');
     await expect(convPane).toBeVisible({ timeout: 10_000 });
 
-    // Count currently visible nodes in the conversation pane
-    const convNodeCount = await page.locator('[data-pane-id="conversation"] [data-node-id]').count();
+    // Wait for the live pane to finish loading history (async fetch on mount)
+    await expect(convPane).toHaveAttribute("data-live-history", "loaded", { timeout: 15_000 });
 
     // The conversation pane should show significant history, not just a few
     // live-session nodes. If totalNodes is 9000+ but we only see 10-20,

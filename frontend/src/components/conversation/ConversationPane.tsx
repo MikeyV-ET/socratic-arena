@@ -66,6 +66,20 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   const prependHistoryNodes = useArenaStore((s) => s.prependHistoryNodes);
   const setHistoryLoading = useArenaStore((s) => s.setHistoryLoading);
 
+  // Live pane history state
+  const currentAgent = useArenaStore((s) => s.currentAgent);
+  const liveCursor = useArenaStore((s) => s.liveCursor);
+  const liveHistoryLoading = useArenaStore((s) => s.liveHistoryLoading);
+  const liveTotalNodes = useArenaStore((s) => s.liveTotalNodes);
+  const initLiveHistory = useArenaStore((s) => s.initLiveHistory);
+  const prependLiveNodes = useArenaStore((s) => s.prependLiveNodes);
+  const setLiveHistoryLoading = useArenaStore((s) => s.setLiveHistoryLoading);
+
+  // Unified accessors — live pane uses liveCursor/liveTotalNodes, history pane uses historyCursor/historyTotalNodes
+  const paneCursor = readOnly ? historyCursor : liveCursor;
+  const paneTotalNodes = readOnly ? historyTotalNodes : liveTotalNodes;
+  const paneLoading = readOnly ? historyLoading : liveHistoryLoading;
+
   const parentRef = useRef<HTMLDivElement>(null);
   const userScrolling = useRef(false);
   const scrollTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -94,33 +108,55 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     }
   }, [effectiveTree.rootNodeId]);
 
-  // basePath + loadOlderHistory must be declared before handleScroll (which uses them)
   const basePath = window.location.pathname.replace(/\/+$/, "");
-  const loadOlderHistory = useCallback(() => {
-    if (!readOnly || historyCursor <= 0 || historyLoading) return;
-    setHistoryLoading(true);
-    const params = new URLSearchParams({ before: String(historyCursor), limit: "50" });
-    fetch(`${basePath}/api/agent/${historyAgent}/history/page?${params}`)
+
+  // Fetch full history for the live pane on mount / agent change
+  const liveHistoryFetched = useRef("");
+  useEffect(() => {
+    if (readOnly || !currentAgent) return;
+    if (liveHistoryFetched.current === currentAgent) return;
+    liveHistoryFetched.current = currentAgent;
+    setLiveHistoryLoading(true);
+    fetch(`${basePath}/api/agent/${currentAgent}/history`)
       .then((r) => r.json())
       .then((d) => {
         if (d.status === "ok" && d.tree) {
-          prependHistoryNodes(d.tree, d.cursor);
+          initLiveHistory(d.tree, d.cursor ?? 0, d.totalNodes ?? 0);
         }
-        setHistoryLoading(false);
+        setLiveHistoryLoading(false);
       })
-      .catch(() => setHistoryLoading(false));
-  }, [readOnly, historyCursor, historyLoading, historyAgent, basePath, setHistoryLoading, prependHistoryNodes]);
+      .catch(() => setLiveHistoryLoading(false));
+  }, [readOnly, currentAgent, basePath, initLiveHistory, setLiveHistoryLoading]);
+
+  // loadOlderHistory must be declared before handleScroll (which uses it)
+  const loadOlderHistory = useCallback(() => {
+    if (paneCursor <= 0 || paneLoading) return;
+    const agent = readOnly ? historyAgent : currentAgent;
+    const setLoading = readOnly ? setHistoryLoading : setLiveHistoryLoading;
+    const prependFn = readOnly ? prependHistoryNodes : prependLiveNodes;
+    setLoading(true);
+    const params = new URLSearchParams({ before: String(paneCursor), limit: "50" });
+    fetch(`${basePath}/api/agent/${agent}/history/page?${params}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.status === "ok" && d.tree) {
+          prependFn(d.tree, d.cursor);
+        }
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, [paneCursor, paneLoading, readOnly, historyAgent, currentAgent, basePath, setHistoryLoading, setLiveHistoryLoading, prependHistoryNodes, prependLiveNodes]);
 
   // Scroll handler: track user scroll state + find centered visible node
   const handleScroll = useCallback(() => {
     const el = parentRef.current;
     if (!el) return;
 
-    // Lazy loading must fire regardless of programmaticScroll
-    const spacerH = readOnly && historyTotalNodes > nodes.length && historyCursor > 0
-      ? (historyTotalNodes - nodes.length) * 60 : 0;
+    // Lazy loading — fires for both live and history panes
+    const spacerH = paneTotalNodes > nodes.length && paneCursor > 0
+      ? (paneTotalNodes - nodes.length) * 60 : 0;
     const atTop = el.scrollTop < spacerH + 100;
-    if (atTop && readOnly && historyCursor > 0 && !historyLoading) {
+    if (atTop && paneCursor > 0 && !paneLoading) {
       loadOlderHistory();
     }
 
@@ -154,7 +190,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
         useArenaStore.getState().reportViewportFocus(paneId, node.id);
       }
     }
-  }, [selectNode, paneId, virtualizer, readOnly, historyCursor, historyLoading, historyTotalNodes, nodes.length, loadOlderHistory]);
+  }, [selectNode, paneId, virtualizer, paneCursor, paneLoading, paneTotalNodes, nodes.length, loadOlderHistory]);
 
   // Auto-scroll to bottom on new content (live pane) or data load (both panes)
   const prevNodeCount = useRef(0);
@@ -181,12 +217,12 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     setTimeout(() => { programmaticScroll.current = false; }, 500);
   }, [readOnly, nodes.length, effectiveTree.rootNodeId, scrollTrigger, virtualizer]);
 
-  // Re-scroll after spacer renders (historyTotalNodes arrives in a separate state update,
+  // Re-scroll after spacer renders (totalNodes arrives in a separate state update,
   // so the spacer div appears after scroll-to-bottom has already fired)
   const prevTotalNodes = useRef(0);
   useEffect(() => {
-    if (!readOnly || historyTotalNodes === prevTotalNodes.current) return;
-    prevTotalNodes.current = historyTotalNodes;
+    if (paneTotalNodes === prevTotalNodes.current) return;
+    prevTotalNodes.current = paneTotalNodes;
     if (nodes.length === 0 || userScrolledUp.current) return;
     programmaticScroll.current = true;
     const el = parentRef.current;
@@ -196,7 +232,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
       if (el2) el2.scrollTop = el2.scrollHeight;
       programmaticScroll.current = false;
     }, 100);
-  }, [readOnly, historyTotalNodes, nodes.length]);
+  }, [paneTotalNodes, nodes.length]);
 
   // Scroll to specific node (cross-pane navigation)
   useEffect(() => {
@@ -369,20 +405,20 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
           <FontSizeControl paneId={paneId} />
         </div>
       )}
-      <div ref={parentRef} onScroll={handleScroll} className="flex-1 overflow-y-auto" style={{ zoom }} data-testid="conversation-messages">
-        {readOnly && historyLoading && (
+      <div ref={parentRef} onScroll={handleScroll} className="flex-1 overflow-y-auto" style={{ zoom }} data-testid="conversation-messages" {...(!readOnly && liveTotalNodes > 0 ? { "data-live-history": "loaded" } : {})}>
+        {paneLoading && (
           <div className="px-4 py-2 text-center text-xs text-muted-foreground animate-pulse" data-testid="history-loading-older">
             Loading older messages...
           </div>
         )}
-        {readOnly && historyCursor <= 0 && nodes.length > 0 && (
+        {paneCursor <= 0 && paneTotalNodes > 0 && nodes.length > 0 && (
           <div className="px-4 py-2 text-center text-[10px] text-muted-foreground/50">
             Beginning of history
           </div>
         )}
         {/* Spacer for unloaded content above (R05: scrollbar accuracy) */}
-        {readOnly && historyTotalNodes > nodes.length && historyCursor > 0 && (
-          <div style={{ height: (historyTotalNodes - nodes.length) * 60, minHeight: 0 }} />
+        {paneTotalNodes > nodes.length && paneCursor > 0 && (
+          <div style={{ height: (paneTotalNodes - nodes.length) * 60, minHeight: 0 }} />
         )}
         <div style={{ height: virtualizer.getTotalSize(), width: "100%", position: "relative" }}>
           {virtualizer.getVirtualItems().map((virtualRow) => {
