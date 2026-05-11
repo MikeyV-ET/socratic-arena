@@ -113,6 +113,18 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
 
   // Scroll handler: track user scroll state + find centered visible node
   const handleScroll = useCallback(() => {
+    const el = parentRef.current;
+    if (!el) return;
+
+    // Lazy loading must fire regardless of programmaticScroll
+    const spacerH = readOnly && historyTotalNodes > nodes.length && historyCursor > 0
+      ? (historyTotalNodes - nodes.length) * 60 : 0;
+    const atTop = el.scrollTop < spacerH + 100;
+    if (atTop && readOnly && historyCursor > 0 && !historyLoading) {
+      loadOlderHistory();
+    }
+
+    // Skip UI state updates during programmatic scrolls
     if (programmaticScroll.current) return;
 
     userScrolling.current = true;
@@ -121,22 +133,11 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
       userScrolling.current = false;
     }, 300);
 
-    const el = parentRef.current;
-    if (!el) return;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
-    // Spacer div for unloaded content pushes scrollTop up by its height
-    const spacerH = readOnly && historyTotalNodes > nodes.length && historyCursor > 0
-      ? (historyTotalNodes - nodes.length) * 60 : 0;
-    const atTop = el.scrollTop < spacerH + 100;
     userScrolledUp.current = !atBottom;
     setShowJumpButton(!atBottom && nodes.length > 20);
 
-    // Trigger lazy loading when scrolled near top in history pane
-    if (atTop && readOnly && historyCursor > 0 && !historyLoading) {
-      loadOlderHistory();
-    }
-
-    // Find the node closest to viewport center (replaces IntersectionObserver)
+    // Find the node closest to viewport center
     const viewportCenter = el.scrollTop + el.clientHeight / 2;
     const items = virtualizer.getVirtualItems();
     let best: (typeof items)[0] | undefined;
