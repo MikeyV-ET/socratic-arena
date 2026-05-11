@@ -257,8 +257,28 @@ No shared state. Just N samples from the same starting point with different inst
 # Socratic Arena codebase
 ~/projects/socratic-arena/
   backend/                         # FastAPI + adapter + tests
+    data/                          # Persistent sidecar files (survive restart)
+      arena_chat.jsonl             # Arena-created conversation nodes (append-only)
+      flags.json                   # User-created flags, per-agent (overwrite)
+      prompts.json                 # Training prompts (overwrite)
+      user_moments.json            # Moments created via flagging (overwrite)
+      deleted_moments.json         # Hidden moment indices (overwrite)
   frontend/                        # React + Vite
 ```
+
+### Persistence (backend/data/)
+
+SA's conversation tree is rebuilt from `updates.jsonl` on every startup. Sidecar files in `backend/data/` persist state that doesn't live in the session log:
+
+| File | Format | What it stores | When written |
+|------|--------|---------------|--------------|
+| `arena_chat.jsonl` | JSONL append | Nodes created via arena chat input | On each arena turn |
+| `flags.json` | JSON overwrite | All flags across all agents | On flag create/delete |
+| `prompts.json` | JSON overwrite | Training prompts | On prompt create/update |
+| `user_moments.json` | JSON overwrite | Moments from flag creation | On flag create |
+| `deleted_moments.json` | JSON overwrite | Hidden moment indices | On moment delete |
+
+**Note on data source evolution:** SA currently reads `updates.jsonl` directly via LiveTailer. Future direction: asdaaas becomes the single reader of raw session files and exposes a consumer API. SA would switch from direct file tailing to consuming asdaaas's processed output. This is additive -- the frontend and persistence layer are unaffected.
 
 ## Concrete Example: Two Moments from One Session
 
@@ -418,6 +438,7 @@ makes the interactions improvable; the workspace is what makes them possible.
 - Shared collaborative editor (Yjs/pycrdt, real-time, WYSIWYG markdown, author coloring, line highlighting)
 - File browser (browse filesystem, open files into editor, save back to disk)
 - Arena chat persistence (arena_chat.jsonl sidecar, survives backend restart)
+- Flag persistence (flags.json sidecar, survives backend restart, per-agent storage)
 - Tail-only startup (100KB tail read instead of full updates.jsonl parse)
 - Font size controls (A-/A+ in header, CSS variable, localStorage persistence)
 - Panel refresh survival (frontend fetches /api/panel/list on WebSocket connect)
