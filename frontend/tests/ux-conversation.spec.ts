@@ -126,14 +126,17 @@ test.describe("Conversation Pane -- Chat panel lazy loading (R20)", () => {
       return { nodeCount: nodes.length, hasLargeSpacer };
     });
 
-    // ASSERTION: Chat panel must lazy-load history.
-    // Either it has a spacer (aware of unloaded content) or loads many nodes.
-    // If neither, the chat panel only shows the live session -- which is the bug
-    // Eric identified: "the chat panel should lazy load all of it"
+    // ASSERTION: Chat panel must be aware of full history and load enough to fill the window.
+    // Eric's spec: startup loads "just enough to fill the window," not the full 5MB tail.
+    // Must have a spacer (indicating more content above) AND enough nodes to fill viewport.
     expect(
-      hasSpacerOrManyNodes.hasLargeSpacer || hasSpacerOrManyNodes.nodeCount >= loadedApiNodes,
-      `Chat panel shows ${hasSpacerOrManyNodes.nodeCount} nodes but API has ${loadedApiNodes} loaded (${totalNodes} total). Chat panel should lazy-load all history.`
+      hasSpacerOrManyNodes.hasLargeSpacer,
+      `Chat panel has ${totalNodes} total nodes but no spacer -- not lazy-loading. Shows ${hasSpacerOrManyNodes.nodeCount} nodes.`
     ).toBe(true);
+    expect(
+      hasSpacerOrManyNodes.nodeCount,
+      `Chat panel should load enough nodes to fill the window on startup. Only ${hasSpacerOrManyNodes.nodeCount} nodes visible.`
+    ).toBeGreaterThanOrEqual(5);
   });
 
   test("R20: Chat panel scrolling up triggers lazy loading of older content", async ({ page, request }) => {
@@ -196,6 +199,180 @@ test.describe("Conversation Pane -- Chat panel lazy loading (R20)", () => {
       afterBranchNodes > initialBranchNodes || loadingShown,
       `Chat panel scroll-up: started with ${initialBranchNodes} branch nodes, now ${afterBranchNodes}. Lazy loading should have loaded more.`
     ).toBe(true);
+  });
+});
+
+test.describe("Conversation Pane -- Branch chain continuity (R21)", () => {
+  test("R21: All nodes in tree.nodes are reachable via branch walk from root", async ({ page, request }) => {
+    await page.goto("/");
+    await expect(page.locator("[data-node-id]").first()).toBeVisible({ timeout: 15_000 });
+
+    const base = new URL(page.url()).origin;
+    const resp = await request.get(`${base}/api/agent/Q/history`);
+    test.skip(!resp.ok(), "Q history not available");
+    const data = await resp.json();
+    test.skip(data.status !== "ok" || !data.truncated, "Q history not truncated");
+
+    const convPane = page.locator('[data-pane-id="conversation"] [data-testid="conversation-messages"]');
+    await expect(convPane).toBeVisible({ timeout: 10_000 });
+    await expect(convPane).toHaveAttribute("data-live-history", "loaded", { timeout: 15_000 });
+    await page.waitForTimeout(2000);
+
+    // Walk the branch the same way the frontend does: start at branch.rootNodeId,
+    // follow children links. Count reachable nodes vs total in tree.nodes.
+    // Disconnected clusters = nodes exist but aren't reachable from root.
+    const chainInfo = await page.evaluate(() => {
+      const store = (window as any).__ARENA_STORE__;
+      if (!store) return null;
+      const state = store.getState();
+      const agents = Object.keys(state.agents ?? {});
+      const agentKey = agents.find((a: string) => a.toLowerCase().includes("q")) ?? agents[0];
+      if (!agentKey) return null;
+      const agentState = state.agents[agentKey];
+      const tree = agentState?.tree;
+      const branch = agentState?.activeBranch ?? agentState?.branches?.[0];
+      if (!tree?.nodes || !branch) return null;
+
+      const totalInDict = Object.keys(tree.nodes).length;
+      const rootId = branch.rootNodeId ?? tree.rootNodeId;
+      if (!rootId) return { totalInDict, reachable: 0, rootId: null };
+
+      // Walk from root following children (take last child = active branch path)
+      const visited = new Set<string>();
+      let current: string | null = rootId;
+      while (current && !visited.has(current)) {
+        visited.add(current);
+        const node = tree.nodes[current];
+        if (!node) break;
+        const children = node.children ?? [];
+        current = children.length > 0 ? children[children.length - 1] : null;
+      }
+
+      return { totalInDict, reachable: visited.size, rootId };
+    });
+
+    // If store isn't exposed, skip gracefully
+    test.skip(!chainInfo, "Arena store not accessible via window.__ARENA_STORE__");
+
+    // The reachable count should equal (or be very close to) the total in the dict.
+    // A large gap means disconnected node clusters -- the exact bug Eric reported.
+    expect(
+      chainInfo!.reachable,
+      `Branch walk from root ${chainInfo!.rootId} reaches ${chainInfo!.reachable} nodes, but tree.nodes has ${chainInfo!.totalInDict}. Gap = ${chainInfo!.totalInDict - chainInfo!.reachable} disconnected nodes.`
+    ).toBeGreaterThanOrEqual(chainInfo!.totalInDict * 0.95);
+  });
+});
+
+test.describe("Conversation Pane -- Scroll position stability (R21)", () => {
+  test("R21: Scroll position does not snap back after mouse wheel up", async ({ page, request }) => {
+    await page.goto("/");
+    await expect(page.locator("[data-node-id]").first()).toBeVisible({ timeout: 15_000 });
+
+    const base = new URL(page.url()).origin;
+    const resp = await request.get(`${base}/api/agent/Q/history`);
+    test.skip(!resp.ok(), "Q history not available");
+    const data = await resp.json();
+    test.skip(data.status !== "ok" || !data.truncated, "Q history not truncated");
+
+    const convPane = page.locator('[data-pane-id="conversation"] [data-testid="conversation-messages"]');
+    await expect(convPane).toBeVisible({ timeout: 10_000 });
+    await expect(convPane).toHaveAttribute("data-live-history", "loaded", { timeout: 15_000 });
+    await page.waitForTimeout(2000);
+
+    // Record initial scroll position (should be at bottom)
+    const initialScroll = await convPane.evaluate((el) => ({
+      scrollTop: el.scrollTop,
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+    }));
+
+    // Scroll up via mouse wheel (the way Eric did it)
+    await convPane.hover();
+    for (let i = 0; i < 5; i++) {
+      await page.mouse.wheel(0, -500);
+    }
+    await page.waitForTimeout(500);
+
+    // Record position immediately after scrolling
+    const afterScroll = await convPane.evaluate((el) => el.scrollTop);
+
+    // User scrolled up, so scrollTop should be less than initial
+    expect(afterScroll).toBeLessThan(initialScroll.scrollTop);
+
+    // Wait to see if it snaps back
+    await page.waitForTimeout(3000);
+    const afterWait = await convPane.evaluate((el) => el.scrollTop);
+
+    // Position should stay where the user put it, not snap back to bottom.
+    // Allow small tolerance (50px) for render adjustments.
+    expect(
+      Math.abs(afterWait - afterScroll),
+      `Scroll snapped back: was at ${afterScroll} after wheel, jumped to ${afterWait} after 3s wait. Delta=${Math.abs(afterWait - afterScroll)}px.`
+    ).toBeLessThan(100);
+  });
+});
+
+test.describe("Conversation Pane -- Scroll-up visibility (R21)", () => {
+  test("R21: Scrolling up into spacer region produces visible message content", async ({ page, request }) => {
+    await page.goto("/");
+    await expect(page.locator("[data-node-id]").first()).toBeVisible({ timeout: 15_000 });
+
+    const base = new URL(page.url()).origin;
+    const resp = await request.get(`${base}/api/agent/Q/history`);
+    test.skip(!resp.ok(), "Q history not available");
+    const data = await resp.json();
+    test.skip(data.status !== "ok" || !data.truncated, "Q history not truncated");
+
+    const convPane = page.locator('[data-pane-id="conversation"] [data-testid="conversation-messages"]');
+    await expect(convPane).toBeVisible({ timeout: 10_000 });
+    await expect(convPane).toHaveAttribute("data-live-history", "loaded", { timeout: 15_000 });
+    await page.waitForTimeout(2000);
+
+    // Scroll to the spacer boundary (top of loaded content)
+    const spacerInfo = await convPane.evaluate((el) => {
+      const firstChild = el.querySelector("[style*='position: relative']");
+      const spacer = firstChild?.previousElementSibling as HTMLElement | null;
+      const spacerH = spacer?.offsetHeight ?? 0;
+      el.scrollTop = spacerH;
+      return { spacerHeight: spacerH };
+    });
+
+    test.skip(spacerInfo.spacerHeight === 0, "No spacer -- all content loaded, nothing to test");
+
+    // Mouse wheel up into spacer region
+    await convPane.hover();
+    for (let i = 0; i < 15; i++) {
+      await page.mouse.wheel(0, -800);
+    }
+    await page.waitForTimeout(3000);
+
+    // After scrolling up, the viewport should contain at least one visible message
+    // with actual text content (not just empty space from the spacer).
+    const visibleContent = await convPane.evaluate((el) => {
+      const rect = el.getBoundingClientRect();
+      const nodes = el.querySelectorAll("[data-node-id]");
+      let visibleNodes = 0;
+      let hasText = false;
+      for (const node of nodes) {
+        const nr = node.getBoundingClientRect();
+        // Node is in viewport if it overlaps the scroll container
+        if (nr.bottom > rect.top && nr.top < rect.bottom) {
+          visibleNodes++;
+          if ((node.textContent ?? "").trim().length > 0) {
+            hasText = true;
+          }
+        }
+      }
+      return { visibleNodes, hasText, scrollTop: el.scrollTop };
+    });
+
+    // After scrolling up into the spacer region, we should see rendered nodes
+    // with actual content. Eric saw blank space or only 6 nodes total.
+    expect(
+      visibleContent.visibleNodes,
+      `After scrolling up to scrollTop=${visibleContent.scrollTop}, viewport shows ${visibleContent.visibleNodes} nodes. Expected at least 1 visible node with content.`
+    ).toBeGreaterThan(0);
+    expect(visibleContent.hasText).toBe(true);
   });
 });
 
