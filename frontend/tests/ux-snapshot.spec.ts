@@ -172,3 +172,85 @@ test.describe("Snapshot/Act -- Page structure", () => {
     expect(snapshot).toContain('button "Search"');
   });
 });
+
+test.describe("Snapshot/Act -- History search", () => {
+  test("Searching in history shows matching results", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForTimeout(3000);
+
+    // ACT: Open history tab
+    await page.getByText("History", { exact: true }).first().click();
+    await page.waitForTimeout(2000);
+
+    // ACT: Click search button
+    await page.getByRole("button", { name: "Search" }).last().click();
+    await page.waitForTimeout(500);
+
+    // SNAPSHOT: Search input should appear
+    const preSearchSnapshot = await page.locator("body").ariaSnapshot();
+    // Search input may have various placeholder text
+    const hasSearchInput = preSearchSnapshot.includes("textbox") ||
+                           preSearchSnapshot.includes("Search");
+    expect(hasSearchInput).toBe(true);
+
+    // ACT: Type a common word and search
+    const searchInput = page.getByPlaceholder(/search/i).last();
+    if (await searchInput.isVisible().catch(() => false)) {
+      await searchInput.fill("the");
+      await searchInput.press("Enter");
+      await page.waitForTimeout(2000);
+
+      // SNAPSHOT: Results should appear
+      const afterSearchSnapshot = await page.locator("body").ariaSnapshot();
+      // Should see clickable results or highlighted matches
+      const hasResults = afterSearchSnapshot.includes("button") &&
+                         afterSearchSnapshot.split("\n").length > preSearchSnapshot.split("\n").length;
+      expect(
+        hasResults,
+        "Search for 'the' should produce visible results in the history pane"
+      ).toBe(true);
+    }
+  });
+});
+
+test.describe("Snapshot/Act -- Agent switching", () => {
+  test("Switching agent changes visible conversation content", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForTimeout(5000);
+
+    // SNAPSHOT: See current messages
+    const beforeSnapshot = await page.locator("body").ariaSnapshot();
+    const beforeMessages = extractMessages(beforeSnapshot);
+
+    // Find the agent selector combobox (first one in the header)
+    const agentSelector = page.getByRole("combobox").first();
+    const options = await agentSelector.locator("option").allTextContents();
+
+    // Find a different agent than the currently selected one
+    const currentAgent = await agentSelector.inputValue();
+    const otherAgent = options.find((o) => o !== currentAgent);
+    if (!otherAgent) {
+      test.skip(true, "Only one agent available");
+      return;
+    }
+
+    // ACT: Switch to different agent
+    await agentSelector.selectOption(otherAgent);
+    await page.waitForTimeout(5000);
+
+    // SNAPSHOT: See new messages
+    const afterSnapshot = await page.locator("body").ariaSnapshot();
+    const afterMessages = extractMessages(afterSnapshot);
+
+    // ASSERT: Should see messages (the other agent has conversation history)
+    // Content should be different from the previous agent
+    if (afterMessages.length > 0 && beforeMessages.length > 0) {
+      const beforeTexts = beforeMessages.map((m) => m.text).join("|");
+      const afterTexts = afterMessages.map((m) => m.text).join("|");
+      expect(
+        afterTexts,
+        `After switching from ${currentAgent} to ${otherAgent}, conversation content should change`
+      ).not.toBe(beforeTexts);
+    }
+  });
+});

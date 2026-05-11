@@ -564,4 +564,16 @@ Received:   7
   173 |   });
   174 | });
   175 | 
+  176 | test.describe("Snapshot/Act -- History search", () => {
+  177 |   test("Searching in history shows matching results", async ({ page }) => {
+  178 |     await page.goto("/");
+  179 |     await page.waitForTimeout(3000);
+  180 | 
+  181 |     // ACT: Open history tab
+  182 |     await page.getByText("History", { exact: true }).first().click();
+  183 |     await page.waitForTimeout(2000);
+  184 | 
+  185 |     // ACT: Click search button
+  186 |     await page.getByRole("button", { name: "Search" }).last().click();
+  187 |     await page.waitForTimeout(500);
 ```
