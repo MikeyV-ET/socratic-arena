@@ -405,7 +405,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
           <FontSizeControl paneId={paneId} />
         </div>
       )}
-      <div ref={parentRef} onScroll={handleScroll} className="flex-1 overflow-y-auto" style={{ zoom }} data-testid="conversation-messages" {...(!readOnly && liveTotalNodes > 0 ? { "data-live-history": "loaded" } : {})}>
+      <div ref={parentRef} onScroll={handleScroll} className="flex-1 overflow-y-auto" style={{ zoom }} data-testid="conversation-messages" data-branch-nodes={nodes.length} {...(!readOnly && liveTotalNodes > 0 ? { "data-live-history": "loaded" } : {})}>
         {paneLoading && (
           <div className="px-4 py-2 text-center text-xs text-muted-foreground animate-pulse" data-testid="history-loading-older">
             Loading older messages...

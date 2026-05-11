@@ -316,13 +316,19 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
   setLiveHistoryLoading: (loading) => set({ liveHistoryLoading: loading }),
   initLiveHistory: (historyTree, cursor, totalNodes) => set((state) => {
     const wsTree = state.tree;
-    // History tree is the base (full chain). WS tree nodes win where overlapping (live content).
     const mergedNodes = { ...historyTree.nodes, ...wsTree.nodes };
+    const olderRoot = historyTree.rootNodeId;
+    const newBranches = { ...wsTree.branches };
+    const activeBranch = newBranches[wsTree.activeBranchId];
+    if (activeBranch && olderRoot) {
+      newBranches[wsTree.activeBranchId] = { ...activeBranch, rootNodeId: olderRoot };
+    }
     return {
       tree: {
         ...wsTree,
         nodes: mergedNodes,
-        rootNodeId: historyTree.rootNodeId || wsTree.rootNodeId,
+        branches: newBranches,
+        rootNodeId: olderRoot || wsTree.rootNodeId,
       },
       liveCursor: cursor,
       liveTotalNodes: totalNodes,
@@ -348,10 +354,17 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
         mergedNodes[existingRoot] = { ...mergedNodes[existingRoot], parentId: leaf };
       }
     }
+    // Update branch rootNodeId so getActiveBranchNodes walks from the oldest node
+    const newBranches = { ...existing.branches };
+    const activeBranch = newBranches[existing.activeBranchId];
+    if (activeBranch && olderRoot) {
+      newBranches[existing.activeBranchId] = { ...activeBranch, rootNodeId: olderRoot };
+    }
     return {
       tree: {
         ...existing,
         nodes: mergedNodes,
+        branches: newBranches,
         rootNodeId: olderRoot || existing.rootNodeId,
       },
       liveCursor: newCursor,
@@ -381,9 +394,16 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
         mergedNodes[existingRoot] = { ...mergedNodes[existingRoot], parentId: leaf };
       }
     }
+    // Update branch rootNodeId so getHistoryBranchNodes walks from the oldest node
+    const newBranches = { ...existing.branches };
+    const activeBranch = newBranches[existing.activeBranchId];
+    if (activeBranch && olderRoot) {
+      newBranches[existing.activeBranchId] = { ...activeBranch, rootNodeId: olderRoot };
+    }
     const mergedTree: ConversationTree = {
       ...existing,
       nodes: mergedNodes,
+      branches: newBranches,
       rootNodeId: olderRoot || existing.rootNodeId,
     };
     return { historyTree: mergedTree, historyCursor: newCursor };
@@ -391,7 +411,8 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
 
   getHistoryBranchNodes: () => {
     const state = get();
-    const t = state.historyTree ?? state.tree;
+    const t = state.historyTree;
+    if (!t) return [];
     const branch = t.branches[t.activeBranchId];
     if (!branch) return [];
 

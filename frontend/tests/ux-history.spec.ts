@@ -288,27 +288,24 @@ test.describe("History Pane -- Lazy loading (R06)", () => {
     const historyScroll = historyPane.locator('[data-testid="conversation-messages"]');
     await expect(historyScroll).toBeVisible({ timeout: 10_000 });
 
-    const initialNodeCount = await historyPane.locator("[data-node-id]").count();
-    expect(initialNodeCount).toBeGreaterThan(0);
+    // Use data-branch-nodes to get total branch walk count (virtualizer only renders viewport items)
+    const initialBranchNodes = Number(await historyScroll.getAttribute("data-branch-nodes") ?? "0");
+    expect(initialBranchNodes).toBeGreaterThan(0);
 
     // The scroll container has a spacer div at the top representing unloaded
     // content: (totalNodes - loadedNodes) * 60px. A real user scrolling up
     // reaches the top of LOADED content (scrollTop ≈ spacerHeight), not
     // scrollTop=0. Simulate that: scroll to just above the first real node.
     const scrollInfo = await historyScroll.evaluate((el) => {
-      // Find the spacer: first child div with large height and no text
       const firstChild = el.querySelector("[style*='position: relative']");
       const spacer = firstChild?.previousElementSibling as HTMLElement | null;
       const spacerH = spacer?.offsetHeight ?? 0;
-      // Scroll to the spacer boundary (top of loaded content)
       el.scrollTop = spacerH;
       return { spacerHeight: spacerH, scrollTop: el.scrollTop, scrollHeight: el.scrollHeight };
     });
-    // Confirm there IS a spacer (truncated history should have one)
     expect(scrollInfo.spacerHeight).toBeGreaterThan(0);
 
-    // Simulate user scrolling up from the top of loaded content via mouse
-    // wheel, then also try setting scrollTop directly near the spacer boundary.
+    // Simulate user scrolling up from the top of loaded content
     await historyScroll.hover();
     for (let i = 0; i < 10; i++) {
       await page.mouse.wheel(0, -1000);
@@ -324,16 +321,15 @@ test.describe("History Pane -- Lazy loading (R06)", () => {
     });
     await page.waitForTimeout(3000);
 
-    // After scrolling to top of loaded content in a truncated history,
-    // lazy loading MUST fire: either more nodes appear or loading indicator shows.
-    const afterNodeCount = await historyPane.locator("[data-node-id]").count();
+    // After scrolling up, lazy loading should increase branch node count or show loading
+    const afterBranchNodes = Number(await historyScroll.getAttribute("data-branch-nodes") ?? "0");
     const loadingShown = await historyPane
       .locator('[data-testid="history-loading-older"]')
       .isVisible()
       .catch(() => false);
 
     expect(
-      afterNodeCount > initialNodeCount || loadingShown,
+      afterBranchNodes > initialBranchNodes || loadingShown,
     ).toBe(true);
   });
 });
