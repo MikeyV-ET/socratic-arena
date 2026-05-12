@@ -94,6 +94,17 @@ class LiveTailer:
             self._offset = 0
             self._inode = 0
 
+    def seek_to_offset(self, offset: int):
+        """Set offset to a specific byte position (for gap-free handoff from tail parse)."""
+        try:
+            st = os.stat(self.filepath)
+            self._offset = min(offset, st.st_size)
+            self._inode = st.st_ino
+            log.info("LiveTailer: seeking to offset %d of %s (file size=%d)", self._offset, self.filepath, st.st_size)
+        except OSError:
+            self._offset = 0
+            self._inode = 0
+
     def set_last_node_id(self, node_id: str | None):
         """Set the ID of the last node in the tree (for parent linking)."""
         self._last_node_id = node_id

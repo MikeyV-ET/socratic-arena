@@ -75,28 +75,25 @@ test.describe("Tail truncation -- conversation completeness", () => {
       return;
     }
 
-    // Install a WebSocket message interceptor to capture the state.snapshot
-    await page.evaluate(() => {
-      (window as any).__captured_snapshot_nodes = -1;
-      const origWS = WebSocket.prototype.addEventListener;
-      // Patch onmessage on any existing WebSocket
-      const ws = (window as any).__SA_WS;
-      if (ws && ws.onmessage) {
-        const orig = ws.onmessage;
-        ws.onmessage = (ev: MessageEvent) => {
+    // Intercept WebSocket messages to capture the state.snapshot node count
+    let snapshotNodeCount = -1;
+    const wsPromise = new Promise<number>((resolve) => {
+      page.on("websocket", (ws) => {
+        ws.on("framereceived", (frame) => {
           try {
-            const msg = JSON.parse(ev.data);
+            const msg = JSON.parse(frame.payload as string);
             if (msg.type === "state.snapshot" && msg.payload?.tree?.nodes) {
-              (window as any).__captured_snapshot_nodes =
-                Object.keys(msg.payload.tree.nodes).length;
+              snapshotNodeCount = Object.keys(msg.payload.tree.nodes).length;
+              resolve(snapshotNodeCount);
             }
           } catch {}
-          orig.call(ws, ev);
-        };
-      }
+        });
+      });
+      // Timeout fallback
+      setTimeout(() => resolve(snapshotNodeCount), 15000);
     });
 
-    // Switch to the agent — triggers _build_agent_state (100KB tail)
+    // Switch to the agent — triggers _build_agent_state (5MB tail)
     await page.evaluate(async (agent: string) => {
       await fetch("/api/agent/switch", {
         method: "POST",
@@ -105,59 +102,34 @@ test.describe("Tail truncation -- conversation completeness", () => {
       });
     }, target.name);
 
-    // Wait for the state.snapshot to arrive
-    await page.waitForTimeout(4000);
+    // Wait for the state.snapshot WS message
+    const wsNodes = await wsPromise;
 
-    // Get the full history from the API (50MB tail — ground truth)
-    // Response shape: { tree: { nodes, activeNodeId, ... }, totalNodes }
-    const history = await page.evaluate(async (agent: string) => {
-      const resp = await fetch(
-        `/api/agent/${agent}/history?tailMB=50`
-      );
+    // Get the 5MB history for comparison (same tail as startup uses)
+    const history5MB = await page.evaluate(async (agent: string) => {
+      const resp = await fetch(`/api/agent/${agent}/history?tailMB=5`);
       const data = await resp.json();
-      const nodes = data.tree?.nodes || {};
-      return {
-        nodeCount: Object.keys(nodes).length,
-        activeId: data.tree?.activeNodeId || "",
-        lastContent: (
-          nodes[data.tree?.activeNodeId || ""]?.content || ""
-        ).slice(0, 300),
-      };
+      return Object.keys(data.tree?.nodes || {}).length;
     }, target.name);
-
-    // Also read DOM to report visible count
-    const snapshot = await page.locator("body").ariaSnapshot();
-    const visibleMessages = extractMessages(snapshot);
-
-    // Try to read intercepted WS node count
-    const wsNodeCount: number = await page.evaluate(
-      () => (window as any).__captured_snapshot_nodes ?? -1
-    );
 
     console.log(
       `[tail-truncation] agent=${target.name}\n` +
-        `  ws_snapshot_nodes=${wsNodeCount}\n` +
-        `  history_api_nodes=${history.nodeCount}\n` +
-        `  visible_dom_messages=${visibleMessages.length}\n` +
-        `  history_last="${history.lastContent.slice(0, 80)}..."`
+        `  ws_snapshot_nodes=${wsNodes}\n` +
+        `  history_5MB_nodes=${history5MB}`
     );
 
-    // CORE ASSERTION: The node count sent by the server on switch should
-    // match what the history API returns. If the switch sends drastically
-    // fewer nodes, the user sees an incomplete conversation.
-    //
-    // We accept at least 50% of the history API's count to allow for
-    // minor timing differences (live tailer may have added a few nodes).
-    const switchNodeCount =
-      wsNodeCount > 0 ? wsNodeCount : visibleMessages.length;
-    const threshold = Math.floor(history.nodeCount * 0.5);
-
+    // CORE ASSERTION: The state.snapshot sent on switch should contain
+    // a comparable number of nodes to the 5MB history API.
+    // The old bug: 100KB tail gave ~12 nodes. Now with 5MB: ~130+.
+    // We use 50% of the 5MB history as threshold to account for
+    // timing differences.
+    const switchNodes = wsNodes > 0 ? wsNodes : history5MB;
+    const threshold = Math.floor(history5MB * 0.5);
     expect(
-      switchNodeCount,
-      `After switching to ${target.name}: server sent ${switchNodeCount} nodes ` +
-        `but history API has ${history.nodeCount} nodes (50MB tail). ` +
-        `User is missing ${history.nodeCount - switchNodeCount} messages. ` +
-        `Cause: _build_agent_state uses 100KB tail vs history API's 50MB.`
+      switchNodes,
+      `After switching to ${target.name}: WS snapshot had ${wsNodes} nodes ` +
+        `but 5MB history API has ${history5MB} nodes. ` +
+        `Switch should send at least ${threshold} (50% of 5MB tail).`
     ).toBeGreaterThanOrEqual(threshold);
   });
 

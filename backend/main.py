@@ -302,8 +302,13 @@ docs_set_broadcast(broadcast)
 
 # --- Live session tailer ---
 
-def _start_live_tailer(agent_name: str):
-    """Initialize and start the live tailer for an agent's updates.jsonl."""
+def _start_live_tailer(agent_name: str, tail_offset: int | None = None):
+    """Initialize and start the live tailer for an agent's updates.jsonl.
+
+    If tail_offset is provided, the tailer starts from that byte offset
+    (closing the gap between tail parse and live tailing). Otherwise
+    seeks to end of file.
+    """
     global _live_tailer, _live_task
 
     # Stop existing tailer
@@ -317,7 +322,10 @@ def _start_live_tailer(agent_name: str):
         return
 
     _live_tailer = LiveTailer(str(updates_path), agent_label=agent_name)
-    _live_tailer.seek_to_end()
+    if tail_offset is not None:
+        _live_tailer.seek_to_offset(tail_offset)
+    else:
+        _live_tailer.seek_to_end()
 
     # Register existing node IDs to prevent duplicate-induced parent cycles
     if state.tree.nodes:
@@ -1719,14 +1727,15 @@ async def load_persisted_data():
             state.tree.active_node_id = prev_id
         log.info("Loaded %d arena chat nodes from sidecar", len(arena_nodes))
     # If ARENA_AGENT is set to something other than knight-bio, switch on startup
+    _tail_offset = None
     if _current_agent != "knight-bio":
-        state = _build_agent_state(_current_agent)
+        state, _tail_offset = _build_agent_state(_current_agent)
         log.info("Startup: loaded state for agent %s", _current_agent)
 
     _load_flags()
 
     # Start live tailer to stream session updates
-    _start_live_tailer(_current_agent)
+    _start_live_tailer(_current_agent, tail_offset=_tail_offset)
 
 
 @app.on_event("shutdown")
@@ -1917,8 +1926,12 @@ def _get_updates_path_for_session(agent_name: str, session_id: str) -> Path | No
     return None
 
 
-def _build_agent_state(agent_name: str, session_id: str | None = None) -> StateSnapshot:
-    """Build a StateSnapshot for a named agent from their session data."""
+def _build_agent_state(agent_name: str, session_id: str | None = None) -> tuple[StateSnapshot, int | None]:
+    """Build a StateSnapshot for a named agent from their session data.
+
+    Returns (state, tail_offset) where tail_offset is the byte position
+    the tail parse started from (for gap-free LiveTailer handoff).
+    """
     from updates_parser import build_state_from_updates
     from notebook_parser import build_notebook
 
@@ -1929,9 +1942,13 @@ def _build_agent_state(agent_name: str, session_id: str | None = None) -> StateS
     agent_dir = AGENTS_HOME / agent_name
     notebook_path = agent_dir / f"lab_notebook_{agent_name.lower()}.md"
 
+    tail_offset = None
     if updates_path:
-        log.info("Loading updates for %s from: %s (tail-only)", agent_name, updates_path)
-        st = build_state_from_updates(str(updates_path), label=agent_name, tail_only=True)
+        tail_bytes = 5 * 1024 * 1024  # 5MB — matches history endpoint default
+        log.info("Loading updates for %s from: %s (tail-only, %dMB)", agent_name, updates_path, tail_bytes // (1024*1024))
+        st = build_state_from_updates(str(updates_path), label=agent_name, tail_only=True, tail_bytes=tail_bytes)
+        file_size = os.path.getsize(str(updates_path))
+        tail_offset = max(0, file_size - tail_bytes)
     else:
         log.info("No session data for %s, creating empty state", agent_name)
         st = StateSnapshot(
@@ -1950,7 +1967,7 @@ def _build_agent_state(agent_name: str, session_id: str | None = None) -> StateS
     if notebook_path.exists():
         st.notebook = build_notebook(str(notebook_path))
 
-    return st
+    return st, tail_offset
 
 
 @app.post("/api/agent/switch")
@@ -1970,13 +1987,13 @@ async def switch_agent(body: dict):
     log.info("Switching arena to agent: %s (session: %s)", agent_name, session_id or "current")
     _arena_node_ids.clear()
     _arena_turn_active = False
-    state = _build_agent_state(agent_name, session_id=session_id)
+    state, tail_offset = _build_agent_state(agent_name, session_id=session_id)
     _current_agent = agent_name
     _load_flags()
 
     # Restart live tailer for the new agent (only for current session)
     if not session_id:
-        _start_live_tailer(agent_name)
+        _start_live_tailer(agent_name, tail_offset=tail_offset)
     else:
         # Historical session — no live tailing
         global _live_tailer, _live_task
