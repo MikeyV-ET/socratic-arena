@@ -130,6 +130,68 @@ test.describe("Snapshot/Act -- Scroll behavior", () => {
       ).toBe(afterFirst);
     }
   });
+
+  test("Sustained scrolling up stays smooth (no jerk/snap-back)", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForTimeout(5000);
+
+    const initialSnapshot = await page.locator("body").ariaSnapshot();
+    const initialMessages = extractMessages(initialSnapshot);
+    if (initialMessages.length < 2) {
+      test.skip(true, "Too few messages to test sustained scroll");
+      return;
+    }
+
+    // Hover over the conversation area
+    const messageArea = page.getByText(initialMessages[0].text).first();
+    await messageArea.hover();
+
+    // Scroll up aggressively in batches, checking for position regression
+    // between each batch. Regression = scroll position jumps forward (down)
+    // after having scrolled up.
+    let regressions = 0;
+    let prevFirstMessage = initialMessages[0].text;
+
+    for (let batch = 0; batch < 8; batch++) {
+      // Scroll up a batch of wheel events
+      for (let i = 0; i < 10; i++) {
+        await page.mouse.wheel(0, -500);
+      }
+      await page.waitForTimeout(800);
+
+      // Read what's visible now
+      const snap = await page.locator("body").ariaSnapshot();
+      const msgs = extractMessages(snap);
+      if (msgs.length === 0) continue;
+
+      const currentFirst = msgs[0].text;
+
+      // Wait a moment for any snap-back
+      await page.waitForTimeout(500);
+      const snap2 = await page.locator("body").ariaSnapshot();
+      const msgs2 = extractMessages(snap2);
+      if (msgs2.length === 0) continue;
+
+      // If the first visible message changed between reads (without
+      // additional scrolling), that's a snap-back regression
+      if (msgs2[0].text !== currentFirst) {
+        regressions++;
+        console.log(
+          `[scroll-jerk] batch=${batch} regression: ` +
+            `"${currentFirst.slice(0, 40)}" → "${msgs2[0].text.slice(0, 40)}"`
+        );
+      }
+
+      prevFirstMessage = msgs2[0].text;
+    }
+
+    // After 80 scroll events in 8 batches, there should be zero regressions.
+    expect(
+      regressions,
+      `Scroll jerkiness detected: ${regressions} position regressions ` +
+        `(snap-backs) during sustained upward scrolling across 8 batches.`
+    ).toBe(0);
+  });
 });
 
 test.describe("Snapshot/Act -- Page structure", () => {
