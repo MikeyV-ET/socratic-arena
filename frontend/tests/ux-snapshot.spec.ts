@@ -845,3 +845,174 @@ test.describe("Snapshot/Act -- Flag notes (R16)", () => {
     await page.waitForTimeout(1000);
   });
 });
+
+test.describe("Snapshot/Act -- Edit flag notes (R16)", () => {
+  test("Clicking a flagged item opens note for editing", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForTimeout(5000);
+
+    // SETUP: Need a flagged item. Flag one first.
+    const unflaggedCount = await page.getByTitle("Flag as training candidate").count();
+    if (unflaggedCount === 0) {
+      test.skip(true, "No unflagged messages available");
+      return;
+    }
+
+    // Flag with an initial note
+    const clicked = await page.evaluate(() => {
+      const btns = document.querySelectorAll('button[title="Flag as training candidate"]');
+      for (let i = btns.length - 1; i >= 0; i--) {
+        const r = btns[i].getBoundingClientRect();
+        if (r.y >= 0 && r.y + r.height <= window.innerHeight) {
+          (btns[i] as HTMLElement).click();
+          return true;
+        }
+      }
+      return false;
+    });
+    if (!clicked) {
+      test.skip(true, "No flag buttons visible in viewport");
+      return;
+    }
+    await page.waitForTimeout(1000);
+
+    const initialNote = `initial-${Date.now()}`;
+    const noteInput = page.getByPlaceholder(/note|reason|why/i)
+      .or(page.getByRole("textbox", { name: /note/i }))
+      .or(page.locator('[data-flag-note-input]'));
+    await noteInput.first().fill(initialNote);
+    await noteInput.first().press("Enter");
+    await page.waitForTimeout(3000);
+
+    // ACT: Click the now-flagged item's flag button (should open note editor, not just unflag)
+    const flaggedBtn = page.getByTitle("Remove flag").first();
+    await flaggedBtn.click();
+    await page.waitForTimeout(1000);
+
+    // VERIFY: A note editor appears with the existing note text
+    const editInput = page.getByPlaceholder(/note|reason|why/i)
+      .or(page.getByRole("textbox", { name: /note/i }))
+      .or(page.locator('[data-flag-note-input]'));
+    const editVisible = await editInput.first().isVisible().catch(() => false);
+    expect(
+      editVisible,
+      "Clicking a flagged item should open note for editing, not just unflag"
+    ).toBe(true);
+
+    // VERIFY: The existing note is pre-filled
+    const currentValue = await editInput.first().inputValue().catch(() => "");
+    expect(
+      currentValue,
+      "Note editor should show the existing note text"
+    ).toContain(initialNote);
+
+    // ACT: Update the note
+    const updatedNote = `updated-${Date.now()}`;
+    await editInput.first().fill(updatedNote);
+    await editInput.first().press("Enter");
+    await page.waitForTimeout(3000);
+
+    // VERIFY: Updated note is visible
+    const snapshot = await page.locator("body").ariaSnapshot();
+    const updatedVisible = snapshot.includes(updatedNote) ||
+      await page.getByText(updatedNote).isVisible().catch(() => false);
+    expect(
+      updatedVisible,
+      "Updated note should be visible after editing"
+    ).toBe(true);
+
+    // CLEANUP
+    await page.evaluate(() => {
+      const btn = document.querySelector('button[title="Remove flag"]');
+      if (btn) (btn as HTMLElement).click();
+    });
+    await page.waitForTimeout(1000);
+  });
+
+  test("Edit note from history panel on item flagged in chat", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForTimeout(5000);
+
+    // Flag an item in chat pane with a note
+    const unflaggedCount = await page.getByTitle("Flag as training candidate").count();
+    if (unflaggedCount === 0) {
+      test.skip(true, "No unflagged messages available");
+      return;
+    }
+
+    const clicked = await page.evaluate(() => {
+      const btns = document.querySelectorAll('button[title="Flag as training candidate"]');
+      for (let i = btns.length - 1; i >= 0; i--) {
+        const r = btns[i].getBoundingClientRect();
+        if (r.y >= 0 && r.y + r.height <= window.innerHeight) {
+          (btns[i] as HTMLElement).click();
+          return true;
+        }
+      }
+      return false;
+    });
+    if (!clicked) {
+      test.skip(true, "No flag buttons visible in viewport");
+      return;
+    }
+    await page.waitForTimeout(1000);
+
+    const originalNote = `chat-note-${Date.now()}`;
+    const noteInput = page.getByPlaceholder(/note|reason|why/i)
+      .or(page.getByRole("textbox", { name: /note/i }))
+      .or(page.locator('[data-flag-note-input]'));
+    await noteInput.first().fill(originalNote);
+    await noteInput.first().press("Enter");
+    await page.waitForTimeout(3000);
+
+    // ACT: Switch to history panel
+    await page.getByText("History", { exact: true }).first().click();
+    await page.waitForTimeout(3000);
+
+    // ACT: Click the flagged item's flag button in history to edit the note
+    const historyFlagBtn = page.getByTitle("Remove flag").first();
+    const histFlagVisible = await historyFlagBtn.isVisible().catch(() => false);
+    if (!histFlagVisible) {
+      test.skip(true, "Flagged item not visible in history panel");
+      return;
+    }
+    await historyFlagBtn.click();
+    await page.waitForTimeout(1000);
+
+    // VERIFY: Note editor opens in history panel with existing note
+    const histEditInput = page.getByPlaceholder(/note|reason|why/i)
+      .or(page.getByRole("textbox", { name: /note/i }))
+      .or(page.locator('[data-flag-note-input]'));
+    const histEditVisible = await histEditInput.first().isVisible().catch(() => false);
+    expect(
+      histEditVisible,
+      "Should be able to edit flag note from history panel"
+    ).toBe(true);
+
+    // ACT: Update the note from history
+    const historyNote = `history-edit-${Date.now()}`;
+    await histEditInput.first().fill(historyNote);
+    await histEditInput.first().press("Enter");
+    await page.waitForTimeout(3000);
+
+    // ACT: Switch back to chat to verify sync
+    await page.getByText("History", { exact: true }).first().click();
+    await page.waitForTimeout(2000);
+
+    // VERIFY: Updated note synced back to chat pane
+    const chatSnapshot = await page.locator("body").ariaSnapshot();
+    const syncedToChat = chatSnapshot.includes(historyNote) ||
+      await page.getByText(historyNote).isVisible().catch(() => false);
+    expect(
+      syncedToChat,
+      "Note edited in history panel should sync to chat panel"
+    ).toBe(true);
+
+    // CLEANUP
+    await page.evaluate(() => {
+      const btn = document.querySelector('button[title="Remove flag"]');
+      if (btn) (btn as HTMLElement).click();
+    });
+    await page.waitForTimeout(1000);
+  });
+});

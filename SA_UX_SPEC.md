@@ -224,6 +224,9 @@
 - [ ] Flag notes appear in both chat and history panes (synced like the flag itself)
 - [ ] Flag notes are persisted (survive page reload via flags.json)
 - [ ] EntryFlagButton in notebook pane also supports notes
+- [ ] **Edit note after flagging:** Clicking a flagged item's ⚑ opens the note for editing (not just unflag). User can update the note text and save.
+- [ ] **Edit from any pane:** Note editing works from chat panel, history panel, and notebook panel -- wherever the flag is visible.
+- [ ] Backend supports `flag.update` message (or re-use `flag.create` with existing flagId) to update a note on an existing flag
 
 ---
 
