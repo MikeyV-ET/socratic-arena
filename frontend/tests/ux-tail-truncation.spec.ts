@@ -133,6 +133,143 @@ test.describe("Tail truncation -- conversation completeness", () => {
     ).toBeGreaterThanOrEqual(threshold);
   });
 
+  test("scroll position does not regress during sustained upward scroll", async ({
+    page,
+  }) => {
+    // Capture scrollTop at high frequency during sustained scrolling.
+    // Jerkiness = scrollTop increases (jumps down) while user is scrolling up.
+    await page.goto("/");
+    await page.waitForTimeout(5000);
+
+    // Find the scrollable conversation container
+    const scrollData = await page.evaluate(() => {
+      // Try common scrollable containers
+      const candidates = [
+        document.querySelector('[data-pane-id="chat"]'),
+        document.querySelector('[role="list"]'),
+        ...Array.from(document.querySelectorAll("div")).filter(
+          (d) => d.scrollHeight > d.clientHeight && d.clientHeight > 200
+        ),
+      ].filter(Boolean);
+
+      if (candidates.length === 0) return { found: false, selector: "" };
+
+      // Pick the one with the most scroll range
+      let best = candidates[0]!;
+      for (const c of candidates) {
+        if (c!.scrollHeight > best.scrollHeight) best = c!;
+      }
+
+      // Tag it for later reference
+      best.setAttribute("data-scroll-test", "target");
+      return {
+        found: true,
+        scrollHeight: best.scrollHeight,
+        clientHeight: best.clientHeight,
+        scrollTop: best.scrollTop,
+      };
+    });
+
+    if (!scrollData.found) {
+      test.skip(true, "No scrollable container found");
+      return;
+    }
+
+    // Install a high-frequency scroll position recorder
+    await page.evaluate(() => {
+      const el = document.querySelector('[data-scroll-test="target"]');
+      if (!el) return;
+      (window as any).__scrollLog = [];
+      const observer = () => {
+        (window as any).__scrollLog.push({
+          t: performance.now(),
+          top: el.scrollTop,
+        });
+      };
+      el.addEventListener("scroll", observer);
+      // Also poll at 60fps in case scroll events are coalesced
+      (window as any).__scrollPoll = setInterval(() => {
+        (window as any).__scrollLog.push({
+          t: performance.now(),
+          top: el.scrollTop,
+        });
+      }, 16);
+    });
+
+    // Scroll to bottom first to have room to scroll up
+    await page.evaluate(() => {
+      const el = document.querySelector('[data-scroll-test="target"]');
+      if (el) el.scrollTop = el.scrollHeight;
+    });
+    await page.waitForTimeout(500);
+
+    // Clear the log, then do sustained upward scrolling
+    await page.evaluate(() => {
+      (window as any).__scrollLog = [];
+    });
+
+    const target = page.locator('[data-scroll-test="target"]');
+    await target.hover();
+
+    // 100 scroll-up events with small delays (simulates real wheel usage)
+    for (let i = 0; i < 100; i++) {
+      await page.mouse.wheel(0, -300);
+      await page.waitForTimeout(50);
+    }
+    await page.waitForTimeout(1000);
+
+    // Stop recording and analyze
+    const log: { t: number; top: number }[] = await page.evaluate(
+      () => {
+        clearInterval((window as any).__scrollPoll);
+        return (window as any).__scrollLog || [];
+      }
+    );
+
+    // Analyze for regressions: any time scrollTop increases (jumps down)
+    // while the user is only scrolling up
+    let regressions = 0;
+    let maxRegression = 0;
+    const regressionDetails: string[] = [];
+
+    for (let i = 1; i < log.length; i++) {
+      const delta = log[i].top - log[i - 1].top;
+      // Scrolling up = scrollTop decreasing. A positive delta = regression
+      if (delta > 2) {
+        // >2px threshold to ignore subpixel noise
+        regressions++;
+        maxRegression = Math.max(maxRegression, delta);
+        if (regressionDetails.length < 5) {
+          regressionDetails.push(
+            `t=${(log[i].t - log[0].t).toFixed(0)}ms: ` +
+              `${log[i - 1].top.toFixed(0)} → ${log[i].top.toFixed(0)} (+${delta.toFixed(0)}px)`
+          );
+        }
+      }
+    }
+
+    const totalScroll =
+      log.length > 1 ? log[0].top - log[log.length - 1].top : 0;
+
+    console.log(
+      `[scroll-jerk] ${log.length} samples, ` +
+        `total_scroll=${totalScroll.toFixed(0)}px up, ` +
+        `regressions=${regressions}, ` +
+        `max_regression=${maxRegression.toFixed(0)}px\n` +
+        (regressionDetails.length > 0
+          ? `  Examples: ${regressionDetails.join("; ")}`
+          : "  No regressions detected")
+    );
+
+    expect(
+      regressions,
+      `Scroll jerkiness: ${regressions} position regressions detected ` +
+        `(scrollTop jumped DOWN while scrolling UP). ` +
+        `Max jump: ${maxRegression.toFixed(0)}px. ` +
+        `Samples: ${regressionDetails.join("; ")}`
+    ).toBe(0);
+  });
+
   test("last visible message matches the actual last message from history", async ({
     page,
   }) => {
