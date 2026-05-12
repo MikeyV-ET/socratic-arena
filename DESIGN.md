@@ -455,6 +455,59 @@ makes the interactions improvable; the workspace is what makes them possible.
 - Automated message replay extraction
 - AGENTS.md diff visualization
 
+## Future Architecture
+
+### SA as Local Binary
+
+SA becomes a packaged desktop application (Tauri or Electron). The FastAPI backend bundles inside. The frontend runs in a native webview instead of a browser tab. Benefits: single install, no dev server, OS-level window management.
+
+**What stays the same:** REST API at localhost:8000, WebSocket for agent communication, panel abstraction, all existing endpoints. Agents interact identically whether SA is a binary or a dev server.
+
+**What changes:**
+- Xpra replaced by native window management. On Windows: Win32 SetParent embeds app windows, UI Automation API for programmatic access. On Linux: X11 reparenting + AT-SPI. On macOS: NSView embedding + Accessibility API.
+- Panel hosting gains native app support. A panel can be a webview (web apps), a managed native window (LibreOffice, terminal), or SA's own components (editor, notebook).
+- The binary manages app lifecycle: launch, embed, resize, focus, close.
+
+### Unified Snapshot/Act Interface
+
+Extend the panel-level snapshot/act pattern (`/api/panel/{id}/snapshot` + `/api/panel/{id}/act`) to cover SA's own UI components. Currently panels are hosted apps only (Chrome via Selenium/CDP). SA's own panes — conversation, notebook, editor, history — become addressable panels with the same interface.
+
+**Agent interaction model:**
+- `GET /api/snapshot` — full SA accessibility tree (all visible panes)
+- `GET /api/snapshot?pane=notebook` — selective, single-pane snapshot (lower token cost)
+- `POST /api/act` — agent-driven UI actions: navigate, scroll, flag, search, open editor
+
+This unifies the interaction model. An agent uses the same pattern whether operating SA's UI, a web app in a panel, or a native desktop app. The resident agent (wearing SA) uses WebSocket commands for low-latency actions; external agents or orchestrators use REST.
+
+**Token efficiency:** Selective pane snapshots cut payload 3-4x vs full-page snapshots. Over a working session with many interactions, this significantly reduces agent context burn.
+
+### Agent-Driven UI Commands
+
+Expand the WebSocket command vocabulary for the resident agent to control SA's UI on behalf of the human:
+
+| Command | Purpose |
+|---------|---------|
+| `navigate.notebook` | Scroll notebook to a specific entry |
+| `navigate.history` | Focus history pane on a specific node |
+| `editor.open` | Open a file in the shared editor |
+| `editor.insert` | Insert content at cursor position |
+| `artifact.display` | Show a generated artifact in its own panel |
+| `highlight` | Visually highlight an element for the human |
+| `panel.launch` | Launch an app in a new panel |
+
+These complement existing commands (`flag.create`, `scrollTargetId`, `sa-search`). The agent acts within the shared workspace, not on it from outside.
+
+### Multi-User Model
+
+Separate OS users, each with their own SA instance. SSH tunnels for remote access and security. Each user gets independent agent sessions, panel state, and conversation history. No shared server — SA runs locally per user, agents attach via asdaaas adapter.
+
+### Packaging Path
+
+1. Move updates.jsonl parsing from TUI/SA into asdaaas. Both become thin clients. ~200 lines of parser + API.
+2. SA frontend becomes a pure client with no filesystem dependencies.
+3. Package with Tauri (Rust, smaller binary, OS-native webview) or Electron (larger, more ecosystem support).
+4. Agent attachment via asdaaas adapter pattern — unchanged.
+
 ## Prior Art
 
 - **Process reward models** (Lightman et al., 2023): Reward intermediate steps via automated verification. RLAIHIS sources signal from expert interaction.
