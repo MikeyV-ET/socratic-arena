@@ -147,6 +147,12 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       store.addFlag(msg.payload.flag as never);
       break;
 
+    case "flag.updated": {
+      const uf = msg.payload.flag as { id: string; note?: string };
+      store.updateFlagNote(uf.id, uf.note);
+      break;
+    }
+
     case "flag.deleted":
       store.removeFlag(msg.payload.flagId as string);
       break;

@@ -159,6 +159,7 @@ interface ArenaState {
   setAwaitingResponse: (v: boolean) => void;
   addFlag: (flag: Flag) => void;
   removeFlag: (flagId: string) => void;
+  updateFlagNote: (flagId: string, note: string | undefined) => void;
   selectPrompt: (promptId: string | null) => void;
   updatePrompt: (promptId: string, fields: Partial<TrainingPrompt>) => void;
   setConnected: (connected: boolean) => void;
@@ -758,6 +759,34 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
         for (const [nodeId, node] of Object.entries(histNodes)) {
           if (node.flags?.some((f) => f.id === flagId)) {
             histNodes[nodeId] = { ...node, flags: node.flags.filter((f) => f.id !== flagId) };
+            update.historyTree = { ...state.historyTree, nodes: histNodes };
+            break;
+          }
+        }
+      }
+      return update;
+    }),
+
+  updateFlagNote: (flagId, note) =>
+    set((state) => {
+      const update: Partial<ArenaState> = {};
+      const patchFlags = (flags: Flag[]) =>
+        flags.map((f) => (f.id === flagId ? { ...f, note } : f));
+      // Patch in tree
+      const newNodes = { ...state.tree.nodes };
+      for (const [nodeId, node] of Object.entries(newNodes)) {
+        if (node.flags.some((f) => f.id === flagId)) {
+          newNodes[nodeId] = { ...node, flags: patchFlags(node.flags) };
+          break;
+        }
+      }
+      update.tree = { ...state.tree, nodes: newNodes };
+      // Patch in historyTree
+      if (state.historyTree) {
+        const histNodes = { ...state.historyTree.nodes };
+        for (const [nodeId, node] of Object.entries(histNodes)) {
+          if (node.flags?.some((f) => f.id === flagId)) {
+            histNodes[nodeId] = { ...node, flags: patchFlags(node.flags) };
             update.historyTree = { ...state.historyTree, nodes: histNodes };
             break;
           }

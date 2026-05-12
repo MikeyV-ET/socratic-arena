@@ -477,6 +477,9 @@ async def websocket_endpoint(ws: WebSocket):
             elif msg_type == "flag.create":
                 await handle_flag_create(ws, payload)
 
+            elif msg_type == "flag.update":
+                await handle_flag_update(payload)
+
             elif msg_type == "flag.delete":
                 await handle_flag_delete(payload)
 
@@ -742,6 +745,26 @@ async def handle_flag_create(ws: WebSocket, payload: dict):
     entry_id = payload.get("entryId", "")
     note = payload.get("note")
 
+    # Dedup: if same type flag already exists, update note instead of creating duplicate
+    if node_id and node_id in state.tree.nodes:
+        existing = next((f for f in state.tree.nodes[node_id].flags if f.type == "training_candidate"), None)
+        if existing:
+            existing.note = note
+            _save_flags()
+            await broadcast({"type": "flag.updated", "payload": {"flag": existing.model_dump()}})
+            await broadcast({"type": "state.snapshot", "payload": state.model_dump()})
+            return
+    elif entry_id:
+        for entry in state.notebook.entries:
+            if entry.id == entry_id:
+                existing = next((f for f in entry.flags if f.type == "training_candidate"), None)
+                if existing:
+                    existing.note = note
+                    _save_flags()
+                    await broadcast({"type": "flag.updated", "payload": {"flag": existing.model_dump()}})
+                    return
+                break
+
     flag = Flag(node_id=node_id or entry_id, note=note)
 
     if node_id and node_id in state.tree.nodes:
@@ -756,6 +779,12 @@ async def handle_flag_create(ws: WebSocket, payload: dict):
                 break
     elif node_id:
         # Node not in memory (older than 100KB tail) — store as orphan
+        existing_orphan = next((f for f in _orphan_flags.get(node_id, []) if f.type == "training_candidate"), None)
+        if existing_orphan:
+            existing_orphan.note = note
+            _save_flags()
+            await broadcast({"type": "flag.updated", "payload": {"flag": existing_orphan.model_dump()}})
+            return
         _orphan_flags.setdefault(node_id, []).append(flag)
 
     _save_flags()
@@ -771,6 +800,33 @@ async def handle_flag_create(ws: WebSocket, payload: dict):
         "type": "moments.updated",
         "payload": {},
     })
+
+
+async def handle_flag_update(payload: dict):
+    flag_id = payload.get("flagId", "")
+    note = payload.get("note")
+    for node in state.tree.nodes.values():
+        for flag in node.flags:
+            if flag.id == flag_id:
+                flag.note = note
+                _save_flags()
+                await broadcast({"type": "flag.updated", "payload": {"flag": flag.model_dump()}})
+                await broadcast({"type": "state.snapshot", "payload": state.model_dump()})
+                return
+    for entry in state.notebook.entries:
+        for flag in entry.flags:
+            if flag.id == flag_id:
+                flag.note = note
+                _save_flags()
+                await broadcast({"type": "flag.updated", "payload": {"flag": flag.model_dump()}})
+                return
+    for nid, flags in _orphan_flags.items():
+        for flag in flags:
+            if flag.id == flag_id:
+                flag.note = note
+                _save_flags()
+                await broadcast({"type": "flag.updated", "payload": {"flag": flag.model_dump()}})
+                return
 
 
 async def handle_flag_delete(payload: dict):
@@ -1701,6 +1757,10 @@ async def agent_action(body: dict):
     # Actions that modify state (process server-side + broadcast)
     if msg_type == "flag.create":
         await handle_flag_create(None, payload)
+        return {"status": "ok", "type": msg_type}
+
+    elif msg_type == "flag.update":
+        await handle_flag_update(payload)
         return {"status": "ok", "type": msg_type}
 
     elif msg_type == "flag.delete":
@@ -2719,6 +2779,23 @@ async def get_flags():
             d["entryId"] = entry.id
             flags.append(d)
     return flags
+
+
+@app.delete("/api/flags")
+async def delete_all_flags():
+    """Remove all flags from nodes, notebook entries, and orphan storage."""
+    count = 0
+    for node in state.tree.nodes.values():
+        count += len(node.flags)
+        node.flags.clear()
+    for entry in state.notebook.entries:
+        count += len(entry.flags)
+        entry.flags.clear()
+    count += sum(len(v) for v in _orphan_flags.values())
+    _orphan_flags.clear()
+    _save_flags()
+    await broadcast({"type": "state.snapshot", "payload": state.model_dump()})
+    return {"deleted": count}
 
 
 @app.get("/api/prompts")
