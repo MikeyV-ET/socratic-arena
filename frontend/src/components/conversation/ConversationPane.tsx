@@ -109,6 +109,14 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     paddingStart: spacerHeight,
   });
 
+  // Suppress scroll-position corrections while the user is actively scrolling.
+  // This is an instance property (not a constructor option). Without it,
+  // ResizeObserver measurements fight wheel events: an item scrolls into view,
+  // gets measured at a different size than the 200px estimate, and the virtualizer
+  // adjusts scrollTop to compensate -- which the user perceives as the scroll
+  // position jumping backwards (down) while scrolling up.
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => !userScrolling.current;
+
   // Reset scroll tracking when data source is REPLACED (agent/session switch),
   // but NOT when it's extended by prepend (older history loaded).
   // On prepend, the old root still exists in the tree as a non-root node.
@@ -182,29 +190,32 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     clearTimeout(scrollTimer.current);
     scrollTimer.current = setTimeout(() => {
       userScrolling.current = false;
+      // Deferred: find the node closest to viewport center once scrolling settles.
+      // Running this on every scroll event caused a state update + re-render per
+      // event, amplifying virtualizer measurement cascades during rapid scroll.
+      const settledEl = parentRef.current;
+      if (!settledEl) return;
+      const viewportCenter = settledEl.scrollTop + settledEl.clientHeight / 2;
+      const items = virtualizer.getVirtualItems();
+      let best: (typeof items)[0] | undefined;
+      for (const item of items) {
+        const mid = item.start + item.size / 2;
+        if (!best || Math.abs(mid - viewportCenter) < Math.abs(best.start + best.size / 2 - viewportCenter)) {
+          best = item;
+        }
+      }
+      if (best) {
+        const node = nodesRef.current[best.index];
+        if (node) {
+          selectNode(node.id);
+          useArenaStore.getState().reportViewportFocus(paneId, node.id);
+        }
+      }
     }, 300);
 
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
     userScrolledUp.current = !atBottom;
     setShowJumpButton(!atBottom && nodes.length > 20);
-
-    // Find the node closest to viewport center
-    const viewportCenter = el.scrollTop + el.clientHeight / 2;
-    const items = virtualizer.getVirtualItems();
-    let best: (typeof items)[0] | undefined;
-    for (const item of items) {
-      const mid = item.start + item.size / 2;
-      if (!best || Math.abs(mid - viewportCenter) < Math.abs(best.start + best.size / 2 - viewportCenter)) {
-        best = item;
-      }
-    }
-    if (best) {
-      const node = nodesRef.current[best.index];
-      if (node) {
-        selectNode(node.id);
-        useArenaStore.getState().reportViewportFocus(paneId, node.id);
-      }
-    }
   }, [selectNode, paneId, virtualizer, paneCursor, paneLoading, paneTotalNodes, nodes.length, loadOlderHistory]);
 
   // Auto-scroll to bottom on new content (live pane) or data load (both panes)
