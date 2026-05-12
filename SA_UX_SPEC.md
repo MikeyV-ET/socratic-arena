@@ -227,6 +227,9 @@
 - [ ] **Edit note after flagging:** Clicking a flagged item's ⚑ opens the note for editing (not just unflag). User can update the note text and save.
 - [ ] **Edit from any pane:** Note editing works from chat panel, history panel, and notebook panel -- wherever the flag is visible.
 - [ ] Backend supports `flag.update` message (or re-use `flag.create` with existing flagId) to update a note on an existing flag
+- [ ] **Remove flag:** Clear way to remove a flag (separate from edit note). Note editor should include a "Remove flag" / delete action.
+- [ ] **No duplicate flags:** Backend deduplicates -- `flag.create` on an already-flagged node (same type) should update the existing flag, not create a second one. Frontend should also prevent double-clicks (disable button while round-trip is in flight).
+- [ ] **Flag button reflects state immediately:** After clicking flag, the button visually changes before the WS round-trip completes (optimistic update) to prevent user from clicking twice.
 
 ---
 

@@ -1016,3 +1016,133 @@ test.describe("Snapshot/Act -- Edit flag notes (R16)", () => {
     await page.waitForTimeout(1000);
   });
 });
+
+test.describe("Snapshot/Act -- Flag removal and dedup (R16)", () => {
+  test("User can remove a flag from a flagged item", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForTimeout(5000);
+
+    const unflaggedBefore = await page.getByTitle("Flag as training candidate").count();
+    if (unflaggedBefore === 0) {
+      test.skip(true, "No unflagged messages available");
+      return;
+    }
+
+    // SETUP: Flag an item first
+    const clicked = await page.evaluate(() => {
+      const btns = document.querySelectorAll('button[title="Flag as training candidate"]');
+      for (let i = btns.length - 1; i >= 0; i--) {
+        const r = btns[i].getBoundingClientRect();
+        if (r.y >= 0 && r.y + r.height <= window.innerHeight) {
+          (btns[i] as HTMLElement).click();
+          return true;
+        }
+      }
+      return false;
+    });
+    if (!clicked) {
+      test.skip(true, "No flag buttons visible in viewport");
+      return;
+    }
+    await page.waitForTimeout(1000);
+
+    // Submit with empty note (quick flag) or submit note
+    const noteInput = page.getByPlaceholder(/note|reason|why/i)
+      .or(page.getByRole("textbox", { name: /note/i }))
+      .or(page.locator('[data-flag-note-input]'));
+    const noteVisible = await noteInput.first().isVisible().catch(() => false);
+    if (noteVisible) {
+      await noteInput.first().press("Enter");
+    }
+    await page.waitForTimeout(3000);
+
+    // Confirm flag exists
+    const flaggedCount = await page.getByTitle("Remove flag").count();
+    expect(flaggedCount, "Flag should exist before removal test").toBeGreaterThan(0);
+
+    // ACT: Remove the flag. The note editor (opened on click) should have a remove/delete action.
+    // Look for a remove/delete button in the popover, or a dedicated unflag action.
+    const flagBtn = page.getByTitle("Remove flag").first();
+    await flagBtn.click();
+    await page.waitForTimeout(1000);
+
+    // Look for a remove/delete/unflag action within the editor/popover
+    const removeAction = page.getByRole("button", { name: /remove|delete|unflag/i })
+      .or(page.getByText(/remove flag/i));
+    const removeVisible = await removeAction.first().isVisible().catch(() => false);
+    expect(
+      removeVisible,
+      "Note editor should include a 'Remove flag' action"
+    ).toBe(true);
+
+    await removeAction.first().click();
+    await page.waitForTimeout(3000);
+
+    // VERIFY: Flag is gone -- button reverts to "Flag as training candidate"
+    const unflaggedAfter = await page.getByTitle("Flag as training candidate").count();
+    expect(
+      unflaggedAfter,
+      "After removing flag, button should revert to 'Flag as training candidate'"
+    ).toBeGreaterThan(flaggedCount - 1);
+  });
+
+  test("Double-clicking flag does not create duplicate flags", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForTimeout(5000);
+
+    const unflaggedBefore = await page.getByTitle("Flag as training candidate").count();
+    if (unflaggedBefore === 0) {
+      test.skip(true, "No unflagged messages available");
+      return;
+    }
+
+    // ACT: Click the flag button twice in quick succession
+    await page.evaluate(() => {
+      const btns = document.querySelectorAll('button[title="Flag as training candidate"]');
+      for (let i = btns.length - 1; i >= 0; i--) {
+        const r = btns[i].getBoundingClientRect();
+        if (r.y >= 0 && r.y + r.height <= window.innerHeight) {
+          (btns[i] as HTMLElement).click();
+          (btns[i] as HTMLElement).click(); // second click immediately
+          return true;
+        }
+      }
+      return false;
+    });
+    await page.waitForTimeout(5000);
+
+    // If a note input appeared, submit it
+    const noteInput = page.getByPlaceholder(/note|reason|why/i)
+      .or(page.getByRole("textbox", { name: /note/i }))
+      .or(page.locator('[data-flag-note-input]'));
+    const noteVisible = await noteInput.first().isVisible().catch(() => false);
+    if (noteVisible) {
+      await noteInput.first().press("Enter");
+      await page.waitForTimeout(3000);
+    }
+
+    // VERIFY via API: the node should have exactly 1 flag, not 2
+    const flags = await page.evaluate(async () => {
+      const res = await fetch("/api/flags");
+      return res.json();
+    });
+
+    // Group flags by nodeId to check for duplicates
+    const flagsByNode: Record<string, number> = {};
+    for (const f of flags as Array<{ nodeId: string }>) {
+      flagsByNode[f.nodeId] = (flagsByNode[f.nodeId] || 0) + 1;
+    }
+    const maxFlagsPerNode = Math.max(...Object.values(flagsByNode), 0);
+    expect(
+      maxFlagsPerNode,
+      `No node should have more than 1 flag of the same type. Found up to ${maxFlagsPerNode} flags on a single node.`
+    ).toBeLessThanOrEqual(1);
+
+    // CLEANUP
+    await page.evaluate(() => {
+      const btn = document.querySelector('button[title="Remove flag"]');
+      if (btn) (btn as HTMLElement).click();
+    });
+    await page.waitForTimeout(1000);
+  });
+});
