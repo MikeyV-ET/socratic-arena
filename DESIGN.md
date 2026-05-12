@@ -497,6 +497,32 @@ Expand the WebSocket command vocabulary for the resident agent to control SA's U
 
 These complement existing commands (`flag.create`, `scrollTargetId`, `sa-search`). The agent acts within the shared workspace, not on it from outside.
 
+### Lightweight Test Case: Shared PDF Viewer/Annotator
+
+A shared PDF viewer validates the full stack — panel hosting, agent interaction, human+agent co-use — without the complexity of managing native app windows. Both the human and agent see the same PDF, can navigate pages, and add annotations.
+
+**Human side:** PDF renders in an SA panel (pdf.js in an iframe or a lightweight React PDF component). Human scrolls, highlights text, adds sticky-note annotations via click.
+
+**Agent side:** REST endpoints for the same operations:
+- `GET /api/panel/{id}/snapshot` — returns current page number, visible text, existing annotations
+- `POST /api/panel/{id}/act` — navigate to page, add annotation at position, highlight passage
+
+**Why this is the right test case:**
+- Small scope: one panel, one file format, no external process to manage
+- Exercises the full pattern: human sees pixels, agent sees structured data, both act on the same document
+- Real use case: Eric and agent reviewing a paper together — agent flags a methods section, human adds a note, agent reads it
+- Annotations are the shared artifact: both parties create and consume them
+- No Xpra, no native window management, no Selenium — pure web, packageable in a binary
+
+**Implementation sketch:**
+1. PDF panel component (react-pdf or pdf.js) with annotation overlay
+2. Backend: load PDF, serve pages, store annotations (JSON sidecar)
+3. Panel snapshot: `{page: 3, totalPages: 12, visibleText: "...", annotations: [...]}`
+4. Panel act: `{action: "goto_page", page: 7}`, `{action: "annotate", page: 3, text: "Check sample size", position: {x, y}}`
+5. WebSocket broadcast: annotation changes sync to both human and agent in real time
+
+**What it proves:** If an agent and human can co-annotate a PDF through SA, the same pattern scales to any shared document type. This becomes the template for future panel types.
+
 ### Multi-User Model
 
 Separate OS users, each with their own SA instance. SSH tunnels for remote access and security. Each user gets independent agent sessions, panel state, and conversation history. No shared server — SA runs locally per user, agents attach via asdaaas adapter.
