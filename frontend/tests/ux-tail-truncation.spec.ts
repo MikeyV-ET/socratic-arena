@@ -208,8 +208,14 @@ test.describe("Tail truncation -- conversation completeness", () => {
       (window as any).__scrollLog = [];
     });
 
-    const target = page.locator('[data-scroll-test="target"]');
-    await target.hover();
+    // Click inside the conversation pane to ensure it receives scroll events
+    // Use the first visible message text to locate the conversation area
+    const msgs = await page.locator("p").filter({ hasText: /.{10,}/ }).all();
+    if (msgs.length > 0) {
+      await msgs[0].hover();
+    } else {
+      await page.mouse.move(400, 450);
+    }
 
     // 100 scroll-up events with small delays (simulates real wheel usage)
     for (let i = 0; i < 100; i++) {
