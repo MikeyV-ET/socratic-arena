@@ -276,6 +276,124 @@ test.describe("Tail truncation -- conversation completeness", () => {
     ).toBe(0);
   });
 
+  test("Cinco session jerks on wheel click 26 from bottom", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await page.waitForTimeout(3000);
+
+    // Switch to Cinco
+    await page.evaluate(async () => {
+      await fetch("/api/agent/switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent: "Cinco" }),
+      });
+    });
+    await page.waitForTimeout(4000);
+
+    // Find the actual scrollable container and scroll to bottom
+    const setup = await page.evaluate(() => {
+      const divs = Array.from(document.querySelectorAll("div"));
+      const scrollable = divs
+        .filter((d) => {
+          const style = getComputedStyle(d);
+          return (
+            (style.overflowY === "auto" || style.overflowY === "scroll") &&
+            d.scrollHeight > d.clientHeight + 100 &&
+            d.clientHeight > 200
+          );
+        })
+        .sort((a, b) => b.scrollHeight - a.scrollHeight);
+
+      if (scrollable.length === 0) return { found: false } as const;
+
+      const el = scrollable[0];
+      el.id = "__scroll_target__";
+      el.scrollTop = el.scrollHeight;
+      return {
+        found: true,
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight,
+        scrollTop: el.scrollTop,
+      } as const;
+    });
+
+    if (!setup.found) {
+      test.skip(true, "No scrollable container found for Cinco");
+      return;
+    }
+
+    await page.waitForTimeout(500);
+
+    // Install scrollTop recorder
+    await page.evaluate(() => {
+      const el = document.getElementById("__scroll_target__")!;
+      (window as any).__scrollLog = [];
+      el.addEventListener("scroll", () => {
+        (window as any).__scrollLog.push({
+          t: performance.now(),
+          top: el.scrollTop,
+        });
+      });
+    });
+
+    // Clear log, then scroll to bottom again to start fresh
+    await page.evaluate(() => {
+      const el = document.getElementById("__scroll_target__")!;
+      el.scrollTop = el.scrollHeight;
+      (window as any).__scrollLog = [];
+    });
+    await page.waitForTimeout(300);
+
+    // Hover over the scroll container
+    const scrollEl = page.locator("#__scroll_target__");
+    const box = await scrollEl.boundingBox();
+    if (box) {
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    }
+
+    // Do exactly 30 single-detent wheel clicks up (bug appears at ~26)
+    for (let i = 0; i < 30; i++) {
+      await page.mouse.wheel(0, -100); // single detent
+      await page.waitForTimeout(100);
+    }
+    await page.waitForTimeout(500);
+
+    // Analyze
+    const log: { t: number; top: number }[] = await page.evaluate(
+      () => (window as any).__scrollLog || []
+    );
+
+    let regressions = 0;
+    let maxRegression = 0;
+    const details: string[] = [];
+    for (let i = 1; i < log.length; i++) {
+      const delta = log[i].top - log[i - 1].top;
+      if (delta > 2) {
+        regressions++;
+        maxRegression = Math.max(maxRegression, delta);
+        if (details.length < 5)
+          details.push(
+            `sample=${i}: ${log[i - 1].top.toFixed(0)} → ${log[i].top.toFixed(0)} (+${delta.toFixed(0)}px)`
+          );
+      }
+    }
+
+    const totalScroll = log.length > 1 ? log[0].top - log[log.length - 1].top : 0;
+    console.log(
+      `[scroll-jerk-cinco] ${log.length} samples, total_scroll=${totalScroll.toFixed(0)}px, ` +
+        `regressions=${regressions}, max=${maxRegression.toFixed(0)}px\n` +
+        (details.length > 0 ? `  ${details.join("; ")}` : "  Clean")
+    );
+
+    expect(
+      regressions,
+      `Cinco scroll jerkiness: ${regressions} regressions in 30 wheel clicks. ` +
+        `Max: ${maxRegression.toFixed(0)}px. ${details.join("; ")}`
+    ).toBe(0);
+  });
+
   test("last visible message matches the actual last message from history", async ({
     page,
   }) => {
