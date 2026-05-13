@@ -105,7 +105,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     count: nodes.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 100,
-    overscan: 20,
+    overscan: nodes.length,
     paddingStart: spacerHeight,
   });
 
