@@ -104,17 +104,14 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   const virtualizer = useVirtualizer({
     count: nodes.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 200,
-    overscan: 5,
+    estimateSize: () => 100,
+    overscan: 20,
     paddingStart: spacerHeight,
   });
 
   // Suppress scroll-position corrections while the user is actively scrolling.
-  // This is an instance property (not a constructor option). Without it,
-  // ResizeObserver measurements fight wheel events: an item scrolls into view,
-  // gets measured at a different size than the 200px estimate, and the virtualizer
-  // adjusts scrollTop to compensate -- which the user perceives as the scroll
-  // position jumping backwards (down) while scrolling up.
+  // With estimateSize≈100 (close to actual), corrections are small (~0-10px).
+  // Re-enabled during idle so the virtualizer can correct accumulated drift.
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => !userScrolling.current;
 
   // Reset scroll tracking when data source is REPLACED (agent/session switch),
