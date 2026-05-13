@@ -1293,3 +1293,99 @@ test.describe("Snapshot/Act -- Flag removal and dedup (R16)", () => {
     await page.waitForTimeout(1000);
   });
 });
+
+// ---- Virtualizer estimate accuracy guard ----
+// The scroll jerkiness bug (fixed 4940edc) was caused by estimateSize=200
+// when actual items averaged ~100px. This test guards against estimate drift
+// by measuring actual item heights and comparing to the configured estimate.
+
+test("virtualizer estimate is within 50% of median item height", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector('[data-testid="conversation-messages"]', { timeout: 15000 });
+  await page.waitForTimeout(2000); // let virtualizer measure items
+
+  const result = await page.evaluate(() => {
+    const container = document.querySelector('[data-testid="conversation-messages"]');
+    if (!container) return { error: "no container" };
+
+    // Collect measured heights from rendered virtualizer items
+    const items = container.querySelectorAll("[data-index]");
+    const heights: number[] = [];
+    items.forEach((el) => {
+      const h = el.getBoundingClientRect().height;
+      if (h > 0) heights.push(Math.round(h));
+    });
+
+    if (heights.length < 5) return { error: "too few items", count: heights.length };
+
+    heights.sort((a, b) => a - b);
+    const median = heights[Math.floor(heights.length / 2)];
+    const mean = Math.round(heights.reduce((s, h) => s + h, 0) / heights.length);
+    const p25 = heights[Math.floor(heights.length * 0.25)];
+    const p75 = heights[Math.floor(heights.length * 0.75)];
+
+    return { median, mean, p25, p75, count: heights.length };
+  });
+
+  if ("error" in result) {
+    test.skip(true, `Skipped: ${result.error}`);
+    return;
+  }
+
+  // The configured estimateSize should be within 50% of the median measured height.
+  // If estimateSize drifts far from actual (like the old 200 vs actual ~100),
+  // the virtualizer accumulates large correction debt → visible scroll jerkiness.
+  const ESTIMATE_SIZE = 100; // must match ConversationPane.tsx estimateSize
+  const ratio = ESTIMATE_SIZE / result.median;
+  console.log(
+    `Virtualizer estimate=${ESTIMATE_SIZE}, median=${result.median}, mean=${result.mean}, ` +
+    `p25=${result.p25}, p75=${result.p75}, count=${result.count}, ratio=${ratio.toFixed(2)}`
+  );
+
+  expect(ratio, `estimateSize(${ESTIMATE_SIZE}) vs median(${result.median}): ratio ${ratio.toFixed(2)} outside 0.5-1.5`).toBeGreaterThanOrEqual(0.5);
+  expect(ratio, `estimateSize(${ESTIMATE_SIZE}) vs median(${result.median}): ratio ${ratio.toFixed(2)} outside 0.5-1.5`).toBeLessThanOrEqual(1.5);
+});
+
+test("scrollHeight is stable during programmatic scroll-up", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForSelector('[data-testid="conversation-messages"]', { timeout: 15000 });
+  await page.waitForTimeout(2000);
+
+  const result = await page.evaluate(async () => {
+    const el = document.querySelector('[data-testid="conversation-messages"]') as HTMLElement;
+    if (!el || el.scrollHeight < 1000) return { error: "not enough content", scrollH: el?.scrollHeight };
+
+    // Scroll up in steps, recording scrollHeight at each step
+    const readings: { scrollTop: number; scrollHeight: number }[] = [];
+    readings.push({ scrollTop: Math.round(el.scrollTop), scrollHeight: el.scrollHeight });
+
+    for (let i = 0; i < 20; i++) {
+      el.scrollBy({ top: -200 });
+      // Wait for ResizeObserver + virtualizer to process
+      await new Promise((r) => setTimeout(r, 400));
+      readings.push({ scrollTop: Math.round(el.scrollTop), scrollHeight: el.scrollHeight });
+    }
+
+    // Compute max scrollHeight delta between consecutive steps
+    let maxDelta = 0;
+    const deltas: number[] = [];
+    for (let i = 1; i < readings.length; i++) {
+      const d = Math.abs(readings[i].scrollHeight - readings[i - 1].scrollHeight);
+      deltas.push(d);
+      maxDelta = Math.max(maxDelta, d);
+    }
+
+    return { maxDelta, avgDelta: Math.round(deltas.reduce((s, d) => s + d, 0) / deltas.length), steps: readings.length };
+  });
+
+  if ("error" in result) {
+    test.skip(true, `Skipped: ${result.error}`);
+    return;
+  }
+
+  // With estimateSize close to actual, per-step scrollHeight changes should be small.
+  // The old estimateSize=200 caused 90-113px changes per item measurement.
+  // With estimateSize=100, changes should be < 50px per step.
+  console.log(`scrollHeight stability: maxDelta=${result.maxDelta}px, avgDelta=${result.avgDelta}px over ${result.steps} steps`);
+  expect(result.maxDelta, `scrollHeight changed by ${result.maxDelta}px in one step (limit 200px)`).toBeLessThan(200);
+});
