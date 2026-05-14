@@ -42,6 +42,82 @@ function ActivityIndicator({ readOnly }: { readOnly: boolean }) {
   );
 }
 
+function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, tree, switchBranch, paneId, toggleTheme, theme, contextPct, connected }: {
+  agents: any[]; currentAgent: string; switching: boolean; onAgentSwitch: (name: string) => void;
+  tree: any; switchBranch: (id: string) => void; paneId: string;
+  toggleTheme: () => void; theme: string; contextPct: number | null; connected: boolean;
+}) {
+  const branches = Object.values(tree.branches);
+  const healthDot = (status: string | null) =>
+    status === "working" || status === "active" ? "bg-success" : status === "ready" ? "bg-blue-400" : "bg-muted-foreground";
+
+  return (
+    <div className="flex items-center justify-between px-2 py-0.5 border-b border-border/50">
+      <div className="flex items-center gap-2">
+        <select
+          value={currentAgent}
+          onChange={(e) => onAgentSwitch(e.target.value)}
+          disabled={switching}
+          className="bg-muted text-foreground text-[11px] px-1.5 py-0.5 rounded border border-border focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+        >
+          {agents.length === 0 && <option value="">Loading...</option>}
+          {agents.map((a: any) => (
+            <option key={a.name} value={a.name}>
+              {a.name}{a.hasSession ? "" : " (no session)"}
+            </option>
+          ))}
+        </select>
+        {currentAgent && agents.length > 0 && (() => {
+          const a = agents.find((x: any) => x.name === currentAgent);
+          if (!a) return null;
+          return <div className={`w-1.5 h-1.5 rounded-full ${healthDot(a.healthStatus)}`} title={a.healthStatus || "offline"} />;
+        })()}
+        {switching && <span className="text-[10px] text-muted-foreground animate-pulse">...</span>}
+      </div>
+      <div className="flex items-center gap-2">
+        {branches.length > 1 && (
+          <select
+            value={tree.activeBranchId}
+            onChange={(e) => switchBranch(e.target.value)}
+            className="bg-muted text-foreground text-[11px] px-1 py-0.5 rounded border border-border focus:outline-none"
+          >
+            {branches.map((b: any) => (
+              <option key={b.id} value={b.id}>{b.label || b.id}</option>
+            ))}
+          </select>
+        )}
+        <FontSizeControl paneId={paneId} />
+        <button
+          onClick={toggleTheme}
+          className="px-1 py-0.5 text-[11px] text-muted-foreground hover:text-foreground rounded border border-border hover:bg-muted transition-colors"
+          title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+        >
+          {theme === "dark" ? "\u2600" : "\u263E"}
+        </button>
+        {contextPct !== null && (
+          <div className="flex items-center gap-1" title={`${currentAgent || "Agent"} context: ${contextPct.toFixed(0)}% used`}>
+            <div className="w-12 h-1 rounded-full bg-muted overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${contextPct > 80 ? "bg-destructive" : contextPct > 60 ? "bg-warning" : "bg-success"}`}
+                style={{ width: `${contextPct}%` }}
+              />
+            </div>
+            <span className={`text-[10px] font-mono ${contextPct > 80 ? "text-destructive" : "text-muted-foreground"}`}>
+              {contextPct.toFixed(0)}%
+            </span>
+          </div>
+        )}
+        <div className="flex items-center gap-1">
+          <div className={`w-1.5 h-1.5 rounded-full ${connected ? "bg-success" : "bg-muted-foreground"}`} />
+          <span className={`text-[10px] ${connected ? "text-muted-foreground" : "text-destructive"}`}>
+            {connected ? "Live" : "Off"}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ConversationPane({ readOnly = false, paneId = "conversation" }: { readOnly?: boolean; paneId?: string } = {}) {
   useArenaStore((s) => s.tree);
   useArenaStore((s) => s.historyTree);
@@ -75,6 +151,15 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   const prependLiveNodes = useArenaStore((s) => s.prependLiveNodes);
   const setLiveHistoryLoading = useArenaStore((s) => s.setLiveHistoryLoading);
 
+  // Header controls (moved from global Header)
+  const connected = useArenaStore((s) => s.connected);
+  const theme = useArenaStore((s) => s.theme);
+  const toggleTheme = useArenaStore((s) => s.toggleTheme);
+  const switchBranch = useArenaStore((s) => s.switchBranch);
+  const agents = useArenaStore((s) => s.agents);
+  const setAgents = useArenaStore((s) => s.setAgents);
+  const setCurrentAgent = useArenaStore((s) => s.setCurrentAgent);
+
   // Unified accessors — live pane uses liveCursor/liveTotalNodes, history pane uses historyCursor/historyTotalNodes
   const paneCursor = readOnly ? historyCursor : liveCursor;
   const paneTotalNodes = readOnly ? historyTotalNodes : liveTotalNodes;
@@ -86,6 +171,8 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   const programmaticScroll = useRef(false);
   const userScrolledUp = useRef(false);
   const [showJumpButton, setShowJumpButton] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  const [contextPct, setContextPct] = useState<number | null>(null);
   const prevRootId = useRef<string | null>(null);
 
   const effectiveTree = readOnly ? (historyTree ?? tree) : tree;
@@ -129,6 +216,48 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   }, [effectiveTree.rootNodeId, effectiveTree.nodes]);
 
   const basePath = window.location.pathname.replace(/\/+$/, "");
+
+  // Agent list + context polling (moved from Header)
+  const fetchContext = useCallback(() => {
+    fetch(`${basePath}/api/agent/context`)
+      .then((r) => r.json())
+      .then((d) => setContextPct(d.pct ?? 0))
+      .catch(() => {});
+  }, [basePath]);
+
+  const fetchAgents = useCallback(() => {
+    fetch(`${basePath}/api/agents`)
+      .then((r) => r.json())
+      .then((d) => {
+        setAgents(d.agents ?? []);
+        if (d.current && !currentAgent) setCurrentAgent(d.current);
+      })
+      .catch(() => {});
+  }, [basePath, currentAgent, setAgents, setCurrentAgent]);
+
+  useEffect(() => {
+    if (readOnly) return;
+    fetchAgents();
+    fetchContext();
+    const iv = setInterval(fetchContext, 15_000);
+    return () => clearInterval(iv);
+  }, [readOnly, fetchAgents, fetchContext, currentAgent]);
+
+  const handleAgentSwitch = useCallback((agentName: string) => {
+    if (agentName === currentAgent || switching) return;
+    setSwitching(true);
+    fetch(`${basePath}/api/agent/switch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agent: agentName }),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.status === "ok") { setCurrentAgent(agentName); fetchContext(); }
+        setSwitching(false);
+      })
+      .catch(() => setSwitching(false));
+  }, [currentAgent, switching, basePath, setCurrentAgent, fetchContext]);
 
   // Fetch full history for the live pane on mount / agent change
   const liveHistoryFetched = useRef("");
@@ -407,11 +536,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     return (
       <div className="flex flex-col h-full bg-background" data-pane-id={paneId}>
         {historyHeader}
-        {!readOnly && (
-          <div className="flex items-center justify-end px-2 py-0.5 border-b border-border/50">
-            <FontSizeControl paneId={paneId} />
-          </div>
-        )}
+        {!readOnly && <LivePaneHeader agents={agents} currentAgent={currentAgent} switching={switching} onAgentSwitch={handleAgentSwitch} tree={tree} switchBranch={switchBranch} paneId={paneId} toggleTheme={toggleTheme} theme={theme} contextPct={contextPct} connected={connected} />}
         <div className="flex-1 flex items-center justify-center">
           <span className="text-sm text-muted-foreground animate-pulse">{readOnly ? "No history data" : "Connecting..."}</span>
         </div>
@@ -423,11 +548,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   return (
     <div className="flex flex-col h-full bg-background relative" data-pane-id={paneId}>
       {historyHeader}
-      {!readOnly && (
-        <div className="flex items-center justify-end px-2 py-0.5 border-b border-border/50">
-          <FontSizeControl paneId={paneId} />
-        </div>
-      )}
+      {!readOnly && <LivePaneHeader agents={agents} currentAgent={currentAgent} switching={switching} onAgentSwitch={handleAgentSwitch} tree={tree} switchBranch={switchBranch} paneId={paneId} toggleTheme={toggleTheme} theme={theme} contextPct={contextPct} connected={connected} />}
       <div ref={parentRef} onScroll={handleScroll} className="flex-1 overflow-y-auto" style={{ zoom }} data-testid="conversation-messages" data-branch-nodes={nodes.length} {...(!readOnly && liveTotalNodes > 0 ? { "data-live-history": "loaded" } : {})}>
         {paneLoading && (
           <div className="px-4 py-2 text-center text-xs text-muted-foreground animate-pulse" data-testid="history-loading-older">
