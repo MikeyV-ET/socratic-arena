@@ -1,6 +1,7 @@
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useCallback, useState, useMemo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useArenaStore } from "@/stores/arenaStore";
+import type { ConversationNode } from "@/types";
 import { Message } from "./Message";
 import { InputBar } from "./InputBar";
 import { FontSizeControl } from "@/components/common/FontSizeControl";
@@ -54,6 +55,7 @@ function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, tree, 
   return (
     <div className="flex items-center justify-between px-2 py-0.5 border-b border-border/50">
       <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold text-muted-foreground mr-1">Socratic Arena</span>
         <select
           value={currentAgent}
           onChange={(e) => onAgentSwitch(e.target.value)}
@@ -175,31 +177,292 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   const [contextPct, setContextPct] = useState<number | null>(null);
   const prevRootId = useRef<string | null>(null);
 
+  // === Batch/Windowed Virtualizer Experiment (Eric's proposal) ===
+  const WINDOW_SIZE = 20;
+  const [visibleWindowStart, setVisibleWindowStart] = useState(0);
+  const measurementRef = useRef<HTMLDivElement>(null);
+  // Map of nodeId -> measured height for the current window + next batch being measured off-screen
+  const measuredHeightsRef = useRef<Map<string, number>>(new Map());
+  // Nodes currently being measured off-screen (not yet in the visible window)
+  const [measuringBatch, setMeasuringBatch] = useState<ConversationNode[]>([]);
+
   const effectiveTree = readOnly ? (historyTree ?? tree) : tree;
-  const nodes = readOnly ? getHistoryBranchNodes() : getActiveBranchNodes();
+  const nodes = readOnly ? getHistoryBranchNodes() : getActiveBranchNodes();   // full loaded branch nodes (for selection, search, etc.)
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
 
-  // Spacer height for unloaded history above the virtualizer.
-  // The virtualizer needs to know about this offset (scrollMargin) so it maps
-  // scroll positions correctly — otherwise it thinks scrollTop=X is within its
-  // own range and renders the wrong items.
-  const spacerHeight = paneTotalNodes > nodes.length && paneCursor > 0
-    ? (paneTotalNodes - nodes.length) * 60
-    : 0;
+  // Current visible window fed to the virtualizer (batch/windowed experiment)
+  const displayNodes = nodes.slice(visibleWindowStart, visibleWindowStart + WINDOW_SIZE);
+
+  // Detect when older history has been prepended at the front of allNodes.
+  // New nodes at the beginning go into measuringBatch for off-screen measurement
+  // before the visible window is expanded to include them.
+  const prevFirstNodeId = useRef<string | null>(null);
+  const prevLength = useRef(0);
+
+  // Flag used when the very first batch of a pane (the newest ~20) is routed through
+  // the measurement path instead of being directly sliced into the window.
+  const initialSeedBatchSize = useRef(0);
+  useEffect(() => {
+    if (nodes.length === 0) {
+      prevFirstNodeId.current = null;
+      return;
+    }
+
+    const currentLen = nodes.length;
+    const currentFirstId = nodes[0].id;
+
+    if (prevFirstNodeId.current === null) {
+      // First load: show newest messages immediately. The virtualizer's own
+      // ResizeObserver will measure them in-place — no off-screen detour needed.
+      setVisibleWindowStart(Math.max(0, currentLen - WINDOW_SIZE));
+      prevFirstNodeId.current = currentFirstId;
+      prevLength.current = currentLen;
+      return;
+    }
+
+    if (currentFirstId !== prevFirstNodeId.current) {
+      const oldFirstIndex = nodes.findIndex((n: ConversationNode) => n.id === prevFirstNodeId.current);
+      if (oldFirstIndex > 0) {
+        const newlyPrepended = nodes.slice(0, oldFirstIndex);
+        setMeasuringBatch(newlyPrepended);
+      }
+    }
+
+    // Handle growth at the end (new live messages)
+    if (currentLen > prevLength.current) {
+      const wasAtBottomOfWindow = visibleWindowStart + WINDOW_SIZE >= prevLength.current - 3;
+      const shouldFollowLive = wasAtBottomOfWindow || !userScrolledUp.current;
+
+      if (shouldFollowLive) {
+        const newStart = Math.max(0, currentLen - WINDOW_SIZE);
+        if (newStart !== visibleWindowStart) {
+          setVisibleWindowStart(newStart);
+        }
+      }
+    }
+
+    prevFirstNodeId.current = currentFirstId;
+    prevLength.current = currentLen;
+  }, [nodes, visibleWindowStart]);
+
+  // Spacer height representing all content above the current visible window (windowed model).
+  // Includes:
+  //   1. Truly unloaded older history (paneTotalNodes - allNodes.length)
+  //   2. Loaded but unrevealed older items (0 .. visibleWindowStart) — these sit in allNodes
+  //      before displayNodes but have already been fetched; we must account for their height
+  //      so the virtualizer's scroll math and lazy-load triggers remain correct.
+  //
+  // We prefer real measured heights (from previous off-screen measurement passes) for the
+  // unrevealed loaded prefix; fall back to conservative averages for anything not yet measured.
+  // This is a useMemo so the value is stable for the virtualizer and for the handleScroll closure.
+  const spacerHeight = useMemo(() => {
+    if (!(paneTotalNodes > nodes.length && paneCursor > 0) && visibleWindowStart === 0) {
+      return 0;
+    }
+
+    const unrevealedLoadedCount = visibleWindowStart;
+    let unrevealedHeight = 0;
+
+    // Sum measured heights for the unrevealed loaded prefix when available.
+    for (let i = 0; i < unrevealedLoadedCount; i++) {
+      const nid = nodes[i]?.id;
+      if (nid && measuredHeightsRef.current.has(nid)) {
+        unrevealedHeight += measuredHeightsRef.current.get(nid)!;
+      } else {
+        // Conservative fallback for long markdown (matches estimateSize spirit).
+        unrevealedHeight += 220;
+      }
+    }
+
+    // Truly unloaded older history (never fetched from backend yet).
+    const trulyUnloaded = Math.max(0, paneTotalNodes - nodes.length);
+    const unloadedFallback = trulyUnloaded * 180; // conservative average for Squiggy-style content
+
+    return unrevealedHeight + unloadedFallback;
+  }, [paneTotalNodes, nodes, visibleWindowStart, paneCursor]);
 
   const virtualizer = useVirtualizer({
-    count: nodes.length,
+    count: displayNodes.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 100,
-    overscan: nodes.length,
+    estimateSize: (index) => {
+      const node = displayNodes[index];
+      if (!node) return 220;
+
+      // If we have a measured height from the off-screen measurement pass, use it.
+      if (measuredHeightsRef.current.has(node.id)) {
+        return measuredHeightsRef.current.get(node.id)!;
+      }
+
+      // Very conservative estimate for agents with long, variable markdown (like Squiggy).
+      const content = node.content || '';
+      const lineCount = Math.max(2, content.split('\n').length);
+      const estimatedHeight = 80 + lineCount * 22 + Math.floor(content.length / 4);
+      return Math.min(1200, Math.max(120, estimatedHeight));
+    },
+    overscan: 15,
     paddingStart: spacerHeight,
   });
 
   // Suppress scroll-position corrections while the user is actively scrolling.
-  // With estimateSize≈100 (close to actual), corrections are small (~0-10px).
-  // Re-enabled during idle so the virtualizer can correct accumulated drift.
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => !userScrolling.current;
+
+  // Robust container resize handling + initial measurement for markdown-heavy agents.
+  // A ResizeObserver on the scroll container catches any layout shift (header changes,
+  // font loading, pane resize) and forces the virtualizer to re-measure.
+  // We also do several post-mount measures to give React-Markdown time to finish laying out.
+  useEffect(() => {
+    const el = parentRef.current;
+    if (!el) return;
+
+    const observer = new ResizeObserver(() => {
+      virtualizer.measure();
+    });
+    observer.observe(el);
+
+    // Multiple rounds of measurement to handle async markdown rendering + layout settling.
+    // We use both setTimeout and requestAnimationFrame to catch different paint cycles.
+    const timers: number[] = [];
+
+    const doMeasure = () => virtualizer.measure();
+
+    // Early measurements
+    timers.push(setTimeout(doMeasure, 80));
+    timers.push(setTimeout(doMeasure, 220));
+
+    // Mid measurements (good for most markdown)
+    timers.push(setTimeout(doMeasure, 480));
+    timers.push(requestAnimationFrame(doMeasure) as unknown as number);
+
+    // Late measurements for very long / complex content (code blocks, tables, etc.)
+    timers.push(setTimeout(doMeasure, 950));
+    timers.push(setTimeout(doMeasure, 1600));
+    timers.push(requestAnimationFrame(() => requestAnimationFrame(doMeasure)) as unknown as number);
+
+    return () => {
+      observer.disconnect();
+      timers.forEach((t) => {
+        if (typeof t === 'number') clearTimeout(t);
+      });
+    };
+  }, [virtualizer, effectiveTree.rootNodeId, readOnly]);
+
+  // When the measuringBatch is rendered in the hidden div, observe their sizes.
+  // Once they have stable heights (after markdown has laid out), record them and
+  // move the batch into the visible window by shifting visibleWindowStart.
+  useEffect(() => {
+    if (!measurementRef.current || measuringBatch.length === 0) return;
+
+    const measuredThisBatch = new Map<string, number>();
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const el = entry.target as HTMLElement;
+        const nodeId = el.getAttribute('data-measure-id');
+        if (nodeId && !measuredThisBatch.has(nodeId)) {
+          const height = entry.contentRect.height;
+          if (height > 0) {
+            measuredThisBatch.set(nodeId, Math.ceil(height));
+          }
+        }
+      }
+
+      // If we've measured all items in this batch, record them and expand the window.
+      if (measuredThisBatch.size === measuringBatch.length) {
+        measuredThisBatch.forEach((h, id) => measuredHeightsRef.current.set(id, h));
+
+        console.log(`[Batch] Measurement complete for ${measuringBatch.length} items. Heights:`, Object.fromEntries(measuredThisBatch));
+
+        const batchSize = measuringBatch.length;
+        const isInitialSeed = initialSeedBatchSize.current > 0;
+
+        if (isInitialSeed) {
+          // Special case: this was the very first load. Reveal the window at the end of the loaded list
+          // (newest items). No upward expansion, no scroll-offset preservation needed for first paint.
+          const totalNow = nodes.length;
+          const newStart = Math.max(0, totalNow - batchSize);
+
+          setVisibleWindowStart(newStart);
+          // For first load we usually want to be at the very bottom of the new window.
+          requestAnimationFrame(() => {
+            const el2 = parentRef.current;
+            if (el2) {
+              el2.scrollTop = el2.scrollHeight;
+            }
+          });
+
+          initialSeedBatchSize.current = 0;
+        } else {
+          // Normal older-prepend case
+          console.log(`[Batch] Expanding window from [${visibleWindowStart}, ${visibleWindowStart + WINDOW_SIZE}) by ${batchSize} items (older prepend).`);
+
+          // Better scroll preservation for older batches being inserted at the top
+          const el = parentRef.current;
+          const items = virtualizer.getVirtualItems();
+          let scrollOffset = 0;
+          if (el && items.length > 0) {
+            scrollOffset = el.scrollTop - items[0].start;
+          }
+
+          setVisibleWindowStart((prev) => {
+            const newStart = Math.max(0, prev - batchSize);
+
+            requestAnimationFrame(() => {
+              const el2 = parentRef.current;
+              if (el2) {
+                let addedHeight = 0;
+                for (let i = 0; i < batchSize; i++) {
+                  const nodeId = nodes[newStart + i]?.id;
+                  if (nodeId && measuredHeightsRef.current.has(nodeId)) {
+                    addedHeight += measuredHeightsRef.current.get(nodeId)!;
+                  } else {
+                    addedHeight += 150;
+                  }
+                }
+                el2.scrollTop = el2.scrollTop + addedHeight + scrollOffset;
+              }
+            });
+
+            return newStart;
+          });
+        }
+
+        setMeasuringBatch([]);
+        resizeObserver.disconnect();
+      }
+    });
+
+    // Observe all the measurement items in the hidden div.
+    const items = measurementRef.current.querySelectorAll('[data-measure-id]');
+    items.forEach((item) => resizeObserver.observe(item));
+
+    // Fallback: if ResizeObserver doesn't fire quickly (some browsers / complex content),
+    // force the move after a generous timeout.
+    const fallback = setTimeout(() => {
+      if (measuringBatch.length > 0) {
+        measuringBatch.forEach((node) => {
+          // Best-effort height from the DOM element if available
+          const el = measurementRef.current?.querySelector(`[data-measure-id="${node.id}"]`);
+          const h = el ? Math.ceil((el as HTMLElement).getBoundingClientRect().height) : 180;
+          measuredHeightsRef.current.set(node.id, h);
+        });
+        if (initialSeedBatchSize.current > 0) {
+          const totalNow = nodes.length;
+          const batchLen = measuringBatch.length;
+          setVisibleWindowStart(Math.max(0, totalNow - batchLen));
+          initialSeedBatchSize.current = 0;
+        } else {
+          setVisibleWindowStart((prev) => Math.max(0, prev - measuringBatch.length));
+        }
+        setMeasuringBatch([]);
+        resizeObserver.disconnect();
+      }
+    }, 2000);
+
+    return () => {
+      resizeObserver.disconnect();
+      clearTimeout(fallback);
+    };
+  }, [measuringBatch]);
 
   // Reset scroll tracking when data source is REPLACED (agent/session switch),
   // but NOT when it's extended by prepend (older history loaded).
@@ -210,7 +473,12 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
       const oldRoot = prevRootId.current;
       prevRootId.current = effectiveTree.rootNodeId;
       if (oldRoot && !effectiveTree.nodes[oldRoot]) {
+        // Data source replaced (agent/session switch) — reset windowed state
         userScrolledUp.current = false;
+        prevFirstNodeId.current = null;
+        prevLength.current = 0;
+        measuredHeightsRef.current.clear();
+        setMeasuringBatch([]);
       }
     }
   }, [effectiveTree.rootNodeId, effectiveTree.nodes]);
@@ -301,11 +569,21 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     const el = parentRef.current;
     if (!el) return;
 
-    // Lazy loading — fires for both live and history panes
-    const spacerH = paneTotalNodes > nodes.length && paneCursor > 0
-      ? (paneTotalNodes - nodes.length) * 60 : 0;
-    const atTop = el.scrollTop < spacerH + 100;
-    if (atTop && paneCursor > 0 && !paneLoading) {
+    // Lazy loading trigger for the batch/windowed experiment.
+    // Trigger when the user is near the top of the current visible window.
+    const items = virtualizer.getVirtualItems();
+    const firstVisibleInWindow = items.length > 0 ? items[0].index : 0;
+    const nearTopOfCurrentWindow = firstVisibleInWindow < 3;
+
+    // Also keep the original spacer-based trigger as a fallback.
+    // Uses the same window-aware memoized spacerHeight as the virtualizer.
+    const spacerH = spacerHeight;
+    const atAbsoluteTop = el.scrollTop < spacerH + 100;
+
+    const shouldLoadOlder = (nearTopOfCurrentWindow || atAbsoluteTop) && (paneCursor > 0 || visibleWindowStart > 0) && !paneLoading;
+
+    if (shouldLoadOlder) {
+      console.log(`[Batch] Triggering loadOlderHistory (nearTopOfWindow=${nearTopOfCurrentWindow}, atAbsoluteTop=${atAbsoluteTop})`);
       loadOlderHistory();
     }
 
@@ -331,7 +609,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
         }
       }
       if (best) {
-        const node = nodesRef.current[best.index];
+        const node = displayNodes[best.index];
         if (node) {
           selectNode(node.id);
           useArenaStore.getState().reportViewportFocus(paneId, node.id);
@@ -342,7 +620,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
     userScrolledUp.current = !atBottom;
     setShowJumpButton(!atBottom && nodes.length > 20);
-  }, [selectNode, paneId, virtualizer, paneCursor, paneLoading, paneTotalNodes, nodes.length, loadOlderHistory]);
+  }, [selectNode, paneId, virtualizer, paneCursor, paneLoading, visibleWindowStart, nodes.length, displayNodes, loadOlderHistory, spacerHeight]);
 
   // Auto-scroll to bottom on new content (live pane) or data load (both panes)
   const prevNodeCount = useRef(0);
@@ -358,7 +636,10 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     if (!readOnly && userScrolledUp.current) return;
 
     programmaticScroll.current = true;
-    virtualizer.scrollToIndex(nodes.length - 1, { align: "end" });
+    // In the batch/windowed model the virtualizer only sees displayNodes (the current window).
+    // Scroll to the last item inside the current window (which will be the newest when following live).
+    const targetIndex = displayNodes.length - 1;
+    virtualizer.scrollToIndex(targetIndex, { align: "end" });
     // Virtualizer measures asynchronously; retry scroll after measurement settles
     const scrollToBottom = () => {
       const el = parentRef.current;
@@ -367,7 +648,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     setTimeout(scrollToBottom, 100);
     setTimeout(scrollToBottom, 300);
     setTimeout(() => { programmaticScroll.current = false; }, 500);
-  }, [readOnly, nodes.length, effectiveTree.rootNodeId, scrollTrigger, virtualizer]);
+  }, [readOnly, nodes.length, effectiveTree.rootNodeId, scrollTrigger, virtualizer, visibleWindowStart]);
 
   // Re-scroll after spacer renders (totalNodes arrives in a separate state update,
   // so the spacer div appears after scroll-to-bottom has already fired)
@@ -393,9 +674,21 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     if (readOnly !== historyActive) { clearScrollTarget(); return; }
     const index = nodes.findIndex((n) => n.id === scrollTargetId);
     if (index !== -1) {
-      programmaticScroll.current = true;
-      virtualizer.scrollToIndex(index, { align: "start" });
-      setTimeout(() => { programmaticScroll.current = false; }, 600);
+      // Shift window so target is visible
+      const windowIdx = index - visibleWindowStart;
+      if (windowIdx < 0 || windowIdx >= WINDOW_SIZE) {
+        const newStart = Math.max(0, index - Math.floor(WINDOW_SIZE / 2));
+        setVisibleWindowStart(newStart);
+        requestAnimationFrame(() => {
+          programmaticScroll.current = true;
+          virtualizer.scrollToIndex(index - newStart, { align: "start" });
+          setTimeout(() => { programmaticScroll.current = false; }, 600);
+        });
+      } else {
+        programmaticScroll.current = true;
+        virtualizer.scrollToIndex(windowIdx, { align: "start" });
+        setTimeout(() => { programmaticScroll.current = false; }, 600);
+      }
     }
     clearScrollTarget();
   }, [scrollTargetId, clearScrollTarget, readOnly, activeTab, nodes, virtualizer]);
@@ -405,8 +698,6 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   const [searchResults, setSearchResults] = useState<{ id: string; role: string; snippet: string; offset: number; timestamp: number }[]>([]);
   const [searchActive, setSearchActive] = useState(false);
   const [searching, setSearching] = useState(false);
-  const savedScrollPos = useRef(0);
-
   const executeSearch = useCallback((query: string) => {
     if (!readOnly || query.length < 2) {
       setSearchResults([]);
@@ -461,13 +752,25 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     programmaticScroll.current = true;
     userScrolledUp.current = false;
     setShowJumpButton(false);
-    virtualizer.scrollToIndex(nodes.length - 1, { align: "end" });
+
+    // In the batch/windowed model, "jump to latest" means:
+    // 1. Move the window to the very end of the loaded history (newest ~20).
+    // 2. Scroll the virtualizer to the last item inside that window.
+    const newStart = Math.max(0, nodes.length - WINDOW_SIZE);
+    if (newStart !== visibleWindowStart) {
+      setVisibleWindowStart(newStart);
+    }
+
+    // Scroll to the last item of the (possibly newly set) window.
+    const targetIndex = Math.min(WINDOW_SIZE, nodes.length) - 1;
+    virtualizer.scrollToIndex(targetIndex, { align: "end" });
+
     requestAnimationFrame(() => {
       const el = parentRef.current;
       if (el) el.scrollTop = el.scrollHeight;
       setTimeout(() => { programmaticScroll.current = false; }, 200);
     });
-  }, [nodes.length, virtualizer]);
+  }, [nodes.length, virtualizer, visibleWindowStart]);
 
   const historyHeader = readOnly ? (
     <div className="border-b border-border/50">
@@ -506,11 +809,21 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
                 <button
                   key={`${r.id}-${i}`}
                   onClick={() => {
-                    // TODO: scroll to result -- for now, find it in loaded nodes
                     const idx = nodes.findIndex((n) => n.id === r.id);
-                    if (idx !== -1) {
+                    if (idx === -1) return;
+                    // Shift window so the result is visible, then scroll within the window
+                    const windowIdx = idx - visibleWindowStart;
+                    if (windowIdx < 0 || windowIdx >= WINDOW_SIZE) {
+                      const newStart = Math.max(0, idx - Math.floor(WINDOW_SIZE / 2));
+                      setVisibleWindowStart(newStart);
+                      requestAnimationFrame(() => {
+                        programmaticScroll.current = true;
+                        virtualizer.scrollToIndex(idx - newStart, { align: "center" });
+                        setTimeout(() => { programmaticScroll.current = false; }, 400);
+                      });
+                    } else {
                       programmaticScroll.current = true;
-                      virtualizer.scrollToIndex(idx, { align: "center" });
+                      virtualizer.scrollToIndex(windowIdx, { align: "center" });
                       setTimeout(() => { programmaticScroll.current = false; }, 400);
                     }
                   }}
@@ -563,7 +876,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
         {/* Spacer for unloaded content handled by virtualizer paddingStart */}
         <div style={{ height: virtualizer.getTotalSize(), width: "100%", position: "relative" }}>
           {virtualizer.getVirtualItems().map((virtualRow) => {
-            const node = nodes[virtualRow.index];
+            const node = displayNodes[virtualRow.index];
             return (
               <div
                 key={node.id}
@@ -590,6 +903,29 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
         </div>
         <ActivityIndicator readOnly={readOnly} />
       </div>
+      {/* Hidden off-screen measurement area for the batch/windowed virtualizer experiment.
+          New older batches are rendered here first so their true heights (after markdown)
+          can be measured before they are added to the visible window. */}
+      <div
+        ref={measurementRef}
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          top: -20000,
+          left: 0,
+          width: '100%', // Will be constrained by parent; accurate width not critical for measurement in this prototype
+          visibility: 'hidden',
+          pointerEvents: 'none',
+          overflow: 'hidden',
+        }}
+      >
+        {measuringBatch.map((node) => (
+          <div key={node.id} data-measure-id={node.id} style={{ width: '100%' }}>
+            <Message node={node} />
+          </div>
+        ))}
+      </div>
+
       {showJumpButton && (
         <button
           onClick={jumpToLatest}
