@@ -18,7 +18,7 @@ function isNodeInRange(nodeId: string | null, range: [string, string]): boolean 
 
 export function NotebookPane() {
   const notebook = useArenaStore((s) => s.notebook);
-  const activeBranchId = useArenaStore((s) => s.tree.activeBranchId);
+  const activeBranchId = "main"; // flat model: no branches
   const selectedNodeId = useArenaStore((s) => s.selectedNodeId);
   const scrollToNode = useArenaStore((s) => s.scrollToNode);
   const notebookScrollTargetId = useArenaStore((s) => s.notebookScrollTargetId);

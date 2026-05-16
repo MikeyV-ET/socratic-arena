@@ -5,7 +5,7 @@ export function InputBar() {
   const [message, setMessage] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const sendWs = useArenaStore((s) => s.sendWs);
-  const activeBranchId = useArenaStore((s) => s.tree.activeBranchId);
+  const activeBranchId = "main"; // flat model: no branches
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 

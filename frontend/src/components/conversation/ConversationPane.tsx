@@ -43,12 +43,10 @@ function ActivityIndicator({ readOnly }: { readOnly: boolean }) {
   );
 }
 
-function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, tree, switchBranch, paneId, toggleTheme, theme, contextPct, connected }: {
+function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, paneId, toggleTheme, theme, contextPct, connected }: {
   agents: any[]; currentAgent: string; switching: boolean; onAgentSwitch: (name: string) => void;
-  tree: any; switchBranch: (id: string) => void; paneId: string;
-  toggleTheme: () => void; theme: string; contextPct: number | null; connected: boolean;
+  paneId: string; toggleTheme: () => void; theme: string; contextPct: number | null; connected: boolean;
 }) {
-  const branches = Object.values(tree.branches);
   const healthDot = (status: string | null) =>
     status === "working" || status === "active" ? "bg-success" : status === "ready" ? "bg-blue-400" : "bg-muted-foreground";
 
@@ -77,17 +75,6 @@ function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, tree, 
         {switching && <span className="text-[10px] text-muted-foreground animate-pulse">...</span>}
       </div>
       <div className="flex items-center gap-2">
-        {branches.length > 1 && (
-          <select
-            value={tree.activeBranchId}
-            onChange={(e) => switchBranch(e.target.value)}
-            className="bg-muted text-foreground text-[11px] px-1 py-0.5 rounded border border-border focus:outline-none"
-          >
-            {branches.map((b: any) => (
-              <option key={b.id} value={b.id}>{b.label || b.id}</option>
-            ))}
-          </select>
-        )}
         <FontSizeControl paneId={paneId} />
         <button
           onClick={toggleTheme}
@@ -121,8 +108,8 @@ function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, tree, 
 }
 
 export function ConversationPane({ readOnly = false, paneId = "conversation" }: { readOnly?: boolean; paneId?: string } = {}) {
-  useArenaStore((s) => s.tree);
-  useArenaStore((s) => s.historyTree);
+  useArenaStore((s) => s.messages);
+  useArenaStore((s) => s.historyMessages);
   const zoom = useArenaStore((s) => 1 + (s.paneFontSizes[paneId] ?? 0) * 0.1);
   const getActiveBranchNodes = useArenaStore((s) => s.getActiveBranchNodes);
   const getHistoryBranchNodes = useArenaStore((s) => s.getHistoryBranchNodes);
@@ -130,18 +117,18 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   const selectedNodeId = useArenaStore((s) => s.selectedNodeId);
   const scrollTargetId = useArenaStore((s) => s.scrollTargetId);
   const clearScrollTarget = useArenaStore((s) => s.clearScrollTarget);
-  const tree = useArenaStore((s) => s.tree);
-  const historyTree = useArenaStore((s) => s.historyTree);
+  const messages = useArenaStore((s) => s.messages);
+  const historyMessages = useArenaStore((s) => s.historyMessages);
   const scrollTrigger = useArenaStore((s) => s.scrollTrigger);
   const activeTab = useArenaStore((s) => s.activeTab);
   const historyAgent = useArenaStore((s) => s.historyAgent);
   const setHistoryAgent = useArenaStore((s) => s.setHistoryAgent);
-  const setHistoryTree = useArenaStore((s) => s.setHistoryTree);
+  const setHistoryMessages = useArenaStore((s) => s.setHistoryMessages);
   const historyCursor = useArenaStore((s) => s.historyCursor);
   const historyLoading = useArenaStore((s) => s.historyLoading);
   const historyTotalNodes = useArenaStore((s) => s.historyTotalNodes);
   const setHistoryMeta = useArenaStore((s) => s.setHistoryMeta);
-  const prependHistoryNodes = useArenaStore((s) => s.prependHistoryNodes);
+  const prependHistoryMessages = useArenaStore((s) => s.prependHistoryMessages);
   const setHistoryLoading = useArenaStore((s) => s.setHistoryLoading);
 
   // Live pane history state
@@ -150,14 +137,13 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   const liveHistoryLoading = useArenaStore((s) => s.liveHistoryLoading);
   const liveTotalNodes = useArenaStore((s) => s.liveTotalNodes);
   const initLiveHistory = useArenaStore((s) => s.initLiveHistory);
-  const prependLiveNodes = useArenaStore((s) => s.prependLiveNodes);
+  const prependLiveMessages = useArenaStore((s) => s.prependLiveMessages);
   const setLiveHistoryLoading = useArenaStore((s) => s.setLiveHistoryLoading);
 
   // Header controls (moved from global Header)
   const connected = useArenaStore((s) => s.connected);
   const theme = useArenaStore((s) => s.theme);
   const toggleTheme = useArenaStore((s) => s.toggleTheme);
-  const switchBranch = useArenaStore((s) => s.switchBranch);
   const agents = useArenaStore((s) => s.agents);
   const setAgents = useArenaStore((s) => s.setAgents);
   const setCurrentAgent = useArenaStore((s) => s.setCurrentAgent);
@@ -186,7 +172,6 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   // Nodes currently being measured off-screen (not yet in the visible window)
   const [measuringBatch, setMeasuringBatch] = useState<ConversationNode[]>([]);
 
-  const effectiveTree = readOnly ? (historyTree ?? tree) : tree;
   const nodes = readOnly ? getHistoryBranchNodes() : getActiveBranchNodes();   // full loaded branch nodes (for selection, search, etc.)
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
@@ -344,7 +329,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
         if (typeof t === 'number') clearTimeout(t);
       });
     };
-  }, [virtualizer, effectiveTree.rootNodeId, readOnly]);
+  }, [virtualizer, messages, historyMessages, readOnly]);
 
   // When the measuringBatch is rendered in the hidden div, observe their sizes.
   // Once they have stable heights (after markdown has laid out), record them and
@@ -465,13 +450,14 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
 
   // Reset scroll tracking when data source is REPLACED (agent/session switch),
   // but NOT when it's extended by prepend (older history loaded).
-  // On prepend, the old root still exists in the tree as a non-root node.
-  // On replace, the old root is gone entirely (different agent/session).
+  // On prepend, the old first message still exists somewhere in the list.
+  // On replace, the old first message is gone entirely (different agent/session).
   useEffect(() => {
-    if (effectiveTree.rootNodeId !== prevRootId.current) {
-      const oldRoot = prevRootId.current;
-      prevRootId.current = effectiveTree.rootNodeId;
-      if (oldRoot && !effectiveTree.nodes[oldRoot]) {
+    const firstId = nodes[0]?.id ?? null;
+    if (firstId !== prevRootId.current) {
+      const oldFirstId = prevRootId.current;
+      prevRootId.current = firstId;
+      if (oldFirstId && !nodes.some((n) => n.id === oldFirstId)) {
         // Data source replaced (agent/session switch) — reset windowed state
         userScrolledUp.current = false;
         prevFirstNodeId.current = null;
@@ -481,7 +467,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
         setMeasuringBatch([]);
       }
     }
-  }, [effectiveTree.rootNodeId, effectiveTree.nodes]);
+  }, [nodes]);
 
   const basePath = window.location.pathname.replace(/\/+$/, "");
 
@@ -537,8 +523,8 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     fetch(`${basePath}/api/agent/${currentAgent}/history`)
       .then((r) => r.json())
       .then((d) => {
-        if (d.status === "ok" && d.tree) {
-          initLiveHistory(d.tree, d.cursor ?? 0, d.totalNodes ?? 0);
+        if (d.status === "ok" && d.messages) {
+          initLiveHistory(d.messages, d.cursor ?? 0, d.totalNodes ?? 0);
         }
         setLiveHistoryLoading(false);
       })
@@ -550,19 +536,19 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     if (paneCursor <= 0 || paneLoading) return;
     const agent = readOnly ? historyAgent : currentAgent;
     const setLoading = readOnly ? setHistoryLoading : setLiveHistoryLoading;
-    const prependFn = readOnly ? prependHistoryNodes : prependLiveNodes;
+    const prependFn = readOnly ? prependHistoryMessages : prependLiveMessages;
     setLoading(true);
     const params = new URLSearchParams({ before: String(paneCursor), limit: "50" });
     fetch(`${basePath}/api/agent/${agent}/history/page?${params}`)
       .then((r) => r.json())
       .then((d) => {
-        if (d.status === "ok" && d.tree) {
-          prependFn(d.tree, d.cursor);
+        if (d.status === "ok" && d.messages) {
+          prependFn(d.messages, d.cursor);
         }
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [paneCursor, paneLoading, readOnly, historyAgent, currentAgent, basePath, setHistoryLoading, setLiveHistoryLoading, prependHistoryNodes, prependLiveNodes]);
+  }, [paneCursor, paneLoading, readOnly, historyAgent, currentAgent, basePath, setHistoryLoading, setLiveHistoryLoading, prependHistoryMessages, prependLiveMessages]);
 
   // Scroll handler: track user scroll state + find centered visible node
   const handleScroll = useCallback(() => {
@@ -629,7 +615,8 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     // For readOnly (history): only scroll to bottom on initial load or data source change
     // For live pane: scroll on every new node unless user scrolled up
     const isInitialLoad = prevNodeCount.current === 0;
-    const isDataSourceChange = effectiveTree.rootNodeId !== prevRootId.current;
+    const currentFirstId = nodes[0]?.id ?? null;
+    const isDataSourceChange = currentFirstId !== prevRootId.current;
     prevNodeCount.current = nodes.length;
 
     if (readOnly && !isInitialLoad && !isDataSourceChange) return;
@@ -648,7 +635,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     setTimeout(scrollToBottom, 100);
     setTimeout(scrollToBottom, 300);
     setTimeout(() => { programmaticScroll.current = false; }, 500);
-  }, [readOnly, nodes.length, effectiveTree.rootNodeId, scrollTrigger, virtualizer, visibleWindowStart]);
+  }, [readOnly, nodes.length, nodes, scrollTrigger, virtualizer, visibleWindowStart]);
 
   // Re-scroll after spacer renders (totalNodes arrives in a separate state update,
   // so the spacer div appears after scroll-to-bottom has already fired)
@@ -740,9 +727,9 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
 
   const handleHistoryDataLoaded = (d: any) => {
     if (d === null) {
-      setHistoryTree(null);
-    } else if (d.tree) {
-      setHistoryTree(d.tree);
+      setHistoryMessages([]);
+    } else if (d.messages) {
+      setHistoryMessages(d.messages);
       if (d.cursor !== undefined) setHistoryMeta(d.cursor, d.totalNodes ?? 0);
     }
   };
@@ -849,7 +836,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     return (
       <div className="flex flex-col h-full bg-background" data-pane-id={paneId}>
         {historyHeader}
-        {!readOnly && <LivePaneHeader agents={agents} currentAgent={currentAgent} switching={switching} onAgentSwitch={handleAgentSwitch} tree={tree} switchBranch={switchBranch} paneId={paneId} toggleTheme={toggleTheme} theme={theme} contextPct={contextPct} connected={connected} />}
+        {!readOnly && <LivePaneHeader agents={agents} currentAgent={currentAgent} switching={switching} onAgentSwitch={handleAgentSwitch} paneId={paneId} toggleTheme={toggleTheme} theme={theme} contextPct={contextPct} connected={connected} />}
         <div className="flex-1 flex items-center justify-center">
           <span className="text-sm text-muted-foreground animate-pulse">{readOnly ? "No history data" : "Connecting..."}</span>
         </div>
@@ -861,7 +848,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   return (
     <div className="flex flex-col h-full bg-background relative" data-pane-id={paneId}>
       {historyHeader}
-      {!readOnly && <LivePaneHeader agents={agents} currentAgent={currentAgent} switching={switching} onAgentSwitch={handleAgentSwitch} tree={tree} switchBranch={switchBranch} paneId={paneId} toggleTheme={toggleTheme} theme={theme} contextPct={contextPct} connected={connected} />}
+      {!readOnly && <LivePaneHeader agents={agents} currentAgent={currentAgent} switching={switching} onAgentSwitch={handleAgentSwitch} paneId={paneId} toggleTheme={toggleTheme} theme={theme} contextPct={contextPct} connected={connected} />}
       <div ref={parentRef} onScroll={handleScroll} className="flex-1 overflow-y-auto" style={{ zoom }} data-testid="conversation-messages" data-branch-nodes={nodes.length} {...(!readOnly && liveTotalNodes > 0 ? { "data-live-history": "loaded" } : {})}>
         {paneLoading && (
           <div className="px-4 py-2 text-center text-xs text-muted-foreground animate-pulse" data-testid="history-loading-older">

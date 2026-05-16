@@ -38,8 +38,10 @@ export function MomentsPane() {
   const handleDevelop = (m: Moment, e: React.MouseEvent) => {
     e.stopPropagation();
     const store = useArenaStore.getState();
-    const node = store.tree.nodes[m.nodeId];
-    const parentNode = node?.parentId ? store.tree.nodes[node.parentId] : null;
+    const node = store._msgIndex.get(m.nodeId);
+    // In flat model, "parent" is the previous message in the list
+    const nodeIdx = node ? store.messages.findIndex((msg) => msg.id === m.nodeId) : -1;
+    const parentNode = nodeIdx > 0 ? store.messages[nodeIdx - 1] : null;
 
     // Flag the node if not already flagged
     if (node && node.flags.length === 0 && sendWs) {

@@ -137,6 +137,36 @@ def parse_updates(filepath: str, live_session_id: str | None = None, agent_label
     return entries
 
 
+def entries_to_messages(entries: list[dict], agent_label: str | None = None) -> list[ConversationNode]:
+    """Convert parsed update entries into a flat ordered list of ConversationNodes.
+
+    No tree wiring (parentId/children not set). Messages are ordered sequentially
+    as they appear in updates.jsonl. Compaction markers are preserved as system messages.
+    """
+    messages = []
+    seen_ids: set[str] = set()
+    for e in entries:
+        node_id = e["id"]
+        # Deduplicate: eventId counters reset after compaction
+        if node_id in seen_ids:
+            node_id = new_id()
+        seen_ids.add(node_id)
+        node = ConversationNode(
+            id=node_id,
+            branch_id="main",
+            role=e["role"],
+            content=e["content"],
+            thinking=e.get("thinking"),
+            timestamp=int(e["timestamp"]),
+            children=[],
+            flags=[],
+            metadata=NodeMetadata(model_id=e.get("model")) if e.get("model") else None,
+            agent_label=e.get("agent_label", agent_label) if e["role"] == "assistant" else None,
+        )
+        messages.append(node)
+    return messages
+
+
 def build_tree_from_updates(entries: list[dict], label: str = "Session", live_session_id: str | None = None) -> ConversationTree:
     """Convert parsed update entries into a ConversationTree.
 
@@ -527,6 +557,19 @@ def search_updates(filepath: str, query: str, limit: int = 50, agent_label: str 
         r.pop("_turn_ts", None)
 
     return results
+
+
+def build_flat_messages(filepath: str, agent_label: str | None = None, tail_only: bool = False, tail_bytes: int = 102400) -> list[ConversationNode]:
+    """Parse updates.jsonl into a flat ordered list of ConversationNodes.
+
+    If tail_only=True, only reads the last tail_bytes of the file.
+    Returns messages in chronological order.
+    """
+    if tail_only:
+        entries = parse_updates_tail(filepath, tail_bytes=tail_bytes, agent_label=agent_label)
+    else:
+        entries = parse_updates(filepath, agent_label=agent_label)
+    return entries_to_messages(entries, agent_label=agent_label)
 
 
 def build_state_from_updates(filepath: str, label: str = "Session", live_session_id: str | None = None, agent_label: str | None = None, tail_only: bool = False, tail_bytes: int = 102400) -> StateSnapshot:

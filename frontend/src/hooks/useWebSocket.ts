@@ -30,9 +30,9 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
   const store = useArenaStore.getState();
   switch (msg.type) {
     case "state.snapshot": {
-      // Batch all state updates into a single zustand set() call.
+      // Flat model: payload has messages[] instead of tree
       store.applySnapshot({
-        ...(msg.payload.tree ? { tree: msg.payload.tree as never } : {}),
+        ...(msg.payload.messages ? { messages: msg.payload.messages as never } : {}),
         ...(msg.payload.notebook ? { notebook: msg.payload.notebook as never } : {}),
         ...(msg.payload.prompts ? { prompts: msg.payload.prompts as never } : {}),
         ...(msg.payload.artifacts ? { artifacts: msg.payload.artifacts as never } : {}),
@@ -115,19 +115,14 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       const updNodeId = msg.payload.nodeId as string;
       const updContent = msg.payload.content as string;
       const updThinking = msg.payload.thinking as string | undefined;
-      const existed = !!store.tree.nodes[updNodeId];
+      const existed = !!store._msgIndex.get(updNodeId);
       // Finalize any active stream on this node before applying final content
       if (store.streamingNodeId === updNodeId) {
         store.finalizeStream(updNodeId);
       }
       clearStreamingTimeout();
       store.updateLiveNode(updNodeId, updContent, updThinking);
-      // Force activeNodeId to this node so the branch walk reaches it,
-      // even if live-tailed nodes have drifted the pointer elsewhere.
-      // Must re-read state after updateLiveNode to avoid overwriting the content update.
-      const fresh = useArenaStore.getState();
-      fresh.setTree({ ...fresh.tree, activeNodeId: updNodeId });
-      const ok = !!useArenaStore.getState().tree.nodes[updNodeId]?.content;
+      const ok = !!useArenaStore.getState()._msgIndex.get(updNodeId)?.content;
       console.log("[ws] node_update", updNodeId.slice(0, 12),
         "existed=" + existed, "contentOk=" + ok,
         "len=" + (updContent?.length ?? 0));
@@ -172,7 +167,7 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
     case "tree.live_node": {
       const liveAction = msg.payload.action as string;
       if (liveAction === "add") {
-        store.addLiveNode(msg.payload.node as never, (msg.payload.parentId as string) || null, !!msg.payload.advance);
+        store.addLiveNode(msg.payload.node as never);
         store.triggerScrollToBottom();
       } else if (liveAction === "update" || liveAction === "finalize") {
         store.updateLiveNode(
@@ -188,18 +183,7 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
     }
 
     case "tree.window": {
-      const tree = store.tree;
-      const windowNodes = msg.payload.nodes as Record<string, never> | undefined;
-      const collapsed = msg.payload.collapsedBranches as never[] | undefined;
-      const stats = msg.payload.stats as never | undefined;
-      if (windowNodes) {
-        store.setTree({
-          ...tree,
-          nodes: windowNodes,
-          collapsedBranches: collapsed || [],
-          stats: stats || tree.stats,
-        } as never);
-      }
+      // No-op in flat model — windowing handled by frontend virtualizer
       break;
     }
 

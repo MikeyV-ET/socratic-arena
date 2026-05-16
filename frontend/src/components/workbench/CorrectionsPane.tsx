@@ -32,7 +32,7 @@ function CorrectionEditor({
   const [whatShouldHave, setWhatShouldHave] = useState(existing?.whatShouldHaveHappened || "");
   const [correctionText, setCorrectionText] = useState(existing?.correctionText || "");
 
-  const nodeContent = useArenaStore((s) => s.tree.nodes[nodeId]?.content || "");
+  const nodeContent = useArenaStore((s) => s._msgIndex.get(nodeId)?.content || "");
   const preview = nodeContent.slice(0, 200) + (nodeContent.length > 200 ? "..." : "");
 
   return (
@@ -110,7 +110,7 @@ function CorrectionEditor({
 }
 
 function CorrectionCard({ correction, onEdit }: { correction: Correction; onEdit: () => void }) {
-  const nodeContent = useArenaStore((s) => s.tree.nodes[correction.nodeId]?.content || "");
+  const nodeContent = useArenaStore((s) => s._msgIndex.get(correction.nodeId)?.content || "");
   const nodePreview = nodeContent.slice(0, 100) + (nodeContent.length > 100 ? "..." : "");
 
   return (

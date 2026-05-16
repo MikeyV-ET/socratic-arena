@@ -164,3 +164,11 @@ class StateSnapshot(CamelModel):
     notebook: Notebook = Field(default_factory=Notebook)
     prompts: list[TrainingPrompt] = []
     artifacts: list[Artifact] = []
+
+
+class FlatState(CamelModel):
+    """Flat message list state — replaces tree-based StateSnapshot."""
+    messages: list[ConversationNode] = []
+    notebook: Notebook = Field(default_factory=Notebook)
+    prompts: list[TrainingPrompt] = []
+    artifacts: list[Artifact] = []

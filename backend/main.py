@@ -11,7 +11,7 @@ import json
 from models import (
     ConversationTree, ConversationNode, Branch, Flag, Notebook, NotebookEntry,
     TrainingPrompt, PromptTestRun, PromptTestResult, PromptDevNote,
-    Artifact, StateSnapshot, new_id, now_ms,
+    Artifact, StateSnapshot, FlatState, new_id, now_ms,
 )
 from mock_data import build_mock_state
 from demo_dataset import build_demo_state
@@ -111,17 +111,22 @@ from shared_docs import router as docs_router, files_router, set_broadcast as do
 app.include_router(docs_router)
 app.include_router(files_router)
 
-# In-memory state
-def _build_default_state() -> StateSnapshot:
-    """Load knight-bio's history as default, with candidate moments flagged.
+# In-memory state — flat message list
+# _msg_index provides O(1) lookup by message ID (for flags, streaming, etc.)
+_msg_index: dict[str, ConversationNode] = {}
 
-    Prefers the live grok session's updates.jsonl (which includes both sixel's
-    history and knight-bio's new turns). Falls back to the converted copy.
-    """
-    from updates_parser import build_state_from_updates
+
+def _rebuild_msg_index():
+    """Rebuild the message-by-ID index from the flat state."""
+    global _msg_index
+    _msg_index = {m.id: m for m in state.messages}
+
+
+def _build_default_state() -> FlatState:
+    """Load knight-bio's history as default, with candidate moments flagged."""
+    from updates_parser import build_flat_messages
     from notebook_parser import build_notebook
 
-    # Prefer the live session's updates.jsonl
     session_updates = get_session_updates_path()
     converted_updates = Path(__file__).parent.parent / "agents" / "knight-bio" / "updates.jsonl"
     updates_path = session_updates or converted_updates
@@ -130,24 +135,24 @@ def _build_default_state() -> StateSnapshot:
     mappings_path = Path(__file__).parent / "data" / "moment_node_mappings.json"
 
     if not updates_path.is_file():
-        return build_demo_state()
+        # Fall back to demo/empty state
+        return FlatState()
 
-    # Read the live session ID for labeling (Sixel vs Knight)
-    _sid_file = Path(__file__).resolve().parent.parent / "agents" / "knight-bio" / "grok_session_id"
-    live_sid = _sid_file.read_text().strip() if _sid_file.exists() else None
-    log.info("Loading updates from: %s (live session: %s)", updates_path, live_sid)
+    log.info("Loading updates from: %s (flat model)", updates_path)
+    messages = build_flat_messages(str(updates_path), agent_label="Knight-Bio", tail_only=True)
 
-    st = build_state_from_updates(str(updates_path), label="Knight-Bio: Desire Detection", live_session_id=live_sid, tail_only=True)
+    st = FlatState(messages=messages)
     if notebook_path.is_file():
         st.notebook = build_notebook(str(notebook_path))
 
     # Pre-flag candidate moments
     if mappings_path.is_file():
+        msg_by_id = {m.id: m for m in messages}
         with open(mappings_path) as f:
             mappings = json.load(f)
         for m in mappings:
             node_id = m["event_id"]
-            if node_id in st.tree.nodes:
+            if node_id in msg_by_id:
                 note = "Verified Socratic moment" if m.get("is_verified") else "Candidate moment"
                 flag = Flag(
                     id=new_id(),
@@ -156,11 +161,12 @@ def _build_default_state() -> StateSnapshot:
                     note=f"{note}: {m.get('probe', '')[:80]}",
                     created_at=now_ms(),
                 )
-                st.tree.nodes[node_id].flags.append(flag)
+                msg_by_id[node_id].flags.append(flag)
 
     return st
 
-state: StateSnapshot = _build_default_state()
+state: FlatState = _build_default_state()
+_rebuild_msg_index()
 # Node IDs created by the arena conversation (not live-tailed).
 # _trim_state_payload preserves paths through these so snapshots don't drop arena messages.
 _arena_node_ids: set[str] = set()
@@ -223,66 +229,20 @@ LIVE_TAIL_INTERVAL = 2.0  # seconds between polls
 # The arena is a pure UI+tooling layer.
 
 
-def _trim_state_payload(payload: dict) -> dict:
-    """Trim state.snapshot payload to active-branch nodes + arena conversation nodes.
+def _trim_state_payload(payload: dict, max_messages: int = 600) -> dict:
+    """Trim state.snapshot to the last max_messages messages.
 
-    The full tree can have thousands of nodes across many branches.
-    The client only renders the active branch, so we walk from root
-    toward activeNodeId, keeping nodes on that path.
-
-    Also preserves paths through any arena-created conversation nodes
-    (tracked in _arena_node_ids) so that snapshots from flag/prompt
-    operations don't drop messages the user just sent.
+    Flat model: just slice the array. Much simpler than tree walking.
     """
-    tree = payload.get("tree", {})
-    all_nodes = tree.get("nodes", {})
-    active_id = tree.get("activeNodeId", "")
-    active_branch = tree.get("activeBranchId", "main")
-    root_id = tree.get("rootNodeId", "")
-
-    if len(all_nodes) <= 600:
+    messages = payload.get("messages", [])
+    if len(messages) <= max_messages:
         return payload
+    return {**payload, "messages": messages[-max_messages:]}
 
-    # Build ancestor set from activeNodeId to root (with cycle detection)
-    ancestors: set[str] = set()
-    nid = active_id
-    while nid and nid in all_nodes:
-        if nid in ancestors:
-            break
-        ancestors.add(nid)
-        nid = all_nodes[nid].get("parentId", "") or ""
 
-    # Also include ancestor paths for all arena conversation nodes
-    for arena_id in _arena_node_ids:
-        nid = arena_id
-        while nid and nid in all_nodes:
-            if nid in ancestors:
-                break
-            ancestors.add(nid)
-            nid = all_nodes[nid].get("parentId", "") or ""
-
-    # Walk from root following ancestors, then continue on active branch
-    kept: dict[str, dict] = {}
-
-    stack = [root_id]
-    while stack:
-        cur = stack.pop()
-        if not cur or cur not in all_nodes or cur in kept:
-            continue
-        kept[cur] = all_nodes[cur]
-        children = all_nodes[cur].get("children", [])
-        ancestor_children = [cid for cid in children if cid in ancestors]
-        if ancestor_children:
-            stack.extend(ancestor_children)
-        else:
-            for cid in children:
-                node = all_nodes.get(cid, {})
-                if node.get("branchId") == active_branch:
-                    stack.append(cid)
-                    break
-
-    trimmed_tree = {**tree, "nodes": kept}
-    return {**payload, "tree": trimmed_tree}
+def _state_snapshot_payload() -> dict:
+    """Build the state.snapshot payload from the flat state."""
+    return _trim_state_payload(state.model_dump())
 
 
 async def broadcast(msg: dict):
@@ -327,13 +287,13 @@ def _start_live_tailer(agent_name: str, tail_offset: int | None = None):
     else:
         _live_tailer.seek_to_end()
 
-    # Register existing node IDs to prevent duplicate-induced parent cycles
-    if state.tree.nodes:
-        _live_tailer.set_known_ids(set(state.tree.nodes.keys()))
+    # Register existing node IDs to prevent duplicates
+    if state.messages:
+        _live_tailer.set_known_ids({m.id for m in state.messages})
 
-    # Set last node ID from current state tree
-    if state.tree.active_node_id:
-        _live_tailer.set_last_node_id(state.tree.active_node_id)
+    # Set last node ID from current messages
+    if state.messages:
+        _live_tailer.set_last_node_id(state.messages[-1].id)
 
     _live_task = asyncio.create_task(_live_tail_loop())
     log.info("LiveTailer: started for %s (%s)", agent_name, updates_path)
@@ -356,60 +316,41 @@ async def _live_tail_loop():
 
                 if action == "add":
                     node_data = entry["node"]
-                    parent_id = entry.get("parent_id")
                     node_id = node_data["id"]
 
                     # When an arena turn is in progress, skip assistant nodes
-                    # entirely — the arena adapter handles delivery via
-                    # /api/adapter/response. This eliminates the dual-tailer
-                    # race condition.
                     if (_pending_arena_node_id
                             and node_data.get("role") == "assistant"
                             and node_id not in _arena_node_ids):
                         log.debug("LiveTailer: skipping assistant node %s (arena turn in progress)", node_id)
                         continue
 
-                    # Skip nodes that already exist (prevents parent-cycle
-                    # from overwriting a node parsed at startup with a
-                    # live-tailed duplicate that has a different parentId)
-                    if node_id in state.tree.nodes:
+                    # Skip duplicates
+                    if node_id in _msg_index:
                         log.debug("LiveTailer: skipping duplicate node %s", node_id)
                         continue
 
-                    # Add to in-memory state tree (node_data uses camelCase aliases)
+                    # Append to flat message list
                     node = ConversationNode.model_validate(node_data)
-                    state.tree.nodes[node_id] = node
-                    # Only advance activeNodeId if we're not in an arena conversation.
-                    # Arena conversation nodes (_arena_node_ids) take priority.
-                    if state.tree.active_node_id not in _arena_node_ids:
-                        state.tree.active_node_id = node_id
-
-                    # Wire parent -> child
-                    if parent_id and parent_id in state.tree.nodes:
-                        parent = state.tree.nodes[parent_id]
-                        if node_id not in parent.children:
-                            parent.children.append(node_id)
-
-                    # Set root if tree was empty
-                    if not state.tree.root_node_id:
-                        state.tree.root_node_id = node_id
+                    state.messages.append(node)
+                    _msg_index[node_id] = node
 
                     await broadcast({
                         "type": "tree.live_node",
                         "payload": {
                             "action": "add",
                             "node": node_data,
-                            "parentId": parent_id,
+                            "parentId": entry.get("parent_id"),
                         },
                     })
 
                 elif action == "update":
                     node_id = entry["node_id"]
-
-                    if node_id in state.tree.nodes:
-                        state.tree.nodes[node_id].content = entry["content"]
+                    msg = _msg_index.get(node_id)
+                    if msg:
+                        msg.content = entry["content"]
                         if entry.get("thinking"):
-                            state.tree.nodes[node_id].thinking = entry["thinking"]
+                            msg.thinking = entry["thinking"]
 
                     await broadcast({
                         "type": "tree.live_node",
@@ -423,11 +364,11 @@ async def _live_tail_loop():
 
                 elif action == "finalize":
                     node_id = entry["node_id"]
-
-                    if node_id in state.tree.nodes:
-                        state.tree.nodes[node_id].content = entry["content"]
+                    msg = _msg_index.get(node_id)
+                    if msg:
+                        msg.content = entry["content"]
                         if entry.get("thinking"):
-                            state.tree.nodes[node_id].thinking = entry["thinking"]
+                            msg.thinking = entry["thinking"]
 
                     await broadcast({
                         "type": "tree.live_node",
@@ -457,7 +398,7 @@ async def websocket_endpoint(ws: WebSocket):
         # Send trimmed state on connect
         await ws.send_text(json.dumps({
             "type": "state.snapshot",
-            "payload": _trim_state_payload(state.model_dump()),
+            "payload": _state_snapshot_payload(),
         }))
 
         while True:
@@ -470,7 +411,7 @@ async def websocket_endpoint(ws: WebSocket):
             if msg_type == "state.sync":
                 await ws.send_text(json.dumps({
                     "type": "state.snapshot",
-                    "payload": _trim_state_payload(state.model_dump()),
+                    "payload": _state_snapshot_payload(),
                 }))
 
             elif msg_type == "conversation.send":
@@ -533,13 +474,13 @@ async def websocket_endpoint(ws: WebSocket):
                 await handle_tree_window(ws, payload)
 
             elif msg_type == "tree.stats":
-                total_flags = sum(len(n.flags) for n in state.tree.nodes.values())
-                all_ts = [n.timestamp for n in state.tree.nodes.values() if n.timestamp > 0]
+                total_flags = sum(len(n.flags) for n in state.messages)
+                all_ts = [n.timestamp for n in state.messages if n.timestamp > 0]
                 await ws.send_text(json.dumps({
                     "type": "tree.stats",
                     "payload": {
-                        "totalNodes": len(state.tree.nodes),
-                        "totalBranches": len(state.tree.branches),
+                        "totalNodes": len(state.messages),
+                        "totalBranches": 1,
                         "totalFlags": total_flags,
                         "timeRange": [min(all_ts), max(all_ts)] if all_ts else [0, 0],
                     },
@@ -610,13 +551,13 @@ def _process_attachments(attachments: list[dict]) -> tuple[str, list[str]]:
 
 
 async def handle_conversation_send(ws: WebSocket, payload: dict):
-    """Store user message in conversation tree and broadcast.
+    """Store user message in flat list and broadcast.
 
     Agent response delivery is handled by the asdaaas arena adapter,
     not by subprocess management here. The adapter calls
     /api/conversation/agent-response to populate assistant nodes.
     """
-    branch_id = payload.get("branchId", state.tree.active_branch_id)
+    branch_id = payload.get("branchId", "main")
     content = payload.get("content", "")
 
     # Process attachments if present
@@ -625,44 +566,39 @@ async def handle_conversation_send(ws: WebSocket, payload: dict):
         attachment_text, _ = _process_attachments(attachments)
         content += attachment_text
 
-    # Create user node
+    # Create user message
     user_node = ConversationNode(
         id=new_id(),
-        parent_id=state.tree.active_node_id,
         branch_id=branch_id,
         role="user",
         content=content,
     )
-    state.tree.nodes[user_node.id] = user_node
+    state.messages.append(user_node)
+    _msg_index[user_node.id] = user_node
     _arena_node_ids.add(user_node.id)
-    if state.tree.active_node_id and state.tree.active_node_id in state.tree.nodes:
-        state.tree.nodes[state.tree.active_node_id].children.append(user_node.id)
 
-    # Create placeholder assistant node (populated when agent responds via adapter)
+    # Create placeholder assistant message (populated when agent responds via adapter)
     assistant_node = ConversationNode(
         id=new_id(),
-        parent_id=user_node.id,
         branch_id=branch_id,
         role="assistant",
         content="",
         agent_label=_current_agent,
     )
-    state.tree.nodes[assistant_node.id] = assistant_node
+    state.messages.append(assistant_node)
+    _msg_index[assistant_node.id] = assistant_node
     _arena_node_ids.add(assistant_node.id)
-    user_node.children.append(assistant_node.id)
-    state.tree.active_node_id = assistant_node.id
 
     # Persist user node to sidecar file
     _persist_arena_node(user_node.model_dump())
 
-    # Broadcast new nodes incrementally (NOT full state.snapshot, which
-    # gets trimmed and can drop arena nodes when live tailer moves activeNodeId)
+    # Broadcast new messages incrementally
     await broadcast({
         "type": "tree.live_node",
         "payload": {
             "action": "add",
             "node": user_node.model_dump(),
-            "parentId": user_node.parent_id,
+            "parentId": None,
             "advance": True,
         },
     })
@@ -671,7 +607,7 @@ async def handle_conversation_send(ws: WebSocket, payload: dict):
         "payload": {
             "action": "add",
             "node": assistant_node.model_dump(),
-            "parentId": assistant_node.parent_id,
+            "parentId": None,
             "advance": True,
         },
     })
@@ -697,23 +633,9 @@ async def handle_conversation_send(ws: WebSocket, payload: dict):
 
 
 async def handle_branch_create(ws: WebSocket, payload: dict):
-    from_node_id = payload.get("fromNodeId", "")
-    label = payload.get("label")
-
-    branch = Branch(
-        parent_node_id=from_node_id,
-        root_node_id=from_node_id,
-        session_id=new_id(),
-        label=label,
-    )
-    state.tree.branches[branch.id] = branch
-    state.tree.active_branch_id = branch.id
-    state.tree.active_node_id = from_node_id
-
-    await broadcast({
-        "type": "state.snapshot",
-        "payload": state.model_dump(),
-    })
+    # Branches are a tree concept — no-op in flat model.
+    # Fork/evaluation will create separate sessions instead.
+    pass
 
 
 def _create_moment_from_flag(source_id: str, content: str, date: str, note: str | None, source: str):
@@ -754,8 +676,8 @@ async def handle_flag_create(ws: WebSocket, payload: dict):
     note = payload.get("note")
 
     # Dedup: if same type flag already exists, update note instead of creating duplicate
-    if node_id and node_id in state.tree.nodes:
-        existing = next((f for f in state.tree.nodes[node_id].flags if f.type == "training_candidate"), None)
+    if node_id and node_id in _msg_index:
+        existing = next((f for f in _msg_index[node_id].flags if f.type == "training_candidate"), None)
         if existing:
             existing.note = note
             _save_flags()
@@ -775,9 +697,9 @@ async def handle_flag_create(ws: WebSocket, payload: dict):
 
     flag = Flag(node_id=node_id or entry_id, note=note)
 
-    if node_id and node_id in state.tree.nodes:
-        state.tree.nodes[node_id].flags.append(flag)
-        node = state.tree.nodes[node_id]
+    if node_id and node_id in _msg_index:
+        _msg_index[node_id].flags.append(flag)
+        node = _msg_index[node_id]
         _create_moment_from_flag(node_id, node.content, node.timestamp or "", note, source="transcript")
     elif entry_id:
         for entry in state.notebook.entries:
@@ -813,7 +735,7 @@ async def handle_flag_create(ws: WebSocket, payload: dict):
 async def handle_flag_update(payload: dict):
     flag_id = payload.get("flagId", "")
     note = payload.get("note")
-    for node in state.tree.nodes.values():
+    for node in state.messages:
         for flag in node.flags:
             if flag.id == flag_id:
                 flag.note = note
@@ -839,7 +761,7 @@ async def handle_flag_update(payload: dict):
 
 async def handle_flag_delete(payload: dict):
     flag_id = payload.get("flagId", "")
-    for node in state.tree.nodes.values():
+    for node in state.messages:
         node.flags = [f for f in node.flags if f.id != flag_id]
     for entry in state.notebook.entries:
         entry.flags = [f for f in entry.flags if f.id != flag_id]
@@ -859,14 +781,8 @@ async def handle_flag_delete(payload: dict):
 
 
 async def handle_branch_switch(payload: dict):
-    branch_id = payload.get("branchId", "")
-    if branch_id in state.tree.branches:
-        state.tree.active_branch_id = branch_id
-        state.tree.active_node_id = state.tree.branches[branch_id].root_node_id
-    await broadcast({
-        "type": "state.snapshot",
-        "payload": state.model_dump(),
-    })
+    # Branches are a tree concept — no-op in flat model.
+    pass
 
 
 async def handle_prompt_create(ws: WebSocket, payload: dict):
@@ -876,7 +792,7 @@ async def handle_prompt_create(ws: WebSocket, payload: dict):
 
     # Derive source from flag if not provided
     if not source_node_id and not source_entry_id and flag_id:
-        for n in state.tree.nodes.values():
+        for n in state.messages:
             if any(f.id == flag_id for f in n.flags):
                 source_node_id = n.id
                 break
@@ -890,25 +806,22 @@ async def handle_prompt_create(ws: WebSocket, payload: dict):
     context_content = ""
     probe_text = ""
 
-    if source_node_id and source_node_id in state.tree.nodes:
-        source_node = state.tree.nodes[source_node_id]
+    if source_node_id and source_node_id in _msg_index:
+        source_node = _msg_index[source_node_id]
+        # Find adjacent messages for context (flat model: use list position)
+        source_idx = next((i for i, m in enumerate(state.messages) if m.id == source_node_id), -1)
         if source_node.role == "assistant":
-            # Flagged the correction response — probe is the parent (user's question)
-            parent = state.tree.nodes.get(source_node.parent_id)
-            if parent and parent.role == "user":
-                probe_text = parent.content
-                # Context is everything before the probe
-                grandparent = state.tree.nodes.get(parent.parent_id)
-                if grandparent:
-                    context_content = grandparent.content
+            # Flagged the correction response — probe is the previous user message
+            if source_idx > 0 and state.messages[source_idx - 1].role == "user":
+                probe_text = state.messages[source_idx - 1].content
+                if source_idx > 1:
+                    context_content = state.messages[source_idx - 2].content
             else:
                 context_content = source_node.content
         elif source_node.role == "user":
-            # Flagged the probe itself
             probe_text = source_node.content
-            parent = state.tree.nodes.get(source_node.parent_id)
-            if parent:
-                context_content = parent.content
+            if source_idx > 0:
+                context_content = state.messages[source_idx - 1].content
     elif source_entry_id:
         for entry in state.notebook.entries:
             if entry.id == source_entry_id:
@@ -991,7 +904,7 @@ def _load_user_moments():
 def _save_flags():
     """Persist all flags for the current agent, preserving other agents' flags."""
     current_flags = []
-    for node in state.tree.nodes.values():
+    for node in state.messages:
         for flag in node.flags:
             current_flags.append({
                 "agent": _current_agent,
@@ -1049,8 +962,8 @@ def _load_flags():
         )
         if not flag.id:
             continue
-        if target_type == "node" and flag.node_id in state.tree.nodes:
-            node = state.tree.nodes[flag.node_id]
+        if target_type == "node" and flag.node_id in _msg_index:
+            node = _msg_index[flag.node_id]
             if not any(f.id == flag.id for f in node.flags):
                 node.flags.append(flag)
                 count += 1
@@ -1352,120 +1265,24 @@ def _save_test_data():
 # --- REST endpoints ---
 
 async def handle_tree_window(ws: WebSocket, payload: dict):
-    """Return a windowed subset of the tree with collapsed branch summaries."""
-    center_id = payload.get("centerNodeId", state.tree.root_node_id)
-    radius = payload.get("radius", 50)
-    expanded = set(payload.get("expandedBranches", []))
+    """Tree windowing is a no-op in the flat model.
 
-    # Always include: path from root to center node
-    path_ids: set[str] = set()
-    current = center_id
-    while current and current in state.tree.nodes:
-        path_ids.add(current)
-        parent = state.tree.nodes[current].parent_id
-        if parent is None:
-            break
-        current = parent
-
-    # Walk forward/backward from center on active branch
-    window_ids: set[str] = set(path_ids)
-
-    # Forward from center
-    fwd = center_id
-    for _ in range(radius):
-        node = state.tree.nodes.get(fwd)
-        if not node or not node.children:
-            break
-        next_id = None
-        for cid in node.children:
-            child = state.tree.nodes.get(cid)
-            if child and child.branch_id == state.tree.active_branch_id:
-                next_id = cid
-                break
-        if not next_id:
-            next_id = node.children[0]
-        window_ids.add(next_id)
-        fwd = next_id
-
-    # Backward from center (already covered by path_ids, but extend on active branch)
-    bwd = center_id
-    for _ in range(radius):
-        node = state.tree.nodes.get(bwd)
-        if not node or not node.parent_id:
-            break
-        window_ids.add(node.parent_id)
-        bwd = node.parent_id
-
-    # For expanded branches, include their nodes
-    for branch_id in expanded:
-        branch = state.tree.branches.get(branch_id)
-        if not branch:
-            continue
-        for nid, node in state.tree.nodes.items():
-            if node.branch_id == branch_id:
-                window_ids.add(nid)
-
-    # Build collapsed branch summaries for non-expanded branches with nodes outside window
-    all_branch_ids: set[str] = set()
-    for node in state.tree.nodes.values():
-        all_branch_ids.add(node.branch_id)
-
-    collapsed_branches = []
-    for branch_id in all_branch_ids:
-        if branch_id == state.tree.active_branch_id:
-            continue
-        if branch_id in expanded:
-            continue
-        branch = state.tree.branches.get(branch_id)
-        if not branch:
-            continue
-        # Count nodes and flags on this branch
-        branch_nodes = [n for n in state.tree.nodes.values() if n.branch_id == branch_id]
-        if not branch_nodes:
-            continue
-        # Check if any branch nodes are already in the window
-        branch_in_window = any(n.id in window_ids for n in branch_nodes)
-        if branch_in_window and len(branch_nodes) <= radius:
-            # Small branch already visible, include all
-            for n in branch_nodes:
-                window_ids.add(n.id)
-            continue
-        node_count = len(branch_nodes)
-        flag_count = sum(len(n.flags) for n in branch_nodes)
-        timestamps = [n.timestamp for n in branch_nodes if n.timestamp > 0]
-        time_range = [min(timestamps), max(timestamps)] if timestamps else [0, 0]
-        collapsed_branches.append({
-            "branchId": branch_id,
-            "parentNodeId": branch.parent_node_id,
-            "nodeCount": node_count,
-            "flagCount": flag_count,
-            "timeRange": time_range,
-            "label": branch.label or branch_id,
-        })
-
-    # Build windowed node dict
-    window_nodes = {}
-    for nid in window_ids:
-        if nid in state.tree.nodes:
-            window_nodes[nid] = state.tree.nodes[nid].model_dump()
-
-    # Stats
-    total_flags = sum(len(n.flags) for n in state.tree.nodes.values())
-    all_timestamps = [n.timestamp for n in state.tree.nodes.values() if n.timestamp > 0]
-    stats = {
-        "totalNodes": len(state.tree.nodes),
-        "totalBranches": len(state.tree.branches),
-        "totalFlags": total_flags,
-        "timeRange": [min(all_timestamps), max(all_timestamps)] if all_timestamps else [0, 0],
-    }
-
+    The flat model sends all messages in the snapshot. Windowing is handled
+    by the virtualizer in the frontend.
+    """
+    total_flags = sum(len(n.flags) for n in state.messages)
+    all_timestamps = [n.timestamp for n in state.messages if n.timestamp > 0]
     await ws.send_text(json.dumps({
         "type": "tree.window",
         "payload": {
-            "nodes": window_nodes,
-            "collapsedBranches": collapsed_branches,
-            "stats": stats,
-            "rootPath": list(path_ids),
+            "nodes": {},
+            "collapsedBranches": [],
+            "stats": {
+                "totalNodes": len(state.messages),
+                "totalBranches": 1,
+                "totalFlags": total_flags,
+                "timeRange": [min(all_timestamps), max(all_timestamps)] if all_timestamps else [0, 0],
+            },
         },
     }))
 
@@ -1592,11 +1409,11 @@ async def get_moments():
             for v in json.load(f):
                 verified_indices.add(v["index"])
                 verified_data[v["index"]] = v
-    # Build probe text -> tree node ID lookup (moments use original UUIDs, tree uses sequential IDs)
+    # Build probe text -> message ID lookup
     probe_to_node = {}
-    for nid, node in state.tree.nodes.items():
+    for node in state.messages:
         if node.role == "user":
-            probe_to_node[node.content.strip()] = nid
+            probe_to_node[node.content.strip()] = node.id
 
     return [{
         "index": m["index"],
@@ -1639,8 +1456,8 @@ async def delete_moment(index: int):
                     entry.flags = []
                     break
         elif source_id and um.get("source") == "transcript":
-            if source_id in state.tree.nodes:
-                state.tree.nodes[source_id].flags = []
+            if source_id in _msg_index:
+                _msg_index[source_id].flags = []
 
     deleted_moment_indices.add(index)
     user_moments[:] = [um for um in user_moments if um["index"] != index]
@@ -1671,8 +1488,8 @@ async def get_viewport():
     """What is the user currently looking at?"""
     node_content = ""
     nid = user_viewport["conversationNode"]
-    if nid and nid in state.tree.nodes:
-        node_content = state.tree.nodes[nid].content[:200]
+    if nid and nid in _msg_index:
+        node_content = _msg_index[nid].content[:200]
     return {**user_viewport, "nodeContent": node_content}
 
 
@@ -1709,27 +1526,21 @@ async def load_persisted_data():
     _load_deleted_moments()
     _load_user_moments()
 
-    # Load persisted arena chat nodes into the state tree
+    # Load persisted arena chat nodes into the flat message list
     arena_nodes = _load_arena_chat()
     if arena_nodes:
-        prev_id = state.tree.active_node_id
         for nd in arena_nodes:
             node = ConversationNode.model_validate(nd)
-            if node.id not in state.tree.nodes:
-                state.tree.nodes[node.id] = node
+            if node.id not in _msg_index:
+                state.messages.append(node)
+                _msg_index[node.id] = node
                 _arena_node_ids.add(node.id)
-                if prev_id and prev_id in state.tree.nodes:
-                    parent = state.tree.nodes[prev_id]
-                    if node.id not in parent.children:
-                        parent.children.append(node.id)
-                prev_id = node.id
-        if prev_id:
-            state.tree.active_node_id = prev_id
         log.info("Loaded %d arena chat nodes from sidecar", len(arena_nodes))
     # If ARENA_AGENT is set to something other than knight-bio, switch on startup
     _tail_offset = None
     if _current_agent != "knight-bio":
         state, _tail_offset = _build_agent_state(_current_agent)
+        _rebuild_msg_index()
         log.info("Startup: loaded state for agent %s", _current_agent)
 
     _load_flags()
@@ -1926,13 +1737,13 @@ def _get_updates_path_for_session(agent_name: str, session_id: str) -> Path | No
     return None
 
 
-def _build_agent_state(agent_name: str, session_id: str | None = None) -> tuple[StateSnapshot, int | None]:
-    """Build a StateSnapshot for a named agent from their session data.
+def _build_agent_state(agent_name: str, session_id: str | None = None) -> tuple[FlatState, int | None]:
+    """Build a FlatState for a named agent from their session data.
 
     Returns (state, tail_offset) where tail_offset is the byte position
     the tail parse started from (for gap-free LiveTailer handoff).
     """
-    from updates_parser import build_state_from_updates
+    from updates_parser import build_flat_messages
     from notebook_parser import build_notebook
 
     if session_id:
@@ -1944,25 +1755,15 @@ def _build_agent_state(agent_name: str, session_id: str | None = None) -> tuple[
 
     tail_offset = None
     if updates_path:
-        tail_bytes = 5 * 1024 * 1024  # 5MB — matches history endpoint default
-        log.info("Loading updates for %s from: %s (tail-only, %dMB)", agent_name, updates_path, tail_bytes // (1024*1024))
-        st = build_state_from_updates(str(updates_path), label=agent_name, tail_only=True, tail_bytes=tail_bytes)
+        tail_bytes = 5 * 1024 * 1024  # 5MB
+        log.info("Loading updates for %s from: %s (flat, tail-only, %dMB)", agent_name, updates_path, tail_bytes // (1024*1024))
+        messages = build_flat_messages(str(updates_path), agent_label=agent_name, tail_only=True, tail_bytes=tail_bytes)
+        st = FlatState(messages=messages)
         file_size = os.path.getsize(str(updates_path))
         tail_offset = max(0, file_size - tail_bytes)
     else:
         log.info("No session data for %s, creating empty state", agent_name)
-        st = StateSnapshot(
-            tree=ConversationTree(
-                branches={"main": Branch(id="main", root_node_id="", label=agent_name)},
-                nodes={},
-                root_node_id="",
-                active_branch_id="main",
-                active_node_id="",
-            ),
-            notebook=Notebook(entries=[]),
-            prompts=[],
-            artifacts=[],
-        )
+        st = FlatState()
 
     if notebook_path.exists():
         st.notebook = build_notebook(str(notebook_path))
@@ -1986,8 +1787,8 @@ async def switch_agent(body: dict):
     session_id = body.get("sessionId")
     log.info("Switching arena to agent: %s (session: %s)", agent_name, session_id or "current")
     _arena_node_ids.clear()
-    _arena_turn_active = False
     state, tail_offset = _build_agent_state(agent_name, session_id=session_id)
+    _rebuild_msg_index()
     _current_agent = agent_name
     _load_flags()
 
@@ -2026,14 +1827,14 @@ async def get_agent_notebook(name: str):
 
 @app.get("/api/agent/{name}/history")
 async def get_agent_history(name: str, sessionId: str | None = None, tailMB: int = 5):
-    """Load a specific agent's conversation tree for history browsing.
+    """Load a specific agent's conversation history as a flat message list.
 
     Uses tail-based loading for performance (large files can be 800MB+).
     Optional sessionId query param loads a specific historical session.
     tailMB controls how much of the file to read (default 5MB = ~50+ turns).
     Returns cursor (byte offset) for pagination and totalNodes estimate.
     """
-    from updates_parser import build_state_from_updates, count_conversation_turns
+    from updates_parser import build_flat_messages, count_conversation_turns
     if sessionId:
         updates_path = _get_updates_path_for_session(name, sessionId)
     else:
@@ -2043,19 +1844,18 @@ async def get_agent_history(name: str, sessionId: str | None = None, tailMB: int
     tail_bytes = max(1, min(tailMB, 50)) * 1024 * 1024
     file_size = updates_path.stat().st_size
     use_tail = file_size > tail_bytes
-    st = await asyncio.to_thread(
-        build_state_from_updates, str(updates_path), label=name,
+    messages = await asyncio.to_thread(
+        build_flat_messages, str(updates_path), agent_label=name,
         tail_only=use_tail, tail_bytes=tail_bytes
     )
-    # Cursor for pagination: byte offset where tail started
     cursor = max(0, file_size - tail_bytes) if use_tail else 0
-    # Count total turns for virtualizer height (cached per session)
-    total_nodes = len(st.tree.nodes)
+    total_nodes = len(messages)
     if use_tail:
         total_nodes_est, _ = await asyncio.to_thread(count_conversation_turns, str(updates_path))
         total_nodes = total_nodes_est
     return {
-        "status": "ok", "agent": name, "tree": st.tree.model_dump(),
+        "status": "ok", "agent": name,
+        "messages": [m.model_dump() for m in messages],
         "truncated": use_tail, "fileSize": file_size,
         "cursor": cursor, "totalNodes": total_nodes,
     }
@@ -2065,10 +1865,9 @@ async def get_agent_history(name: str, sessionId: str | None = None, tailMB: int
 async def get_agent_history_page(name: str, before: int, limit: int = 50, sessionId: str | None = None):
     """Load a page of older history entries before the given byte offset.
 
-    Returns entries as flat nodes (not a full tree) + new cursor.
-    Cursor of 0 means beginning of file reached.
+    Returns flat messages + new cursor. Cursor of 0 means beginning of file reached.
     """
-    from updates_parser import parse_updates_page, build_tree_from_updates
+    from updates_parser import parse_updates_page, entries_to_messages
     if sessionId:
         updates_path = _get_updates_path_for_session(name, sessionId)
     else:
@@ -2079,9 +1878,10 @@ async def get_agent_history_page(name: str, before: int, limit: int = 50, sessio
         parse_updates_page, str(updates_path), before_offset=before,
         limit=min(limit, 200), agent_label=name
     )
-    tree = build_tree_from_updates(entries, label=name)
+    messages = entries_to_messages(entries, agent_label=name)
     return {
-        "status": "ok", "agent": name, "tree": tree.model_dump(),
+        "status": "ok", "agent": name,
+        "messages": [m.model_dump() for m in messages],
         "cursor": new_cursor, "nodeCount": len(entries),
     }
 
@@ -2159,7 +1959,8 @@ async def adapter_response(body: dict):
     content = body.get("content", "")
     thinking = body.get("thinking")
 
-    if node_id not in state.tree.nodes:
+    msg = _msg_index.get(node_id)
+    if not msg:
         from fastapi.responses import JSONResponse
         return JSONResponse(
             status_code=404,
@@ -2171,7 +1972,7 @@ async def adapter_response(body: dict):
     if _pending_arena_node_id == node_id:
         _pending_arena_node_id = None
 
-    node = state.tree.nodes[node_id]
+    node = msg
     node.content = content
     if thinking:
         node.thinking = thinking
@@ -2207,10 +2008,11 @@ async def adapter_chunk(body: dict):
     content = body.get("content", "")
     chunk_type = body.get("type", "text")
 
-    if node_id not in state.tree.nodes:
+    msg = _msg_index.get(node_id)
+    if not msg:
         return {"status": "error", "message": f"node {node_id} not found"}
 
-    node = state.tree.nodes[node_id]
+    node = msg
 
     if chunk_type == "text":
         node.content = (node.content or "") + content
@@ -2710,7 +2512,7 @@ from fastapi.responses import PlainTextResponse
 @app.get("/api/export/training-data")
 async def export_training_data(format: str = "jsonl"):
     """Export corrections + episode scores as GRPO-format JSONL."""
-    tree_nodes = {nid: n.model_dump() for nid, n in state.tree.nodes.items()} if state.tree.nodes else None
+    tree_nodes = {m.id: m.model_dump() for m in state.messages} if state.messages else None
     jsonl = export_all_jsonl(tree_nodes=tree_nodes, episode_scores=_episode_scores)
 
     if format == "json":
@@ -2770,12 +2572,13 @@ async def get_models():
 
 @app.get("/api/tree")
 async def get_tree():
-    return state.tree.model_dump()
+    """Legacy tree endpoint — returns messages as a flat list."""
+    return {"messages": [m.model_dump() for m in state.messages]}
 
 
 @app.get("/api/tree/node/{node_id}")
 async def get_node(node_id: str):
-    node = state.tree.nodes.get(node_id)
+    node = _msg_index.get(node_id)
     if not node:
         return {"error": "not found"}
     return node.model_dump()
@@ -2784,7 +2587,7 @@ async def get_node(node_id: str):
 @app.get("/api/flags")
 async def get_flags():
     flags = []
-    for node in state.tree.nodes.values():
+    for node in state.messages:
         for f in node.flags:
             d = f.model_dump()
             d["source"] = "node"
@@ -2802,7 +2605,7 @@ async def get_flags():
 async def delete_all_flags():
     """Remove all flags from nodes, notebook entries, and orphan storage."""
     count = 0
-    for node in state.tree.nodes.values():
+    for node in state.messages:
         count += len(node.flags)
         node.flags.clear()
     for entry in state.notebook.entries:
@@ -2878,7 +2681,7 @@ async def create_artifact(body: dict):
     """Create or register an artifact."""
     from models import Artifact
     artifact = Artifact(
-        branch_id=body.get("branchId", state.tree.active_branch_id),
+        branch_id=body.get("branchId", "main"),
         type=body.get("type", "presentation"),
         filename=body.get("filename", ""),
         title=body.get("title", "Untitled"),
@@ -3136,7 +2939,10 @@ async def load_updates_session(body: dict):
     if not filepath or not Path(filepath).is_file():
         return {"error": f"file not found: {filepath}"}
 
-    state = build_state_from_updates(filepath, label=body.get("label", "Session"))
+    from updates_parser import build_flat_messages
+    messages = build_flat_messages(filepath, agent_label=body.get("label", "Session"))
+    state = FlatState(messages=messages)
+    _rebuild_msg_index()
 
     notebook_path = body.get("notebookPath")
     if notebook_path and Path(notebook_path).is_file():
@@ -3145,12 +2951,12 @@ async def load_updates_session(body: dict):
 
     await broadcast({
         "type": "state.snapshot",
-        "payload": state.model_dump(),
+        "payload": _state_snapshot_payload(),
     })
     return {
         "status": "ok",
-        "nodes": len(state.tree.nodes),
-        "branches": len(state.tree.branches),
+        "nodes": len(state.messages),
+        "branches": 1,
         "notebookEntries": len(state.notebook.entries),
     }
 
@@ -3159,15 +2965,16 @@ async def load_updates_session(body: dict):
 async def load_demo():
     """Load curated demo dataset (6 flagged moments, 6 training prompts, 33 notebook entries)."""
     global state
-    state = build_demo_state()
+    state = FlatState()  # Demo not supported in flat model yet
+    _rebuild_msg_index()
     await broadcast({
         "type": "state.snapshot",
-        "payload": state.model_dump(),
+        "payload": _state_snapshot_payload(),
     })
     return {
         "status": "ok",
-        "nodes": len(state.tree.nodes),
-        "flags": sum(len(n.flags) for n in state.tree.nodes.values()),
+        "nodes": len(state.messages),
+        "flags": sum(len(n.flags) for n in state.messages),
         "prompts": len(state.prompts),
         "notebookEntries": len(state.notebook.entries),
     }

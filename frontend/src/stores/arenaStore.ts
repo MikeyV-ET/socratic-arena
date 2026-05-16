@@ -1,7 +1,6 @@
 import type React from "react";
 import { create } from "zustand";
 import type {
-  ConversationTree,
   ConversationNode,
   Notebook,
   TrainingPrompt,
@@ -21,20 +20,12 @@ export interface PanelInfo {
   seleniumPort?: number;
 }
 
-const emptyTree: ConversationTree = {
-  id: "",
-  branches: {},
-  nodes: {},
-  rootNodeId: "",
-  activeBranchId: "main",
-  activeNodeId: "",
-};
-
 const emptyNotebook: Notebook = { entries: [] };
 
 interface ArenaState {
-  // Core data
-  tree: ConversationTree;
+  // Core data — flat ordered message list (replaces ConversationTree)
+  messages: ConversationNode[];
+  _msgIndex: Map<string, ConversationNode>;
   notebook: Notebook;
   prompts: TrainingPrompt[];
   artifacts: Artifact[];
@@ -48,7 +39,7 @@ interface ArenaState {
   streamingContent: string;
   streamingThinking: string;
 
-  // Tree windowing
+  // Tree windowing (legacy — kept for compat, mostly no-ops)
   expandedBranches: Set<string>;
   toggleBranch: (branchId: string) => void;
   requestTreeWindow: (centerNodeId: string) => void;
@@ -100,12 +91,12 @@ interface ArenaState {
   notebookAgent: string;
   momentsAgent: string;
   agents: { name: string; hasNotebook: boolean; hasSession: boolean; healthStatus: string | null }[];
-  historyTree: ConversationTree | null;
+  historyMessages: ConversationNode[];
   historyCursor: number;
   historyTotalNodes: number;
   historyLoading: boolean;
 
-  // Live pane history (parallels history pane state but operates on tree)
+  // Live pane history
   liveCursor: number;
   liveTotalNodes: number;
   liveHistoryLoading: boolean;
@@ -114,17 +105,17 @@ interface ArenaState {
   setNotebookAgent: (agent: string) => void;
   setMomentsAgent: (agent: string) => void;
   setAgents: (agents: ArenaState["agents"]) => void;
-  setHistoryTree: (tree: ConversationTree | null) => void;
+  setHistoryMessages: (messages: ConversationNode[]) => void;
   setHistoryMeta: (cursor: number, totalNodes: number) => void;
-  prependHistoryNodes: (tree: ConversationTree, newCursor: number) => void;
+  prependHistoryMessages: (messages: ConversationNode[], newCursor: number) => void;
   setHistoryLoading: (loading: boolean) => void;
   getHistoryBranchNodes: () => ConversationNode[];
 
   // Live pane history actions
   setLiveMeta: (cursor: number, totalNodes: number) => void;
   setLiveHistoryLoading: (loading: boolean) => void;
-  initLiveHistory: (historyTree: ConversationTree, cursor: number, totalNodes: number) => void;
-  prependLiveNodes: (olderTree: ConversationTree, newCursor: number) => void;
+  initLiveHistory: (messages: ConversationNode[], cursor: number, totalNodes: number) => void;
+  prependLiveMessages: (olderMessages: ConversationNode[], newCursor: number) => void;
 
   // Connection
   connected: boolean;
@@ -136,15 +127,14 @@ interface ArenaState {
 
   // Derived helpers
   getActiveBranchNodes: () => ConversationNode[];
-  getNodePath: (nodeId: string) => ConversationNode[];
   getNodeById: (nodeId: string) => ConversationNode | undefined;
 
   // Actions
-  setTree: (tree: ConversationTree) => void;
+  setMessages: (messages: ConversationNode[]) => void;
   setNotebook: (notebook: Notebook) => void;
   setPrompts: (prompts: TrainingPrompt[]) => void;
   setArtifacts: (artifacts: Artifact[]) => void;
-  applySnapshot: (payload: { tree?: ConversationTree; notebook?: Notebook; prompts?: TrainingPrompt[]; artifacts?: Artifact[] }) => void;
+  applySnapshot: (payload: { messages?: ConversationNode[]; notebook?: Notebook; prompts?: TrainingPrompt[]; artifacts?: Artifact[] }) => void;
   switchBranch: (branchId: string) => void;
   selectNode: (nodeId: string) => void;
   scrollToNode: (nodeId: string) => void;
@@ -168,7 +158,7 @@ interface ArenaState {
   appendStreamChunk: (nodeId: string, content: string) => void;
   appendThinkingChunk: (nodeId: string, content: string) => void;
   finalizeStream: (nodeId: string) => void;
-  addLiveNode: (node: ConversationNode, parentId: string | null, advance?: boolean) => void;
+  addLiveNode: (node: ConversationNode) => void;
   updateLiveNode: (nodeId: string, content: string, thinking?: string | null) => void;
 
   // Prompt test (shared via main WebSocket, no duplicate connection)
@@ -207,9 +197,16 @@ interface ArenaState {
 
 const _viewportTimers: Record<string, ReturnType<typeof setTimeout>> = {};
 
+function buildIndex(messages: ConversationNode[]): Map<string, ConversationNode> {
+  const map = new Map<string, ConversationNode>();
+  for (const m of messages) map.set(m.id, m);
+  return map;
+}
+
 export const useArenaStore = create<ArenaState>((set, get) => ({
   // Start empty — WebSocket state.snapshot populates on connect
-  tree: emptyTree,
+  messages: [],
+  _msgIndex: new Map(),
   notebook: emptyNotebook,
   prompts: [],
   artifacts: [],
@@ -298,189 +295,56 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
   notebookAgent: "",
   momentsAgent: "",
   agents: [],
-  historyTree: null,
+  historyMessages: [],
   historyCursor: 0,
   historyTotalNodes: 0,
   historyLoading: false,
   liveCursor: 0,
   liveTotalNodes: 0,
   liveHistoryLoading: false,
-  setCurrentAgent: (agent) => set({ currentAgent: agent, historyAgent: agent, notebookAgent: agent, momentsAgent: agent, historyTree: null, historyCursor: 0, historyTotalNodes: 0, liveCursor: 0, liveTotalNodes: 0 }),
+  setCurrentAgent: (agent) => set({ currentAgent: agent, historyAgent: agent, notebookAgent: agent, momentsAgent: agent, historyMessages: [], historyCursor: 0, historyTotalNodes: 0, liveCursor: 0, liveTotalNodes: 0 }),
   setHistoryAgent: (agent) => set({ historyAgent: agent }),
   setNotebookAgent: (agent) => set({ notebookAgent: agent }),
   setMomentsAgent: (agent) => set({ momentsAgent: agent }),
   setAgents: (agents) => set({ agents }),
-  setHistoryTree: (tree) => set({ historyTree: tree }),
+  setHistoryMessages: (messages) => set({ historyMessages: messages }),
   setHistoryMeta: (cursor, totalNodes) => set({ historyCursor: cursor, historyTotalNodes: totalNodes }),
   setHistoryLoading: (loading) => set({ historyLoading: loading }),
   setLiveMeta: (cursor, totalNodes) => set({ liveCursor: cursor, liveTotalNodes: totalNodes }),
   setLiveHistoryLoading: (loading) => set({ liveHistoryLoading: loading }),
-  initLiveHistory: (historyTree, cursor, totalNodes) => set((state) => {
-    const wsTree = state.tree;
-    const mergedNodes = { ...historyTree.nodes, ...wsTree.nodes };
-    const olderRoot = historyTree.rootNodeId;
-    const newBranches = { ...wsTree.branches };
-    const activeBranch = newBranches[wsTree.activeBranchId];
-    if (olderRoot) {
-      if (activeBranch) {
-        newBranches[wsTree.activeBranchId] = { ...activeBranch, rootNodeId: olderRoot };
-      } else {
-        // History fetched before first state.snapshot — create the branch entry.
-        // Use historyTree's branch if available, otherwise synthesize one.
-        const histBranch = historyTree.branches?.[historyTree.activeBranchId ?? wsTree.activeBranchId];
-        newBranches[wsTree.activeBranchId] = histBranch
-          ? { ...histBranch, rootNodeId: olderRoot }
-          : { id: wsTree.activeBranchId, rootNodeId: olderRoot, label: "main", parentNodeId: "" };
-      }
-    }
+  initLiveHistory: (historyMessages, cursor, totalNodes) => set((state) => {
+    // Prepend history messages before current live messages, deduplicating by ID
+    const existingIds = new Set(state.messages.map((m) => m.id));
+    const newMsgs = historyMessages.filter((m) => !existingIds.has(m.id));
+    const merged = [...newMsgs, ...state.messages];
     return {
-      tree: {
-        ...wsTree,
-        nodes: mergedNodes,
-        branches: newBranches,
-        rootNodeId: olderRoot || wsTree.rootNodeId,
-      },
+      messages: merged,
+      _msgIndex: buildIndex(merged),
       liveCursor: cursor,
       liveTotalNodes: totalNodes,
     };
   }),
-  prependLiveNodes: (olderTree, newCursor) => set((state) => {
-    const existing = state.tree;
-    if (!existing) return { tree: olderTree, liveCursor: newCursor };
-    const mergedNodes = { ...olderTree.nodes, ...existing.nodes };
-    const olderRoot = olderTree.rootNodeId;
-    const existingRoot = existing.rootNodeId;
-    if (mergedNodes[existingRoot] && olderRoot) {
-      let leaf = olderRoot;
-      const visited = new Set<string>();
-      while (mergedNodes[leaf] && mergedNodes[leaf].children.length > 0 && !visited.has(leaf)) {
-        visited.add(leaf);
-        leaf = mergedNodes[leaf].children[mergedNodes[leaf].children.length - 1];
-      }
-      if (leaf && mergedNodes[leaf] && !mergedNodes[leaf].children.includes(existingRoot)) {
-        mergedNodes[leaf] = { ...mergedNodes[leaf], children: [...mergedNodes[leaf].children, existingRoot] };
-      }
-      if (mergedNodes[existingRoot]) {
-        mergedNodes[existingRoot] = { ...mergedNodes[existingRoot], parentId: leaf };
-      }
-    }
-    // Update branch rootNodeId so getActiveBranchNodes walks from the oldest node
-    const newBranches = { ...existing.branches };
-    const activeBranch = newBranches[existing.activeBranchId];
-    if (activeBranch && olderRoot) {
-      newBranches[existing.activeBranchId] = { ...activeBranch, rootNodeId: olderRoot };
-    }
+  prependLiveMessages: (olderMessages, newCursor) => set((state) => {
+    const existingIds = new Set(state.messages.map((m) => m.id));
+    const newMsgs = olderMessages.filter((m) => !existingIds.has(m.id));
+    const merged = [...newMsgs, ...state.messages];
     return {
-      tree: {
-        ...existing,
-        nodes: mergedNodes,
-        branches: newBranches,
-        rootNodeId: olderRoot || existing.rootNodeId,
-      },
+      messages: merged,
+      _msgIndex: buildIndex(merged),
       liveCursor: newCursor,
     };
   }),
-  prependHistoryNodes: (olderTree, newCursor) => set((state) => {
-    const existing = state.historyTree;
-    if (!existing) return { historyTree: olderTree, historyCursor: newCursor };
-    // Merge: older nodes go before existing nodes
-    const mergedNodes = { ...olderTree.nodes, ...existing.nodes };
-    // Find new root: olderTree's root is the oldest node
-    const olderRoot = olderTree.rootNodeId;
-    // Connect older tree's leaf to existing tree's root
-    const existingRoot = existing.rootNodeId;
-    if (mergedNodes[existingRoot] && olderRoot) {
-      // Find the last node in the older branch (deepest child along main branch)
-      let leaf = olderRoot;
-      const visited = new Set<string>();
-      while (mergedNodes[leaf] && mergedNodes[leaf].children.length > 0 && !visited.has(leaf)) {
-        visited.add(leaf);
-        leaf = mergedNodes[leaf].children[mergedNodes[leaf].children.length - 1];
-      }
-      if (leaf && mergedNodes[leaf] && !mergedNodes[leaf].children.includes(existingRoot)) {
-        mergedNodes[leaf] = { ...mergedNodes[leaf], children: [...mergedNodes[leaf].children, existingRoot] };
-      }
-      if (mergedNodes[existingRoot]) {
-        mergedNodes[existingRoot] = { ...mergedNodes[existingRoot], parentId: leaf };
-      }
-    }
-    // Update branch rootNodeId so getHistoryBranchNodes walks from the oldest node
-    const newBranches = { ...existing.branches };
-    const activeBranch = newBranches[existing.activeBranchId];
-    if (activeBranch && olderRoot) {
-      newBranches[existing.activeBranchId] = { ...activeBranch, rootNodeId: olderRoot };
-    }
-    const mergedTree: ConversationTree = {
-      ...existing,
-      nodes: mergedNodes,
-      branches: newBranches,
-      rootNodeId: olderRoot || existing.rootNodeId,
+  prependHistoryMessages: (olderMessages, newCursor) => set((state) => {
+    const existingIds = new Set(state.historyMessages.map((m) => m.id));
+    const newMsgs = olderMessages.filter((m) => !existingIds.has(m.id));
+    return {
+      historyMessages: [...newMsgs, ...state.historyMessages],
+      historyCursor: newCursor,
     };
-    return { historyTree: mergedTree, historyCursor: newCursor };
   }),
 
   getHistoryBranchNodes: () => {
-    const state = get();
-    const t = state.historyTree;
-    if (!t) return [];
-    const branch = t.branches[t.activeBranchId];
-    if (!branch) return [];
-
-    // Build ancestors from selectedNodeId (or activeNodeId) so the walk
-    // follows the path toward the target node at fork points.
-    const targetId = state.selectedNodeId || t.activeNodeId;
-    const ancestors = new Set<string>();
-    let anc: ConversationNode | undefined = targetId ? t.nodes[targetId] : undefined;
-    while (anc && !ancestors.has(anc.id)) {
-      ancestors.add(anc.id);
-      anc = anc.parentId ? t.nodes[anc.parentId] : undefined;
-    }
-
-    const pickNext = (children: string[]): string | undefined =>
-      children.find((cid) => ancestors.has(cid)) ??
-      children.find((cid) => t.nodes[cid]?.branchId === t.activeBranchId);
-
-    const nodes: ConversationNode[] = [];
-
-    const getNodePath = (nodeId: string): ConversationNode[] => {
-      const path: ConversationNode[] = [];
-      const seen = new Set<string>();
-      let current: ConversationNode | undefined = t.nodes[nodeId];
-      while (current && !seen.has(current.id)) {
-        seen.add(current.id);
-        path.unshift(current);
-        current = current.parentId ? t.nodes[current.parentId] : undefined;
-      }
-      return path;
-    };
-
-    if (branch.parentNodeId) {
-      nodes.push(...getNodePath(branch.parentNodeId));
-      const forkPoint = t.nodes[branch.parentNodeId];
-      if (forkPoint) {
-        const visited = new Set<string>();
-        let current: ConversationNode | undefined;
-        const nextOnBranch = pickNext(forkPoint.children);
-        current = nextOnBranch ? t.nodes[nextOnBranch] : undefined;
-        while (current && !visited.has(current.id)) {
-          visited.add(current.id);
-          nodes.push(current);
-          const nextId = pickNext(current.children);
-          current = nextId ? t.nodes[nextId] : undefined;
-        }
-      }
-    } else {
-      const visited = new Set<string>();
-      let current: ConversationNode | undefined = t.nodes[branch.rootNodeId];
-      while (current && !visited.has(current.id)) {
-        visited.add(current.id);
-        nodes.push(current);
-        const nextId = pickNext(current.children);
-        current = nextId ? t.nodes[nextId] : undefined;
-      }
-    }
-
-    return nodes;
+    return get().historyMessages;
   },
 
   theme: (localStorage.getItem("arena-theme") as "dark" | "light") || "dark",
@@ -511,40 +375,8 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
       promptDraft: { ...state.promptDraft, [field]: value },
     })),
 
-  toggleBranch: (branchId) => {
-    set((state) => {
-      const next = new Set(state.expandedBranches);
-      if (next.has(branchId)) next.delete(branchId);
-      else next.add(branchId);
-      return { expandedBranches: next };
-    });
-    const sendWs = get().sendWs;
-    const { selectedNodeId, expandedBranches } = get();
-    if (sendWs) {
-      sendWs({
-        type: "tree.window",
-        payload: {
-          centerNodeId: selectedNodeId || get().tree.rootNodeId,
-          radius: 50,
-          expandedBranches: Array.from(expandedBranches),
-        },
-      });
-    }
-  },
-
-  requestTreeWindow: (centerNodeId) => {
-    const sendWs = get().sendWs;
-    if (sendWs) {
-      sendWs({
-        type: "tree.window",
-        payload: {
-          centerNodeId,
-          radius: 50,
-          expandedBranches: Array.from(get().expandedBranches),
-        },
-      });
-    }
-  },
+  toggleBranch: () => { /* no-op in flat model */ },
+  requestTreeWindow: () => { /* no-op in flat model */ },
   selectedPromptId: null,
   streamingNodeId: null,
   streamingContent: "",
@@ -561,131 +393,51 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
   },
 
   getActiveBranchNodes: () => {
-    const { tree } = get();
-    const branch = tree.branches[tree.activeBranchId];
-    if (!branch) return [];
-
-    // Build ancestor set from activeNodeId to root so the walk
-    // follows the path toward the current active node at branch points.
-    // Guard against parentId cycles (data corruption) with visited set.
-    const ancestors = new Set<string>();
-    let anc: ConversationNode | undefined = tree.nodes[tree.activeNodeId];
-    while (anc && !ancestors.has(anc.id)) {
-      ancestors.add(anc.id);
-      anc = anc.parentId ? tree.nodes[anc.parentId] : undefined;
-    }
-
-    const pickNext = (children: string[]): string | undefined =>
-      children.find((cid) => ancestors.has(cid)) ??
-      children.find((cid) => tree.nodes[cid]?.branchId === tree.activeBranchId);
-
-    const nodes: ConversationNode[] = [];
-
-    if (branch.parentNodeId) {
-      nodes.push(...get().getNodePath(branch.parentNodeId));
-
-      const forkPoint = tree.nodes[branch.parentNodeId];
-      if (forkPoint) {
-        const visited = new Set<string>();
-        let current: ConversationNode | undefined;
-        const nextOnBranch = pickNext(forkPoint.children);
-        current = nextOnBranch ? tree.nodes[nextOnBranch] : undefined;
-        while (current && !visited.has(current.id)) {
-          visited.add(current.id);
-          nodes.push(current);
-          const nextId = pickNext(current.children);
-          current = nextId ? tree.nodes[nextId] : undefined;
-        }
-      }
-    } else {
-      const visited = new Set<string>();
-      let current: ConversationNode | undefined = tree.nodes[branch.rootNodeId];
-      while (current && !visited.has(current.id)) {
-        visited.add(current.id);
-        nodes.push(current);
-        const nextId = pickNext(current.children);
-        current = nextId ? tree.nodes[nextId] : undefined;
-      }
-    }
-
-    return nodes;
-  },
-
-  getNodePath: (nodeId: string) => {
-    const { tree } = get();
-    const path: ConversationNode[] = [];
-    const visited = new Set<string>();
-    let current: ConversationNode | undefined = tree.nodes[nodeId];
-    while (current && !visited.has(current.id)) {
-      visited.add(current.id);
-      path.unshift(current);
-      current = current.parentId ? tree.nodes[current.parentId] : undefined;
-    }
-    return path;
+    return get().messages;
   },
 
   getNodeById: (nodeId: string) => {
-    return get().tree.nodes[nodeId];
+    return get()._msgIndex.get(nodeId);
   },
 
-  setTree: (tree) => set({ tree }),
+  setMessages: (messages) => set({ messages, _msgIndex: buildIndex(messages) }),
   setNotebook: (notebook) => set({ notebook }),
   setPrompts: (prompts) => set({ prompts }),
   setArtifacts: (artifacts) => set({ artifacts }),
   applySnapshot: (payload) => set((state) => {
-    let treeUpdate: Partial<{ tree: ConversationTree }> = {};
-    if (payload.tree) {
-      // Merge: preserve client-side history nodes that aren't in the snapshot.
-      // The backend snapshot only has the recent tail; initLiveHistory/prependLiveNodes
-      // added older nodes that must survive snapshot updates.
-      const incoming = payload.tree;
-      const existing = state.tree;
-      const mergedNodes = { ...existing.nodes, ...incoming.nodes };
-      // Keep existing branch rootNodeId if it points to a node still in the tree
-      // (history prepend set it to an older root that the snapshot doesn't know about).
-      const newBranches = { ...incoming.branches };
-      const existingBranch = existing.branches[existing.activeBranchId];
-      const incomingBranch = newBranches[incoming.activeBranchId];
-      // Prefer existingBranch.rootNodeId; fall back to existing.rootNodeId
-      // (initLiveHistory may have set rootNodeId before any branch entry existed).
-      const preservedRoot = existingBranch?.rootNodeId ?? existing.rootNodeId;
-      if (incomingBranch && preservedRoot && mergedNodes[preservedRoot]) {
-        newBranches[incoming.activeBranchId] = { ...incomingBranch, rootNodeId: preservedRoot };
-      }
-      treeUpdate = {
-        tree: {
-          ...incoming,
-          nodes: mergedNodes,
-          branches: newBranches,
-          rootNodeId: mergedNodes[existing.rootNodeId] ? existing.rootNodeId : incoming.rootNodeId,
-        },
-      };
+    let msgUpdate: Record<string, unknown> = {};
+    if (payload.messages) {
+      // Merge: preserve client-side history messages that aren't in the snapshot.
+      // The backend snapshot only has the recent tail; initLiveHistory added older messages.
+      const incomingIds = new Set(payload.messages.map((m) => m.id));
+      const preserved = state.messages.filter((m) => !incomingIds.has(m.id));
+      const merged = [...preserved, ...payload.messages];
+      msgUpdate = { messages: merged, _msgIndex: buildIndex(merged) };
     }
-    // Propagate flag changes from snapshot to historyTree so the
-    // history pane re-renders when flags are created/deleted.
-    let historyTreeUpdate: Record<string, unknown> = {};
-    if (payload.tree && state.historyTree) {
-      const incomingNodes = payload.tree.nodes;
-      const histNodes = { ...state.historyTree.nodes };
+
+    // Propagate flag changes to history messages
+    if (payload.messages && state.historyMessages.length > 0) {
+      const incomingById = new Map(payload.messages.map((m) => [m.id, m]));
       let flagsChanged = false;
-      for (const nodeId of Object.keys(incomingNodes)) {
-        if (histNodes[nodeId]) {
-          const inFlags = (incomingNodes[nodeId] as { flags?: { id: string }[] }).flags || [];
-          const hFlags = (histNodes[nodeId] as { flags?: { id: string }[] }).flags || [];
+      const updatedHistory = state.historyMessages.map((hm) => {
+        const incoming = incomingById.get(hm.id);
+        if (incoming) {
+          const inFlags = incoming.flags || [];
+          const hFlags = hm.flags || [];
           if (inFlags.length !== hFlags.length || inFlags.some((f, i) => f.id !== hFlags[i]?.id)) {
-            histNodes[nodeId] = { ...histNodes[nodeId], flags: inFlags } as typeof histNodes[string];
             flagsChanged = true;
+            return { ...hm, flags: inFlags };
           }
         }
-      }
+        return hm;
+      });
       if (flagsChanged) {
-        historyTreeUpdate = { historyTree: { ...state.historyTree, nodes: histNodes } };
+        msgUpdate.historyMessages = updatedHistory;
       }
     }
 
     return {
-      ...treeUpdate,
-      ...historyTreeUpdate,
+      ...msgUpdate,
       ...(payload.notebook ? { notebook: payload.notebook } : {}),
       ...(payload.prompts ? { prompts: payload.prompts } : {}),
       ...(payload.artifacts ? { artifacts: payload.artifacts } : {}),
@@ -693,20 +445,16 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
     };
   }),
 
-  switchBranch: (branchId) => {
-    set((state) => ({
-      tree: { ...state.tree, activeBranchId: branchId },
-    }));
-    get().sendWs?.({ type: "branch.switch", payload: { branchId } });
+  switchBranch: (_branchId) => {
+    // No-op in flat model
   },
 
   selectNode: (nodeId) => set({ selectedNodeId: nodeId }),
   scrollToNode: (nodeId) => {
-    set((state) => ({
+    set({
       selectedNodeId: nodeId,
       scrollTargetId: nodeId,
-      tree: { ...state.tree, activeNodeId: nodeId },
-    }));
+    });
     get().sendWs?.({
       type: "viewport.focus",
       payload: { pane: "navigate", nodeId, source: "click" },
@@ -718,81 +466,45 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
 
   addFlag: (flag) =>
     set((state) => {
-      const node = state.tree.nodes[flag.nodeId];
-      const histNode = state.historyTree?.nodes?.[flag.nodeId];
-      if (!node && !histNode) return state;
-      const update: Partial<ArenaState> = {};
-      if (node) {
-        const updatedNode = { ...node, flags: [...node.flags, flag] };
-        update.tree = {
-          ...state.tree,
-          nodes: { ...state.tree.nodes, [flag.nodeId]: updatedNode },
-        };
-      }
-      if (histNode) {
-        update.historyTree = {
-          ...state.historyTree!,
-          nodes: {
-            ...state.historyTree!.nodes,
-            [flag.nodeId]: { ...histNode, flags: [...(histNode.flags || []), flag] },
-          },
-        };
-      }
-      return update;
+      const messages = state.messages.map((m) =>
+        m.id === flag.nodeId ? { ...m, flags: [...m.flags, flag] } : m
+      );
+      const historyMessages = state.historyMessages.map((m) =>
+        m.id === flag.nodeId ? { ...m, flags: [...(m.flags || []), flag] } : m
+      );
+      return { messages, _msgIndex: buildIndex(messages), historyMessages };
     }),
 
   removeFlag: (flagId) =>
     set((state) => {
-      const update: Partial<ArenaState> = {};
-      // Remove from tree
-      const newNodes = { ...state.tree.nodes };
-      for (const [nodeId, node] of Object.entries(newNodes)) {
-        if (node.flags.some((f) => f.id === flagId)) {
-          newNodes[nodeId] = { ...node, flags: node.flags.filter((f) => f.id !== flagId) };
-          break;
-        }
-      }
-      update.tree = { ...state.tree, nodes: newNodes };
-      // Remove from historyTree
-      if (state.historyTree) {
-        const histNodes = { ...state.historyTree.nodes };
-        for (const [nodeId, node] of Object.entries(histNodes)) {
-          if (node.flags?.some((f) => f.id === flagId)) {
-            histNodes[nodeId] = { ...node, flags: node.flags.filter((f) => f.id !== flagId) };
-            update.historyTree = { ...state.historyTree, nodes: histNodes };
-            break;
-          }
-        }
-      }
-      return update;
+      const messages = state.messages.map((m) =>
+        m.flags.some((f) => f.id === flagId)
+          ? { ...m, flags: m.flags.filter((f) => f.id !== flagId) }
+          : m
+      );
+      const historyMessages = state.historyMessages.map((m) =>
+        m.flags?.some((f) => f.id === flagId)
+          ? { ...m, flags: m.flags.filter((f) => f.id !== flagId) }
+          : m
+      );
+      return { messages, _msgIndex: buildIndex(messages), historyMessages };
     }),
 
   updateFlagNote: (flagId, note) =>
     set((state) => {
-      const update: Partial<ArenaState> = {};
       const patchFlags = (flags: Flag[]) =>
         flags.map((f) => (f.id === flagId ? { ...f, note } : f));
-      // Patch in tree
-      const newNodes = { ...state.tree.nodes };
-      for (const [nodeId, node] of Object.entries(newNodes)) {
-        if (node.flags.some((f) => f.id === flagId)) {
-          newNodes[nodeId] = { ...node, flags: patchFlags(node.flags) };
-          break;
-        }
-      }
-      update.tree = { ...state.tree, nodes: newNodes };
-      // Patch in historyTree
-      if (state.historyTree) {
-        const histNodes = { ...state.historyTree.nodes };
-        for (const [nodeId, node] of Object.entries(histNodes)) {
-          if (node.flags?.some((f) => f.id === flagId)) {
-            histNodes[nodeId] = { ...node, flags: patchFlags(node.flags) };
-            update.historyTree = { ...state.historyTree, nodes: histNodes };
-            break;
-          }
-        }
-      }
-      return update;
+      const messages = state.messages.map((m) =>
+        m.flags.some((f) => f.id === flagId)
+          ? { ...m, flags: patchFlags(m.flags) }
+          : m
+      );
+      const historyMessages = state.historyMessages.map((m) =>
+        m.flags?.some((f) => f.id === flagId)
+          ? { ...m, flags: patchFlags(m.flags) }
+          : m
+      );
+      return { messages, _msgIndex: buildIndex(messages), historyMessages };
     }),
 
   selectPrompt: (promptId) => set({ selectedPromptId: promptId }),
@@ -830,68 +542,41 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
 
   finalizeStream: (nodeId) =>
     set((state) => {
-      const node = state.tree.nodes[nodeId];
+      const node = state._msgIndex.get(nodeId);
       if (!node) return { streamingNodeId: null, streamingContent: "", streamingThinking: "" };
+      const messages = state.messages.map((m) =>
+        m.id === nodeId
+          ? { ...m, content: state.streamingContent || m.content, thinking: state.streamingThinking || m.thinking }
+          : m
+      );
       return {
-        tree: {
-          ...state.tree,
-          nodes: {
-            ...state.tree.nodes,
-            [nodeId]: {
-              ...node,
-              content: state.streamingContent || node.content,
-              thinking: state.streamingThinking || node.thinking,
-            },
-          },
-        },
+        messages,
+        _msgIndex: buildIndex(messages),
         streamingNodeId: null,
         streamingContent: "",
         streamingThinking: "",
       };
     }),
 
-  addLiveNode: (node, parentId, advance) =>
+  addLiveNode: (node) =>
     set((state) => {
-      const newNodes = { ...state.tree.nodes, [node.id]: node };
-      // Wire parent -> child
-      if (parentId && newNodes[parentId]) {
-        const parent = newNodes[parentId];
-        if (!parent.children.includes(node.id)) {
-          newNodes[parentId] = { ...parent, children: [...parent.children, node.id] };
-        }
-      }
-      // Advance activeNodeId if: explicitly requested (arena conversation nodes),
-      // or if this node extends the current path (parent is active node).
-      // Live-tailed nodes (advance=false) only advance if they extend the path,
-      // preventing drift to sibling branches.
-      const shouldAdvance = advance || !state.tree.activeNodeId || parentId === state.tree.activeNodeId;
-      return {
-        tree: {
-          ...state.tree,
-          nodes: newNodes,
-          activeNodeId: shouldAdvance ? node.id : state.tree.activeNodeId,
-          rootNodeId: state.tree.rootNodeId || node.id,
-        },
-      };
+      // Skip duplicates
+      if (state._msgIndex.has(node.id)) return state;
+      const messages = [...state.messages, node];
+      const idx = new Map(state._msgIndex);
+      idx.set(node.id, node);
+      return { messages, _msgIndex: idx };
     }),
 
   updateLiveNode: (nodeId, content, thinking) =>
     set((state) => {
-      const node = state.tree.nodes[nodeId];
-      if (!node) return state;
-      return {
-        tree: {
-          ...state.tree,
-          nodes: {
-            ...state.tree.nodes,
-            [nodeId]: {
-              ...node,
-              content,
-              ...(thinking != null ? { thinking } : {}),
-            },
-          },
-        },
-      };
+      if (!state._msgIndex.has(nodeId)) return state;
+      const messages = state.messages.map((m) =>
+        m.id === nodeId
+          ? { ...m, content, ...(thinking != null ? { thinking } : {}) }
+          : m
+      );
+      return { messages, _msgIndex: buildIndex(messages) };
     }),
 
     // Prompt test state

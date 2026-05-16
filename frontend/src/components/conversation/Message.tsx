@@ -13,7 +13,7 @@ interface MessageProps {
 
 export function Message({ node }: MessageProps) {
   const [showThinking, setShowThinking] = useState(false);
-  const tree = useArenaStore((s) => s.tree);
+  // flat model: no tree, no branch detection needed
   const theme = useArenaStore((s) => s.theme);
   const streamingContent = useArenaStore((s) =>
     s.streamingNodeId === node.id ? s.streamingContent : null
@@ -39,10 +39,8 @@ export function Message({ node }: MessageProps) {
   const displayContent = isUser
     ? rawContent.replace(/\s*\[Context left [^\]]*\]\s*/g, "").trim()
     : rawContent;
-  const hasBranches = node.children.length > 1;
-  const branchCount = node.children.filter(
-    (cid) => tree.nodes[cid]?.branchId !== node.branchId
-  ).length;
+  const hasBranches = false; // flat model: no branches
+  const branchCount = 0;
 
   return (
     <div
