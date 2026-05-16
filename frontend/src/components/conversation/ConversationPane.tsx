@@ -294,11 +294,10 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
         return measuredHeightsRef.current.get(node.id)!;
       }
 
-      // Very conservative estimate for agents with long, variable markdown (like Squiggy).
+      // Estimate based on content. No cap — long markdown can easily exceed 3000px.
       const content = node.content || '';
       const lineCount = Math.max(2, content.split('\n').length);
-      const estimatedHeight = 80 + lineCount * 22 + Math.floor(content.length / 4);
-      return Math.min(1200, Math.max(120, estimatedHeight));
+      return Math.max(120, 80 + lineCount * 24 + Math.floor(content.length / 3));
     },
     overscan: 15,
     paddingStart: spacerHeight,
