@@ -82,8 +82,8 @@ test.describe("Tail truncation -- conversation completeness", () => {
         ws.on("framereceived", (frame) => {
           try {
             const msg = JSON.parse(frame.payload as string);
-            if (msg.type === "state.snapshot" && msg.payload?.tree?.nodes) {
-              snapshotNodeCount = Object.keys(msg.payload.tree.nodes).length;
+            if (msg.type === "state.snapshot" && msg.payload?.messages) {
+              snapshotNodeCount = msg.payload.messages.length;
               resolve(snapshotNodeCount);
             }
           } catch {}
@@ -109,7 +109,7 @@ test.describe("Tail truncation -- conversation completeness", () => {
     const history5MB = await page.evaluate(async (agent: string) => {
       const resp = await fetch(`/api/agent/${agent}/history?tailMB=5`);
       const data = await resp.json();
-      return Object.keys(data.tree?.nodes || {}).length;
+      return (data.messages || []).length;
     }, target.name);
 
     console.log(
@@ -418,13 +418,13 @@ test.describe("Tail truncation -- conversation completeness", () => {
         `/api/agent/${agent}/history?tailMB=50`
       );
       const data = await resp.json();
-      const nodes = data.tree?.nodes || {};
-      const activeId = data.tree?.activeNodeId || "";
-      const lastNode = nodes[activeId];
+      const nodes = data.messages || [];
+      const activeId = nodes.length > 0 ? nodes[nodes.length - 1].id : "";
+      const lastNode = nodes.find((n: any) => n.id === activeId);
       return {
         content: (lastNode?.content || "").slice(0, 200),
         role: lastNode?.role || "",
-        totalNodes: Object.keys(nodes).length,
+        totalNodes: nodes.length,
       };
     }, agentInfo.current);
 

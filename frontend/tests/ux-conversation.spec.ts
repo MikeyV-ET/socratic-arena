@@ -93,7 +93,7 @@ test.describe("Conversation Pane -- Chat panel lazy loading (R20)", () => {
     test.skip(data.status !== "ok" || !data.truncated, "Q history not truncated -- nothing to lazy-load");
 
     const totalNodes = data.totalNodes;
-    const loadedApiNodes = Object.keys(data.tree?.nodes ?? {}).length;
+    const loadedApiNodes = (data.messages ?? []).length;
 
     // The conversation pane (left side, readOnly=false) should have awareness
     // of the full history, not just the live WebSocket session. Verify by
@@ -188,64 +188,34 @@ test.describe("Conversation Pane -- Chat panel lazy loading (R20)", () => {
   });
 });
 
-test.describe("Conversation Pane -- Branch chain continuity (R21)", () => {
-  test("R21: All nodes in tree.nodes are reachable via branch walk from root", async ({ page, request }) => {
+test.describe("Conversation Pane -- Message list integrity (R21)", () => {
+  test("R21: All messages from API are valid and chronologically ordered", async ({ page, request }) => {
     await page.goto("/");
     await expect(page.locator("[data-node-id]").first()).toBeVisible({ timeout: 15_000 });
 
     const base = new URL(page.url()).origin;
-    const resp = await request.get(`${base}/api/agent/Q/history`);
-    test.skip(!resp.ok(), "Q history not available");
+    const resp = await request.get(`${base}/api/tree`);
+    test.skip(!resp.ok(), "API not available");
     const data = await resp.json();
-    test.skip(data.status !== "ok" || !data.truncated, "Q history not truncated");
+    const messages = data.messages ?? [];
+    test.skip(messages.length < 2, "Too few messages to verify ordering");
 
-    const convPane = page.locator('[data-pane-id="conversation"] [data-testid="conversation-messages"]');
-    await expect(convPane).toBeVisible({ timeout: 10_000 });
-    await expect(convPane).toHaveAttribute("data-live-history", "loaded", { timeout: 15_000 });
-    await page.waitForTimeout(2000);
+    // Every message should have required fields
+    for (const msg of messages) {
+      expect(msg.id).toBeTruthy();
+      expect(["user", "assistant", "system"]).toContain(msg.role);
+      expect(typeof msg.content).toBe("string");
+    }
 
-    // Walk the branch the same way the frontend does: start at branch.rootNodeId,
-    // follow children links. Count reachable nodes vs total in tree.nodes.
-    // Disconnected clusters = nodes exist but aren't reachable from root.
-    const chainInfo = await page.evaluate(() => {
-      const store = (window as any).__ARENA_STORE__;
-      if (!store) return null;
-      const state = store.getState();
-      const agents = Object.keys(state.agents ?? {});
-      const agentKey = agents.find((a: string) => a.toLowerCase().includes("q")) ?? agents[0];
-      if (!agentKey) return null;
-      const agentState = state.agents[agentKey];
-      const tree = agentState?.tree;
-      const branch = agentState?.activeBranch ?? agentState?.branches?.[0];
-      if (!tree?.nodes || !branch) return null;
-
-      const totalInDict = Object.keys(tree.nodes).length;
-      const rootId = branch.rootNodeId ?? tree.rootNodeId;
-      if (!rootId) return { totalInDict, reachable: 0, rootId: null };
-
-      // Walk from root following children (take last child = active branch path)
-      const visited = new Set<string>();
-      let current: string | null = rootId;
-      while (current && !visited.has(current)) {
-        visited.add(current);
-        const node = tree.nodes[current];
-        if (!node) break;
-        const children = node.children ?? [];
-        current = children.length > 0 ? children[children.length - 1] : null;
+    // Messages should be in chronological order
+    for (let i = 1; i < messages.length; i++) {
+      if (messages[i].timestamp && messages[i-1].timestamp) {
+        expect(
+          messages[i].timestamp,
+          `Message ${i} (${messages[i].id}) timestamp ${messages[i].timestamp} is before message ${i-1} timestamp ${messages[i-1].timestamp}`
+        ).toBeGreaterThanOrEqual(messages[i-1].timestamp);
       }
-
-      return { totalInDict, reachable: visited.size, rootId };
-    });
-
-    // If store isn't exposed, skip gracefully
-    test.skip(!chainInfo, "Arena store not accessible via window.__ARENA_STORE__");
-
-    // The reachable count should equal (or be very close to) the total in the dict.
-    // A large gap means disconnected node clusters -- the exact bug Eric reported.
-    expect(
-      chainInfo!.reachable,
-      `Branch walk from root ${chainInfo!.rootId} reaches ${chainInfo!.reachable} nodes, but tree.nodes has ${chainInfo!.totalInDict}. Gap = ${chainInfo!.totalInDict - chainInfo!.reachable} disconnected nodes.`
-    ).toBeGreaterThanOrEqual(chainInfo!.totalInDict * 0.95);
+    }
   });
 });
 

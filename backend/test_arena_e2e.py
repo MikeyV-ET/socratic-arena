@@ -141,12 +141,11 @@ async def _test_browser_to_inbox():
         # Receive initial state
         raw = await asyncio.wait_for(ws.recv(), timeout=5)
         state = json.loads(raw)
-        branch_id = state["payload"]["tree"]["activeBranchId"]
 
-        # Send user message
+        # Send user message (flat model — use "main" as branchId)
         await ws.send(json.dumps({
             "type": "conversation.send",
-            "payload": {"branchId": branch_id, "content": marker},
+            "payload": {"branchId": "main", "content": marker},
         }))
 
         # Wait for turn_start broadcast
@@ -221,13 +220,11 @@ async def _test_response_to_browser():
     async with websockets.connect(WS_URL, max_size=WS_MAX_SIZE) as ws:
         # Get state
         raw = await asyncio.wait_for(ws.recv(), timeout=5)
-        state = json.loads(raw)
-        branch_id = state["payload"]["tree"]["activeBranchId"]
 
         # Send a user message to get a nodeId
         await ws.send(json.dumps({
             "type": "conversation.send",
-            "payload": {"branchId": branch_id, "content": marker_msg},
+            "payload": {"branchId": "main", "content": marker_msg},
         }))
 
         # Collect turn_start to get nodeId
@@ -305,13 +302,11 @@ async def _test_full_e2e_round_trip():
     async with websockets.connect(WS_URL, max_size=WS_MAX_SIZE) as ws:
         # Get state
         raw = await asyncio.wait_for(ws.recv(), timeout=5)
-        state = json.loads(raw)
-        branch_id = state["payload"]["tree"]["activeBranchId"]
 
         # Step 1: Browser sends message
         await ws.send(json.dumps({
             "type": "conversation.send",
-            "payload": {"branchId": branch_id, "content": user_msg},
+            "payload": {"branchId": "main", "content": user_msg},
         }))
 
         # Get nodeId from turn_start

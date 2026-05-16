@@ -135,7 +135,7 @@ test.describe("History Pane -- Data validation against updates.jsonl (R18)", () 
           targetAgent = agent;
           totalNodes = data.totalNodes;
           cursor = data.cursor;
-          loadedNodes = Object.keys(data.tree?.nodes ?? {}).length;
+          loadedNodes = (data.messages ?? []).length;
           break;
         }
       }
@@ -155,8 +155,8 @@ test.describe("History Pane -- Data validation against updates.jsonl (R18)", () 
     expect(pageData.nodeCount).toBeGreaterThan(0);
 
     // Verify paginated nodes have content and valid roles
-    const pageNodes = pageData.tree?.nodes ?? {};
-    for (const [_id, node] of Object.entries(pageNodes) as [string, any][]) {
+    const pageNodes = pageData.messages ?? [];
+    for (const node of pageNodes as any[]) {
       expect(["user", "assistant"]).toContain(node.role);
       expect(typeof node.content).toBe("string");
       expect(node.id).toBeTruthy();
@@ -177,8 +177,7 @@ test.describe("History Pane -- Data validation against updates.jsonl (R18)", () 
     const data = await resp.json();
     test.skip(data.status !== "ok", "Q history returned error");
 
-    const nodes = data.tree?.nodes ?? {};
-    const nodeList = Object.values(nodes) as any[];
+    const nodeList = (data.messages ?? []) as any[];
     expect(nodeList.length).toBeGreaterThan(0);
 
     // Verify structure: each node has required fields from updates.jsonl parsing
@@ -193,17 +192,13 @@ test.describe("History Pane -- Data validation against updates.jsonl (R18)", () 
       }
     }
 
-    // Verify the tree links: children arrays should reference existing nodes
-    // (within the loaded set -- truncated histories may have dangling parentIds)
-    let validLinks = 0;
-    for (const node of nodeList) {
-      for (const childId of node.children ?? []) {
-        if (nodes[childId]) validLinks++;
-      }
-    }
-    // At least some links should be valid within the loaded window
+    // With flat message model, verify ordering: timestamps should be non-decreasing
     if (nodeList.length > 1) {
-      expect(validLinks).toBeGreaterThan(0);
+      for (let i = 1; i < nodeList.length; i++) {
+        if (nodeList[i].timestamp && nodeList[i-1].timestamp) {
+          expect(nodeList[i].timestamp).toBeGreaterThanOrEqual(nodeList[i-1].timestamp);
+        }
+      }
     }
   });
 
@@ -229,7 +224,7 @@ test.describe("History Pane -- Data validation against updates.jsonl (R18)", () 
     const resp = await request.get(`${base}/api/agent/Q/history`);
     test.skip(!resp.ok(), "Q history not available");
     const data = await resp.json();
-    const apiNodeCount = Object.keys(data.tree?.nodes ?? {}).length;
+    const apiNodeCount = (data.messages ?? []).length;
 
     // Count what the virtualizer has rendered (may be less due to viewport)
     // but the total virtualizer item count should match apiNodeCount
