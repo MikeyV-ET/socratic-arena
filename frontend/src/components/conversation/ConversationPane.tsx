@@ -477,6 +477,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
         userScrolledUp.current = false;
         prevFirstNodeId.current = null;
         prevLength.current = 0;
+        prevNodeCount.current = 0;
         measuredHeightsRef.current.clear();
         setMeasuringBatch([]);
       }
