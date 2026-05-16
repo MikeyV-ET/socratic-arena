@@ -278,17 +278,18 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     getScrollElement: () => parentRef.current,
     estimateSize: (index) => {
       const node = displayNodes[index];
-      if (!node) return 220;
+      if (!node) return 100;
 
       // If we have a measured height from the off-screen measurement pass, use it.
       if (measuredHeightsRef.current.has(node.id)) {
         return measuredHeightsRef.current.get(node.id)!;
       }
 
-      // Estimate based on content. No cap — long markdown can easily exceed 3000px.
+      // Conservative estimate — slightly under-estimate to avoid large gaps.
+      // The measureElement ref will correct to actual height after render.
       const content = node.content || '';
-      const lineCount = Math.max(2, content.split('\n').length);
-      return Math.max(120, 80 + lineCount * 24 + Math.floor(content.length / 3));
+      const lineCount = content.split('\n').length;
+      return Math.max(60, 40 + lineCount * 20);
     },
     overscan: 15,
     gap: 4,
@@ -614,11 +615,8 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     userScrolledUp.current = !atBottom;
     setShowJumpButton(!atBottom && nodes.length > 20);
 
-    // If user scrolled to bottom of current window but window isn't at the end,
-    // advance window to show the latest messages.
-    if (atBottom && visibleWindowStart + WINDOW_SIZE < nodes.length) {
-      setVisibleWindowStart(Math.max(0, nodes.length - WINDOW_SIZE));
-    }
+    // Window advance to end is handled by jumpToLatest button, not scroll handler.
+    // Advancing here during scroll caused regressions (scroll-up broken).
   }, [selectNode, paneId, virtualizer, paneCursor, paneLoading, visibleWindowStart, nodes.length, displayNodes, loadOlderHistory, spacerHeight]);
 
   // Auto-scroll to bottom on new content (live pane) or data load (both panes)
