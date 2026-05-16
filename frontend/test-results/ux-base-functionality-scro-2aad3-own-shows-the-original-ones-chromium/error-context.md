@@ -6,18 +6,18 @@
 
 # Test info
 
-- Name: ux-base-functionality.spec.ts >> gap between consecutive messages is exactly 4px
-- Location: tests/ux-base-functionality.spec.ts:75:1
+- Name: ux-base-functionality.spec.ts >> scrolling up reveals older messages, scrolling back down shows the original ones
+- Location: tests/ux-base-functionality.spec.ts:160:1
 
 # Error details
 
 ```
-Error: Gap between 019e1dbe..019e1dbe was 130px, expected 4px
+Error: After scrolling back down, the original bottom message is gone
 
-expect(received).toBe(expected) // Object.is equality
+expect(received).toContain(expected) // indexOf
 
-Expected: 4
-Received: 130
+Expected value: "019e1dbe-6874-7d00-bbe1-760a77a26e7e-5204"
+Received array: ["019e1dbe-6874-7d00-bbe1-760a77a26e7e-5407", "019e1dbe-6874-7d00-bbe1-760a77a26e7e-5428", "019e1dbe-6874-7d00-bbe1-760a77a26e7e-5436", "019e1dbe-6874-7d00-bbe1-760a77a26e7e-5457", "019e1dbe-6874-7d00-bbe1-760a77a26e7e-5463", "019e1dbe-6874-7d00-bbe1-760a77a26e7e-5486", "019e1dbe-6874-7d00-bbe1-760a77a26e7e-5488", "019e1dbe-6874-7d00-bbe1-760a77a26e7e-5494", "019e1dbe-6874-7d00-bbe1-760a77a26e7e-5505", "2a2c57c6-abcb-4a96-a4ef-df7a8dcd49d3", …]
 ```
 
 # Page snapshot
@@ -328,211 +328,209 @@ Received: 130
                 - option "019e1d82 - May 12 - 8.3KB"
                 - option "019e1d81 - May 12 - 8.3KB"
             - button "Search" [ref=e341]
-          - generic [ref=e342]:
-            - generic [ref=e343]: Beginning of history
-            - generic [ref=e344]:
+          - generic [ref=e343]:
+            - generic [ref=e346]:
               - generic [ref=e347]:
-                - generic [ref=e348]:
-                  - generic [ref=e350]: Q
-                  - button "⚑" [ref=e352]
-                - generic [ref=e353]:
-                  - paragraph [ref=e354]: "Three real bugs. Bug #1 is the critical one — user doesn't see latest messages. This is the exact bug Eric reported before that motivated the flat model refactor in the first place. Let me diagnose."
-                  - paragraph [ref=e355]:
-                    - strong [ref=e356]: "Bug #1: Bottom message wrong on initial load."
-                    - text: The windowed model sets
-                    - code [ref=e357]: "`visibleWindowStart = Math.max(0, nodes.length - WINDOW_SIZE)`"
-                    - text: on first load, which should show the last 20. But if WS snapshot has 184 messages and then initLiveHistory merges more, the prepend logic might shift things.
-                  - paragraph [ref=e358]: Let me look at the initial load flow in ConversationPane.
+                - generic [ref=e349]: Q
+                - button "⚑" [ref=e351]
+              - generic [ref=e352]:
+                - paragraph [ref=e353]: "Three real bugs. Bug #1 is the critical one — user doesn't see latest messages. This is the exact bug Eric reported before that motivated the flat model refactor in the first place. Let me diagnose."
+                - paragraph [ref=e354]:
+                  - strong [ref=e355]: "Bug #1: Bottom message wrong on initial load."
+                  - text: The windowed model sets
+                  - code [ref=e356]: "`visibleWindowStart = Math.max(0, nodes.length - WINDOW_SIZE)`"
+                  - text: on first load, which should show the last 20. But if WS snapshot has 184 messages and then initLiveHistory merges more, the prepend logic might shift things.
+                - paragraph [ref=e357]: Let me look at the initial load flow in ConversationPane.
+            - generic [ref=e360]:
               - generic [ref=e361]:
-                - generic [ref=e362]:
-                  - generic [ref=e364]: Q
-                  - button "⚑" [ref=e366]
-                - generic [ref=e367]:
-                  - paragraph [ref=e368]: "I see the issue. The initial load flow is:"
-                  - list [ref=e369]:
-                    - listitem [ref=e370]:
-                      - text: WS connects →
-                      - code [ref=e371]: "`state.snapshot`"
-                      - text: with 184 messages →
-                      - code [ref=e372]: "`applySnapshot`"
-                      - text: sets
-                      - code [ref=e373]: "`messages`"
-                    - listitem [ref=e374]:
-                      - text: "First render: nodes.length=184,"
-                      - code [ref=e375]: "`prevFirstNodeId.current=null`"
-                      - text: → sets
-                      - code [ref=e376]: "`visibleWindowStart = max(0, 184-20) = 164`"
-                      - text: —
-                      - strong [ref=e377]: correct
-                    - listitem [ref=e378]:
-                      - text: Then
-                      - code [ref=e379]: "`initLiveHistory`"
-                      - text: fires with ~182 messages from REST → merges, prepends older ones
-                    - listitem [ref=e380]:
-                      - text: This changes
-                      - code [ref=e381]: "`nodes`"
-                      - text: array — the prepend detection fires, creates a measuring batch
-                    - listitem [ref=e382]:
-                      - text: The measuring batch callback shifts
-                      - code [ref=e383]: "`visibleWindowStart`"
-                      - text: backwards —
-                      - strong [ref=e384]: this is the bug
-                  - paragraph [ref=e385]:
-                    - text: "The problem:"
-                    - code [ref=e386]: "`initLiveHistory`"
-                    - text: prepends history messages BEFORE the WS messages. This triggers the "new nodes prepended" path which sends them to measuring batch and then shifts the window backwards. The user ends up looking at message ~95 instead of the latest.
-                  - paragraph [ref=e387]:
-                    - text: "The fix: when"
-                    - code [ref=e388]: "`initLiveHistory`"
-                    - text: prepends AND we weren't scrolled up, keep the window at the end (latest messages). The prepend should only shift the window if the user was already looking at older content.
+                - generic [ref=e363]: Q
+                - button "⚑" [ref=e365]
+              - generic [ref=e366]:
+                - paragraph [ref=e367]: "I see the issue. The initial load flow is:"
+                - list [ref=e368]:
+                  - listitem [ref=e369]:
+                    - text: WS connects →
+                    - code [ref=e370]: "`state.snapshot`"
+                    - text: with 184 messages →
+                    - code [ref=e371]: "`applySnapshot`"
+                    - text: sets
+                    - code [ref=e372]: "`messages`"
+                  - listitem [ref=e373]:
+                    - text: "First render: nodes.length=184,"
+                    - code [ref=e374]: "`prevFirstNodeId.current=null`"
+                    - text: → sets
+                    - code [ref=e375]: "`visibleWindowStart = max(0, 184-20) = 164`"
+                    - text: —
+                    - strong [ref=e376]: correct
+                  - listitem [ref=e377]:
+                    - text: Then
+                    - code [ref=e378]: "`initLiveHistory`"
+                    - text: fires with ~182 messages from REST → merges, prepends older ones
+                  - listitem [ref=e379]:
+                    - text: This changes
+                    - code [ref=e380]: "`nodes`"
+                    - text: array — the prepend detection fires, creates a measuring batch
+                  - listitem [ref=e381]:
+                    - text: The measuring batch callback shifts
+                    - code [ref=e382]: "`visibleWindowStart`"
+                    - text: backwards —
+                    - strong [ref=e383]: this is the bug
+                - paragraph [ref=e384]:
+                  - text: "The problem:"
+                  - code [ref=e385]: "`initLiveHistory`"
+                  - text: prepends history messages BEFORE the WS messages. This triggers the "new nodes prepended" path which sends them to measuring batch and then shifts the window backwards. The user ends up looking at message ~95 instead of the latest.
+                - paragraph [ref=e386]:
+                  - text: "The fix: when"
+                  - code [ref=e387]: "`initLiveHistory`"
+                  - text: prepends AND we weren't scrolled up, keep the window at the end (latest messages). The prepend should only shift the window if the user was already looking at older content.
+            - generic [ref=e390]:
               - generic [ref=e391]:
-                - generic [ref=e392]:
-                  - generic [ref=e394]: Q
-                  - button "⚑" [ref=e396]
-                - paragraph [ref=e398]:
-                  - text: Now fix
-                  - strong [ref=e399]: "Bug #2"
-                  - text: ": 4px gap between messages. The virtualizer uses absolute positioning, so CSS gap on parent doesn't work. I need to add margin-bottom to each message item."
+                - generic [ref=e393]: Q
+                - button "⚑" [ref=e395]
+              - paragraph [ref=e397]:
+                - text: Now fix
+                - strong [ref=e398]: "Bug #2"
+                - text: ": 4px gap between messages. The virtualizer uses absolute positioning, so CSS gap on parent doesn't work. I need to add margin-bottom to each message item."
+            - generic [ref=e401]:
               - generic [ref=e402]:
-                - generic [ref=e403]:
-                  - generic [ref=e405]: Q
-                  - button "⚑" [ref=e407]
-                - generic [ref=e408]:
-                  - paragraph [ref=e409]:
-                    - strong [ref=e410]: "Bug #3"
-                    - text: ": Scroll down after scroll up doesn't return to bottom. The issue is that after scrolling up, the window shifts but"
-                    - code [ref=e411]: "`scrollTo(scrollHeight)`"
-                    - text: doesn't move the window back to the end. The
-                    - code [ref=e412]: "`jumpToLatest`"
-                    - text: function handles this correctly, but the test likely uses raw
-                    - code [ref=e413]: "`scrollTo`"
-                    - text: ". The fix: when the scroll handler detects we're at the bottom again, reset"
-                    - code [ref=e414]: "`userScrolledUp`"
-                    - text: .
-                  - paragraph [ref=e415]:
-                    - text: Actually, looking at the scroll handler, it already does
-                    - code [ref=e416]: "`userScrolledUp.current = !atBottom`"
-                    - text: . The real issue is that
-                    - code [ref=e417]: "`scrollTo(scrollHeight)`"
-                    - text: puts us at the bottom of the current window, but the window might not be at the end of messages. Let me check if there's a "follow live" mechanism that moves the window back.
-                  - paragraph [ref=e418]:
-                    - text: The
-                    - code [ref=e419]: "`shouldFollowLive`"
-                    - text: check in the nodes effect only fires when
-                    - code [ref=e420]: "`currentLen > prevLength.current`"
-                    - text: (new messages arrive). If no new messages come, scrolling to bottom of current window doesn't advance the window to the end.
-                  - paragraph [ref=e421]: "The fix: in the scroll handler, when the user scrolls to the bottom of the current window AND there are more messages after the window, advance the window."
+                - generic [ref=e404]: Q
+                - button "⚑" [ref=e406]
+              - generic [ref=e407]:
+                - paragraph [ref=e408]:
+                  - strong [ref=e409]: "Bug #3"
+                  - text: ": Scroll down after scroll up doesn't return to bottom. The issue is that after scrolling up, the window shifts but"
+                  - code [ref=e410]: "`scrollTo(scrollHeight)`"
+                  - text: doesn't move the window back to the end. The
+                  - code [ref=e411]: "`jumpToLatest`"
+                  - text: function handles this correctly, but the test likely uses raw
+                  - code [ref=e412]: "`scrollTo`"
+                  - text: ". The fix: when the scroll handler detects we're at the bottom again, reset"
+                  - code [ref=e413]: "`userScrolledUp`"
+                  - text: .
+                - paragraph [ref=e414]:
+                  - text: Actually, looking at the scroll handler, it already does
+                  - code [ref=e415]: "`userScrolledUp.current = !atBottom`"
+                  - text: . The real issue is that
+                  - code [ref=e416]: "`scrollTo(scrollHeight)`"
+                  - text: puts us at the bottom of the current window, but the window might not be at the end of messages. Let me check if there's a "follow live" mechanism that moves the window back.
+                - paragraph [ref=e417]:
+                  - text: The
+                  - code [ref=e418]: "`shouldFollowLive`"
+                  - text: check in the nodes effect only fires when
+                  - code [ref=e419]: "`currentLen > prevLength.current`"
+                  - text: (new messages arrive). If no new messages come, scrolling to bottom of current window doesn't advance the window to the end.
+                - paragraph [ref=e420]: "The fix: in the scroll handler, when the user scrolls to the bottom of the current window AND there are more messages after the window, advance the window."
+            - generic [ref=e423]:
               - generic [ref=e424]:
-                - generic [ref=e425]:
-                  - generic [ref=e427]: Q
-                  - button "⚑" [ref=e429]
-                - paragraph [ref=e431]: Now build and verify.
+                - generic [ref=e426]: Q
+                - button "⚑" [ref=e428]
+              - paragraph [ref=e430]: Now build and verify.
+            - generic [ref=e433]:
               - generic [ref=e434]:
-                - generic [ref=e435]:
-                  - generic [ref=e437]: Q
-                  - button "⚑" [ref=e439]
-                - paragraph [ref=e441]: 3 bugs fixed, Trip notified. Waiting for test re-run results.
+                - generic [ref=e436]: Q
+                - button "⚑" [ref=e438]
+              - paragraph [ref=e440]: 3 bugs fixed, Trip notified. Waiting for test re-run results.
+            - generic [ref=e443]:
               - generic [ref=e444]:
-                - generic [ref=e445]:
-                  - generic [ref=e447]: Eric
-                  - button "⚑" [ref=e449]
-                - generic [ref=e450]:
-                  - paragraph [ref=e451]: "[localmail (id=bell_bg8ljhzr, ts=1778945535.21583, reply_via=localmail outbox)] [localmail] Mail from Trip: Q — re-ran after 15a6123. Progress: 3/5 pass now (scroll-back FIXED, nice). 2 still failing:"
-                  - list [ref=e452]:
-                    - listitem [ref=e453]:
-                      - paragraph [ref=e454]:
-                        - strong [ref=e455]: "Gap (0px not 4px):"
-                        - code [ref=e456]: "`paddingBottom: 4`"
-                        - text: is inside the element's bounding rect. The virtualizer measures the element (including padding) and positions the next item flush against it. getBoundingClientRect gap between consecutive items = 0. Need the virtualizer's
-                        - code [ref=e457]: "`gap`"
-                        - text: "option instead: add"
-                        - code [ref=e458]: "`gap: 4`"
-                        - text: to the useVirtualizer config. @tanstack/react-virtual supports it.
-                    - listitem [ref=e459]:
-                      - paragraph [ref=e460]:
-                        - strong [ref=e461]: "Bottom message still wrong:"
-                        - text: "U... (Full message: cat /home/eric/agents/Q/asdaaas/adapters/localmail/payloads/d3f5e2ec-7f6a-4822-867c-78ba19e15eb8.json — 0.8KB, ~201 tokens) [localmail (id=bell_q3jlss_9, ts=1778945535.2157543, reply_via=localmail outbox)] [localmail] Mail from Trip: Q — re-ran after 15a6123. Progress: 3/5 pass now (scroll-back FIXED, nice). 2 still failing:"
-                    - listitem [ref=e462]:
-                      - paragraph [ref=e463]:
-                        - strong [ref=e464]: "Gap (0px not 4px):"
-                        - code [ref=e465]: "`paddingBottom: 4`"
-                        - text: is inside the element's bounding rect. The virtualizer measures the element (including padding) and positions the next item flush against it. getBoundingClientRect gap between consecutive items = 0. Need the virtualizer's
-                        - code [ref=e466]: "`gap`"
-                        - text: "option instead: add"
-                        - code [ref=e467]: "`gap: 4`"
-                        - text: to the useVirtualizer config. @tanstack/react-virtual supports it.
-                    - listitem [ref=e468]:
-                      - paragraph [ref=e469]:
-                        - strong [ref=e470]: "Bottom message still wrong:"
-                        - text: "U... (Full message: cat /home/eric/agents/Q/asdaaas/adapters/localmail/payloads/d3f5e2ec-7f6a-4822-867c-78ba19e15eb8.json — 0.8KB, ~201 tokens)"
+                - generic [ref=e446]: Eric
+                - button "⚑" [ref=e448]
+              - generic [ref=e449]:
+                - paragraph [ref=e450]: "[localmail (id=bell_bg8ljhzr, ts=1778945535.21583, reply_via=localmail outbox)] [localmail] Mail from Trip: Q — re-ran after 15a6123. Progress: 3/5 pass now (scroll-back FIXED, nice). 2 still failing:"
+                - list [ref=e451]:
+                  - listitem [ref=e452]:
+                    - paragraph [ref=e453]:
+                      - strong [ref=e454]: "Gap (0px not 4px):"
+                      - code [ref=e455]: "`paddingBottom: 4`"
+                      - text: is inside the element's bounding rect. The virtualizer measures the element (including padding) and positions the next item flush against it. getBoundingClientRect gap between consecutive items = 0. Need the virtualizer's
+                      - code [ref=e456]: "`gap`"
+                      - text: "option instead: add"
+                      - code [ref=e457]: "`gap: 4`"
+                      - text: to the useVirtualizer config. @tanstack/react-virtual supports it.
+                  - listitem [ref=e458]:
+                    - paragraph [ref=e459]:
+                      - strong [ref=e460]: "Bottom message still wrong:"
+                      - text: "U... (Full message: cat /home/eric/agents/Q/asdaaas/adapters/localmail/payloads/d3f5e2ec-7f6a-4822-867c-78ba19e15eb8.json — 0.8KB, ~201 tokens) [localmail (id=bell_q3jlss_9, ts=1778945535.2157543, reply_via=localmail outbox)] [localmail] Mail from Trip: Q — re-ran after 15a6123. Progress: 3/5 pass now (scroll-back FIXED, nice). 2 still failing:"
+                  - listitem [ref=e461]:
+                    - paragraph [ref=e462]:
+                      - strong [ref=e463]: "Gap (0px not 4px):"
+                      - code [ref=e464]: "`paddingBottom: 4`"
+                      - text: is inside the element's bounding rect. The virtualizer measures the element (including padding) and positions the next item flush against it. getBoundingClientRect gap between consecutive items = 0. Need the virtualizer's
+                      - code [ref=e465]: "`gap`"
+                      - text: "option instead: add"
+                      - code [ref=e466]: "`gap: 4`"
+                      - text: to the useVirtualizer config. @tanstack/react-virtual supports it.
+                  - listitem [ref=e467]:
+                    - paragraph [ref=e468]:
+                      - strong [ref=e469]: "Bottom message still wrong:"
+                      - text: "U... (Full message: cat /home/eric/agents/Q/asdaaas/adapters/localmail/payloads/d3f5e2ec-7f6a-4822-867c-78ba19e15eb8.json — 0.8KB, ~201 tokens)"
+            - generic [ref=e472]:
               - generic [ref=e473]:
-                - generic [ref=e474]:
-                  - generic [ref=e476]: Q
-                  - button "⚑" [ref=e478]
-                - paragraph [ref=e480]: Two fixes needed. Trip's right on both counts.
+                - generic [ref=e475]: Q
+                - button "⚑" [ref=e477]
+              - paragraph [ref=e479]: Two fixes needed. Trip's right on both counts.
+            - generic [ref=e482]:
               - generic [ref=e483]:
-                - generic [ref=e484]:
-                  - generic [ref=e486]: Q
-                  - button "⚑" [ref=e488]
-                - paragraph [ref=e490]: "For bug #2, Trip suspects stale dev server. Let me restart it and also rebuild."
+                - generic [ref=e485]: Q
+                - button "⚑" [ref=e487]
+              - paragraph [ref=e489]: "For bug #2, Trip suspects stale dev server. Let me restart it and also rebuild."
+            - generic [ref=e492]:
               - generic [ref=e493]:
-                - generic [ref=e494]:
-                  - generic [ref=e496]: Q
-                  - button "⚑" [ref=e498]
-                - paragraph [ref=e500]: Vite build error. Let me check it.
+                - generic [ref=e495]: Q
+                - button "⚑" [ref=e497]
+              - paragraph [ref=e499]: Vite build error. Let me check it.
+            - generic [ref=e502]:
               - generic [ref=e503]:
-                - generic [ref=e504]:
-                  - generic [ref=e506]: Q
-                  - button "⚑" [ref=e508]
-                - paragraph [ref=e510]: It built fine — the error was from running inside the wrong prefix. Let me commit and tell Trip.
+                - generic [ref=e505]: Q
+                - button "⚑" [ref=e507]
+              - paragraph [ref=e509]: It built fine — the error was from running inside the wrong prefix. Let me commit and tell Trip.
+            - generic [ref=e512]:
               - generic [ref=e513]:
-                - generic [ref=e514]:
-                  - generic [ref=e516]: Q
-                  - button "⚑" [ref=e518]
-                - paragraph [ref=e520]: Fixes shipped. Waiting for Trip's re-run. Context at 27k — will compact if needed after this round.
+                - generic [ref=e515]: Q
+                - button "⚑" [ref=e517]
+              - paragraph [ref=e519]: Fixes shipped. Waiting for Trip's re-run. Context at 27k — will compact if needed after this round.
+            - generic [ref=e522]:
               - generic [ref=e523]:
-                - generic [ref=e524]:
-                  - generic [ref=e526]: Eric
-                  - button "⚑" [ref=e528]
-                - generic [ref=e529]:
-                  - paragraph [ref=e530]: "[localmail (id=bell_gs0d8axt, ts=1778945749.6435015, reply_via=localmail outbox)] [localmail] Mail from Trip: Q — 3/5 pass now. Bottom message FIXED (nice). Two remaining:"
-                  - list [ref=e531]:
-                    - listitem [ref=e532]:
-                      - strong [ref=e533]: "Gap: 46-128px, not 4px."
-                      - text: The
-                      - code [ref=e534]: "`gap: 4`"
-                      - text: "option is working, but the virtualizer is positioning items based on estimateSize, not measured heights. Measured all 19 gaps: range 46-128px, mean ~68px. The visual gap = (estimateSize - actualHeight) + 4. Example: estimate 220px, actual 87px → gap 137px. The measureElement ref should feed back to correct positions, but it's not updating them after initial layout. Either the virtualizer ne... (Full message: cat /home/eric/agents/Q/asdaaas/adapters/localmail/payloads/bcb0f5ed-619d-4d9f-aba4-70085bdad314.json — 1.0KB, ~258 tokens)"
+                - generic [ref=e525]: Eric
+                - button "⚑" [ref=e527]
+              - generic [ref=e528]:
+                - paragraph [ref=e529]: "[localmail (id=bell_gs0d8axt, ts=1778945749.6435015, reply_via=localmail outbox)] [localmail] Mail from Trip: Q — 3/5 pass now. Bottom message FIXED (nice). Two remaining:"
+                - list [ref=e530]:
+                  - listitem [ref=e531]:
+                    - strong [ref=e532]: "Gap: 46-128px, not 4px."
+                    - text: The
+                    - code [ref=e533]: "`gap: 4`"
+                    - text: "option is working, but the virtualizer is positioning items based on estimateSize, not measured heights. Measured all 19 gaps: range 46-128px, mean ~68px. The visual gap = (estimateSize - actualHeight) + 4. Example: estimate 220px, actual 87px → gap 137px. The measureElement ref should feed back to correct positions, but it's not updating them after initial layout. Either the virtualizer ne... (Full message: cat /home/eric/agents/Q/asdaaas/adapters/localmail/payloads/bcb0f5ed-619d-4d9f-aba4-70085bdad314.json — 1.0KB, ~258 tokens)"
+            - generic [ref=e536]:
               - generic [ref=e537]:
-                - generic [ref=e538]:
-                  - generic [ref=e540]: Q
-                  - button "⚑" [ref=e542]
-                - button "▶ thinking" [ref=e543]:
-                  - generic [ref=e544]: ▶
-                  - text: thinking
-                - generic [ref=e545]:
-                  - paragraph [ref=e546]: Two issues. Let me fix both quickly — context is tight.
-                  - paragraph [ref=e547]:
-                    - strong [ref=e548]: "#2 (regression)"
-                    - text: ": My scroll-to-bottom window advance fires during scroll-up. Need to guard it."
+                - generic [ref=e539]: Q
+                - button "⚑" [ref=e541]
+              - button "▶ thinking" [ref=e542]:
+                - generic [ref=e543]: ▶
+                - text: thinking
+              - generic [ref=e544]:
+                - paragraph [ref=e545]: Two issues. Let me fix both quickly — context is tight.
+                - paragraph [ref=e546]:
+                  - strong [ref=e547]: "#2 (regression)"
+                  - text: ": My scroll-to-bottom window advance fires during scroll-up. Need to guard it."
+            - generic [ref=e550]:
               - generic [ref=e551]:
-                - generic [ref=e552]:
-                  - generic [ref=e554]: Q
-                  - button "⚑" [ref=e556]
-                - paragraph [ref=e558]:
-                  - text: Wait —
-                  - code [ref=e559]: "`userScrolledUp.current = !atBottom`"
-                  - text: is set right before this check, so when
-                  - code [ref=e560]: "`atBottom`"
-                  - text: is true,
-                  - code [ref=e561]: "`userScrolledUp`"
-                  - text: "is already false. The issue is different: during scroll-up via wheel events, the user briefly hits bottom of the short window. The fix: only advance on a sustained bottom position, not during active scrolling."
+                - generic [ref=e553]: Q
+                - button "⚑" [ref=e555]
+              - paragraph [ref=e557]:
+                - text: Wait —
+                - code [ref=e558]: "`userScrolledUp.current = !atBottom`"
+                - text: is set right before this check, so when
+                - code [ref=e559]: "`atBottom`"
+                - text: is true,
+                - code [ref=e560]: "`userScrolledUp`"
+                - text: "is already false. The issue is different: during scroll-up via wheel events, the user briefly hits bottom of the short window. The fix: only advance on a sustained bottom position, not during active scrolling."
+            - generic [ref=e563]:
               - generic [ref=e564]:
-                - generic [ref=e565]:
-                  - generic [ref=e567]: Q
-                  - button "⚑" [ref=e569]
-                - paragraph [ref=e571]:
-                  - strong [ref=e572]: "#1 (gaps)"
-                  - text: ": The estimateSize returns 120-220px but actual is 87-375px. The virtualizer uses estimates for initial positioning, then measureElement corrects — but something's preventing the correction from updating positions. Let me force a remeasure cycle after mount."
+                - generic [ref=e566]: Q
+                - button "⚑" [ref=e568]
+              - paragraph [ref=e570]:
+                - strong [ref=e571]: "#1 (gaps)"
+                - text: ": The estimateSize returns 120-220px but actual is 87-375px. The virtualizer uses estimates for initial positioning, then measureElement corrects — but something's preventing the correction from updating positions. Let me force a remeasure cycle after mount."
         - option "Cinco"
         - option "Jr"
         - option "Q" [selected]
@@ -569,114 +567,6 @@ Received: 130
 # Test source
 
 ```ts
-  13  | const API = "http://localhost:8000";
-  14  | const AGENT = "Q";
-  15  | 
-  16  | /** Fetch the last N messages from the history API. */
-  17  | async function getHistoryMessages(agent: string, limit?: number) {
-  18  |   const url = `${API}/api/agent/${agent}/history`;
-  19  |   const resp = await fetch(url);
-  20  |   const data = await resp.json();
-  21  |   const msgs = data.messages ?? [];
-  22  |   return limit ? msgs.slice(-limit) : msgs;
-  23  | }
-  24  | 
-  25  | /** Wait for conversation messages to render in the live pane. */
-  26  | async function waitForMessages(page: import("@playwright/test").Page) {
-  27  |   // Wait for at least one message with visible text content
-  28  |   const container = page.locator('[data-testid="conversation-messages"]').first();
-  29  |   await container.locator("[data-node-id]").first().waitFor({ timeout: 15_000 });
-  30  | }
-  31  | 
-  32  | // ============================================================================
-  33  | // Test 1: Is the right message at the bottom?
-  34  | // ============================================================================
-  35  | 
-  36  | test("bottom message matches the most recent message from the API", async ({ page }) => {
-  37  |   await page.goto("/");
-  38  |   await waitForMessages(page);
-  39  | 
-  40  |   const container = page.locator('[data-testid="conversation-messages"]').first();
-  41  | 
-  42  |   // Scroll to the absolute bottom — what a user sees after the page loads
-  43  |   await container.evaluate((el) => el.scrollTo(0, el.scrollHeight));
-  44  |   await page.waitForTimeout(1500);
-  45  |   // Scroll again in case content grew during the first scroll
-  46  |   await container.evaluate((el) => el.scrollTo(0, el.scrollHeight));
-  47  |   await page.waitForTimeout(500);
-  48  | 
-  49  |   // Get the visually bottommost message
-  50  |   const bottomNodeId = await container.evaluate((el) => {
-  51  |     const nodes = Array.from(el.querySelectorAll("[data-node-id]"));
-  52  |     if (nodes.length === 0) return null;
-  53  |     const sorted = nodes
-  54  |       .map((n) => ({ id: n.getAttribute("data-node-id"), top: n.getBoundingClientRect().top }))
-  55  |       .sort((a, b) => b.top - a.top);
-  56  |     return sorted[0].id;
-  57  |   });
-  58  |   expect(bottomNodeId, "No messages rendered").toBeTruthy();
-  59  | 
-  60  |   // Query the API AFTER settling — compare against what the backend knows
-  61  |   const apiMessages = await getHistoryMessages(AGENT);
-  62  |   const lastApiMsg = apiMessages[apiMessages.length - 1];
-  63  |   expect(lastApiMsg, "API returned no messages").toBeTruthy();
-  64  | 
-  65  |   expect(
-  66  |     bottomNodeId,
-  67  |     `Bottom message in UI (${bottomNodeId}) doesn't match API's latest (${lastApiMsg.id}).`
-  68  |   ).toBe(lastApiMsg.id);
-  69  | });
-  70  | 
-  71  | // ============================================================================
-  72  | // Test 2: Are message gaps exactly 4px?
-  73  | // ============================================================================
-  74  | 
-  75  | test("gap between consecutive messages is exactly 4px", async ({ page }) => {
-  76  |   await page.goto("/");
-  77  |   await waitForMessages(page);
-  78  |   // Give the virtualizer time to measure all items and stabilize positions
-  79  |   await page.waitForTimeout(3000);
-  80  | 
-  81  |   // Measure bounding rects of all visible messages
-  82  |   const gaps = await page.evaluate(() => {
-  83  |     const container = document.querySelector('[data-testid="conversation-messages"]');
-  84  |     if (!container) return { error: "no container" };
-  85  | 
-  86  |     const nodes = Array.from(container.querySelectorAll("[data-node-id]"));
-  87  |     if (nodes.length < 2) return { error: "fewer than 2 messages", count: nodes.length };
-  88  | 
-  89  |     // Sort by visual position (translateY)
-  90  |     const sorted = nodes
-  91  |       .map((el) => {
-  92  |         const rect = el.getBoundingClientRect();
-  93  |         return { top: rect.top, bottom: rect.bottom, height: rect.height, id: el.getAttribute("data-node-id") };
-  94  |       })
-  95  |       .sort((a, b) => a.top - b.top);
-  96  | 
-  97  |     const gaps: { between: string; gap: number }[] = [];
-  98  |     for (let i = 0; i < sorted.length - 1; i++) {
-  99  |       const gap = Math.round((sorted[i + 1].top - sorted[i].bottom) * 100) / 100;
-  100 |       gaps.push({
-  101 |         between: `${sorted[i].id?.slice(0, 8)}..${sorted[i + 1].id?.slice(0, 8)}`,
-  102 |         gap,
-  103 |       });
-  104 |     }
-  105 |     return { gaps, count: sorted.length };
-  106 |   });
-  107 | 
-  108 |   expect(gaps).not.toHaveProperty("error");
-  109 |   const result = gaps as { gaps: { between: string; gap: number }[]; count: number };
-  110 |   expect(result.count).toBeGreaterThanOrEqual(2);
-  111 | 
-  112 |   for (const entry of result.gaps) {
-> 113 |     expect(entry.gap, `Gap between ${entry.between} was ${entry.gap}px, expected 4px`).toBe(4);
-      |                                                                                        ^ Error: Gap between 019e1dbe..019e1dbe was 130px, expected 4px
-  114 |   }
-  115 | });
-  116 | 
-  117 | // ============================================================================
-  118 | // Test 3: Do thinking traces load and display?
-  119 | // ============================================================================
   120 | 
   121 | test("messages with thinking traces show a thinking toggle", async ({ page }) => {
   122 |   const apiMessages = await getHistoryMessages(AGENT);
@@ -771,4 +661,82 @@ Received: 130
   211 |     await container.evaluate((el) => el.scrollTo(0, el.scrollHeight));
   212 |     await page.waitForTimeout(1000);
   213 |   }
+  214 | 
+  215 |   // The bottom message should be reachable — either visible or we can get back to it
+  216 |   const afterScrollBackIds = await getVisibleMessageIds();
+  217 |   expect(
+  218 |     afterScrollBackIds,
+  219 |     "After scrolling back down, the original bottom message is gone"
+> 220 |   ).toContain(bottomMsgId);
+      |     ^ Error: After scrolling back down, the original bottom message is gone
+  221 | });
+  222 | 
+  223 | // ============================================================================
+  224 | // Test 5: Rendered content matches API for the last N messages
+  225 | // ============================================================================
+  226 | 
+  227 | test("rendered messages match the API response for the last N visible messages", async ({ page }) => {
+  228 |   await page.goto("/");
+  229 |   await waitForMessages(page);
+  230 |   await page.waitForTimeout(1000);
+  231 | 
+  232 |   const container = page.locator('[data-testid="conversation-messages"]').first();
+  233 | 
+  234 |   // Get all rendered node IDs and their text content
+  235 |   const rendered = await container.evaluate((el) => {
+  236 |     const nodes = el.querySelectorAll("[data-node-id]");
+  237 |     return Array.from(nodes).map((n) => ({
+  238 |       id: n.getAttribute("data-node-id"),
+  239 |       text: (n as HTMLElement).innerText,
+  240 |     }));
+  241 |   });
+  242 | 
+  243 |   expect(rendered.length, "No messages rendered").toBeGreaterThan(0);
+  244 | 
+  245 |   // Query API after page has loaded
+  246 |   const apiMessages = await getHistoryMessages(AGENT);
+  247 | 
+  248 |   // Every rendered message should correspond to an API message with matching content.
+  249 |   // Note: the WebSocket may deliver extra messages (from the live tailer) that the
+  250 |   // REST API doesn't include yet. Skip those rather than failing.
+  251 |   let verified = 0;
+  252 |   let skippedLiveTail = 0;
+  253 |   for (const r of rendered) {
+  254 |     const apiMsg = apiMessages.find((m: any) => m.id === r.id);
+  255 |     if (!apiMsg) {
+  256 |       skippedLiveTail++;
+  257 |       continue; // live-tailed message not in REST API — not a content error
+  258 |     }
+  259 | 
+  260 |     // The frontend strips [Context left ...] tags from user messages.
+  261 |     // Apply the same transform before comparing.
+  262 |     let apiContent = apiMsg.content;
+  263 |     if (apiMsg.role === "user") {
+  264 |       apiContent = apiContent.replace(/\s*\[Context left [^\]]*\]\s*/g, "").trim();
+  265 |     }
+  266 | 
+  267 |     // For content verification, check that distinctive words from the API
+  268 |     // content appear in the rendered text. Markdown rendering changes
+  269 |     // formatting but preserves words.
+  270 |     const plainWords = apiContent
+  271 |       .replace(/[#*`_\[\]()>|~]/g, " ")
+  272 |       .replace(/\n/g, " ")
+  273 |       .split(/\s+/)
+  274 |       .filter((w: string) => w.length > 4 && !/^(https?|mailto)/.test(w))
+  275 |       .slice(0, 10);
+  276 | 
+  277 |     if (plainWords.length >= 2) {
+  278 |       // Check that at least half the probe words appear in rendered text
+  279 |       const renderedLower = r.text.toLowerCase();
+  280 |       const found = plainWords.filter((w: string) => renderedLower.includes(w.toLowerCase()));
+  281 |       expect(
+  282 |         found.length,
+  283 |         `Message ${r.id?.slice(0, 12)} (${apiMsg.role}): only ${found.length}/${plainWords.length} words matched. Missing: ${plainWords.filter((w: string) => !renderedLower.includes(w.toLowerCase())).join(", ")}`
+  284 |       ).toBeGreaterThanOrEqual(Math.ceil(plainWords.length / 2));
+  285 |     }
+  286 |     verified++;
+  287 |   }
+  288 | 
+  289 |   expect(verified, "No messages were verified").toBeGreaterThan(0);
+  290 | });
 ```

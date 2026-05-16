@@ -299,10 +299,10 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   // Suppress scroll-position corrections while the user is actively scrolling.
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => !userScrolling.current;
 
-  // Robust container resize handling + initial measurement for markdown-heavy agents.
-  // A ResizeObserver on the scroll container catches any layout shift (header changes,
-  // font loading, pane resize) and forces the virtualizer to re-measure.
-  // We also do several post-mount measures to give React-Markdown time to finish laying out.
+  // Force re-render after virtualizer measures items so positions update.
+  // The virtualizer measures via measureElement ResizeObserver but may not
+  // trigger a React re-render to update translateY positions.
+  const [, forceRender] = useState(0);
   useEffect(() => {
     const el = parentRef.current;
     if (!el) return;
@@ -312,30 +312,18 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     });
     observer.observe(el);
 
-    // Multiple rounds of measurement to handle async markdown rendering + layout settling.
-    // We use both setTimeout and requestAnimationFrame to catch different paint cycles.
-    const timers: number[] = [];
-
-    const doMeasure = () => virtualizer.measure();
-
-    // Early measurements
-    timers.push(setTimeout(doMeasure, 80));
-    timers.push(setTimeout(doMeasure, 220));
-
-    // Mid measurements (good for most markdown)
-    timers.push(setTimeout(doMeasure, 480));
-    timers.push(requestAnimationFrame(doMeasure) as unknown as number);
-
-    // Late measurements for very long / complex content (code blocks, tables, etc.)
-    timers.push(setTimeout(doMeasure, 950));
-    timers.push(setTimeout(doMeasure, 1600));
-    timers.push(requestAnimationFrame(() => requestAnimationFrame(doMeasure)) as unknown as number);
+    // Force re-renders after mount to pick up measured item sizes.
+    // Each round gives markdown more time to render, then forces position recalc.
+    const timers = [
+      setTimeout(() => forceRender((n) => n + 1), 150),
+      setTimeout(() => forceRender((n) => n + 1), 400),
+      setTimeout(() => forceRender((n) => n + 1), 800),
+      setTimeout(() => forceRender((n) => n + 1), 1500),
+    ];
 
     return () => {
       observer.disconnect();
-      timers.forEach((t) => {
-        if (typeof t === 'number') clearTimeout(t);
-      });
+      timers.forEach(clearTimeout);
     };
   }, [virtualizer, messages, historyMessages, readOnly]);
 
@@ -609,14 +597,22 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
           useArenaStore.getState().reportViewportFocus(paneId, node.id);
         }
       }
+      // Deferred window advance: if scroll settled at bottom and window isn't at end
+      const el2 = parentRef.current;
+      if (el2) {
+        const atBot = el2.scrollHeight - el2.scrollTop - el2.clientHeight < 50;
+        if (atBot && visibleWindowStart + WINDOW_SIZE < nodesRef.current.length) {
+          setVisibleWindowStart(Math.max(0, nodesRef.current.length - WINDOW_SIZE));
+        }
+      }
     }, 300);
 
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
     userScrolledUp.current = !atBottom;
     setShowJumpButton(!atBottom && nodes.length > 20);
 
-    // Window advance to end is handled by jumpToLatest button, not scroll handler.
-    // Advancing here during scroll caused regressions (scroll-up broken).
+    // Deferred window advance: after scrolling settles at bottom, move window to end.
+    // Done in the settled timeout (300ms) to avoid interfering with active scroll-up.
   }, [selectNode, paneId, virtualizer, paneCursor, paneLoading, visibleWindowStart, nodes.length, displayNodes, loadOlderHistory, spacerHeight]);
 
   // Auto-scroll to bottom on new content (live pane) or data load (both panes)
