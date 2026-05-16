@@ -291,6 +291,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
       return Math.max(120, 80 + lineCount * 24 + Math.floor(content.length / 3));
     },
     overscan: 15,
+    gap: 4,
     paddingStart: spacerHeight,
   });
 
@@ -893,7 +894,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
                   left: 0,
                   width: "100%",
                   transform: `translateY(${virtualRow.start}px)`,
-                  paddingBottom: 4,
+                  
                 }}
               >
                 <Message node={node} />
