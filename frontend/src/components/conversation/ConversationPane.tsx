@@ -209,13 +209,19 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     if (currentFirstId !== prevFirstNodeId.current) {
       const oldFirstIndex = nodes.findIndex((n: ConversationNode) => n.id === prevFirstNodeId.current);
       if (oldFirstIndex > 0) {
-        const newlyPrepended = nodes.slice(0, oldFirstIndex);
-        setMeasuringBatch(newlyPrepended);
+        // Older history prepended. Only route through measuring batch if user
+        // was actively looking at older content. If we're following live (at
+        // the bottom), just keep the window at the end — don't shift backwards.
+        if (userScrolledUp.current) {
+          const newlyPrepended = nodes.slice(0, oldFirstIndex);
+          setMeasuringBatch(newlyPrepended);
+        } else {
+          // Stay at the bottom — adjust window to account for prepended items
+          setVisibleWindowStart(Math.max(0, currentLen - WINDOW_SIZE));
+        }
       }
-    }
-
-    // Handle growth at the end (new live messages)
-    if (currentLen > prevLength.current) {
+    } else if (currentLen > prevLength.current) {
+      // Growth at the end (new live messages)
       const wasAtBottomOfWindow = visibleWindowStart + WINDOW_SIZE >= prevLength.current - 3;
       const shouldFollowLive = wasAtBottomOfWindow || !userScrolledUp.current;
 
@@ -606,6 +612,12 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
     userScrolledUp.current = !atBottom;
     setShowJumpButton(!atBottom && nodes.length > 20);
+
+    // If user scrolled to bottom of current window but window isn't at the end,
+    // advance window to show the latest messages.
+    if (atBottom && visibleWindowStart + WINDOW_SIZE < nodes.length) {
+      setVisibleWindowStart(Math.max(0, nodes.length - WINDOW_SIZE));
+    }
   }, [selectNode, paneId, virtualizer, paneCursor, paneLoading, visibleWindowStart, nodes.length, displayNodes, loadOlderHistory, spacerHeight]);
 
   // Auto-scroll to bottom on new content (live pane) or data load (both panes)
@@ -881,6 +893,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
                   left: 0,
                   width: "100%",
                   transform: `translateY(${virtualRow.start}px)`,
+                  paddingBottom: 4,
                 }}
               >
                 <Message node={node} />
