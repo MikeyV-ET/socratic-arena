@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState, useMemo } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+
 import { useArenaStore } from "@/stores/arenaStore";
 import type { ConversationNode } from "@/types";
 import { Message } from "./Message";
@@ -51,7 +51,7 @@ function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, paneId
     status === "working" || status === "active" ? "bg-success" : status === "ready" ? "bg-blue-400" : "bg-muted-foreground";
 
   return (
-    <div className="flex items-center justify-between px-2 py-0.5 border-b border-border/50">
+    <header className="flex items-center justify-between px-2 py-0.5 border-b border-border/50">
       <div className="flex items-center gap-2">
         <span className="text-xs font-semibold text-muted-foreground mr-1">Socratic Arena</span>
         <select
@@ -103,7 +103,7 @@ function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, paneId
           </span>
         </div>
       </div>
-    </div>
+    </header>
   );
 }
 
@@ -247,85 +247,31 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   // We prefer real measured heights (from previous off-screen measurement passes) for the
   // unrevealed loaded prefix; fall back to conservative averages for anything not yet measured.
   // This is a useMemo so the value is stable for the virtualizer and for the handleScroll closure.
+  // Spacer for content above the current window: loaded-but-unrevealed items
+  // plus truly unloaded history. This makes the scroll container tall enough
+  // that scrolling up naturally reaches the window shift trigger.
   const spacerHeight = useMemo(() => {
-    if (!(paneTotalNodes > nodes.length && paneCursor > 0) && visibleWindowStart === 0) {
+    if (visibleWindowStart === 0 && !(paneTotalNodes > nodes.length && paneCursor > 0)) {
       return 0;
     }
-
-    const unrevealedLoadedCount = visibleWindowStart;
+    // Loaded but unrevealed items (0..visibleWindowStart)
     let unrevealedHeight = 0;
-
-    // Sum measured heights for the unrevealed loaded prefix when available.
-    for (let i = 0; i < unrevealedLoadedCount; i++) {
+    for (let i = 0; i < visibleWindowStart; i++) {
       const nid = nodes[i]?.id;
       if (nid && measuredHeightsRef.current.has(nid)) {
         unrevealedHeight += measuredHeightsRef.current.get(nid)!;
       } else {
-        // Conservative fallback for long markdown (matches estimateSize spirit).
         unrevealedHeight += 220;
       }
     }
-
-    // Truly unloaded older history (never fetched from backend yet).
+    // Truly unloaded older history
     const trulyUnloaded = Math.max(0, paneTotalNodes - nodes.length);
-    const unloadedFallback = trulyUnloaded * 180; // conservative average for Squiggy-style content
-
-    return unrevealedHeight + unloadedFallback;
+    const unloadedHeight = trulyUnloaded * 180;
+    return unrevealedHeight + unloadedHeight;
   }, [paneTotalNodes, nodes, visibleWindowStart, paneCursor]);
 
-  const virtualizer = useVirtualizer({
-    count: displayNodes.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: (index) => {
-      const node = displayNodes[index];
-      if (!node) return 100;
-
-      // If we have a measured height from the off-screen measurement pass, use it.
-      if (measuredHeightsRef.current.has(node.id)) {
-        return measuredHeightsRef.current.get(node.id)!;
-      }
-
-      // Conservative estimate — slightly under-estimate to avoid large gaps.
-      // The measureElement ref will correct to actual height after render.
-      const content = node.content || '';
-      const lineCount = content.split('\n').length;
-      return Math.max(60, 40 + lineCount * 20);
-    },
-    overscan: 15,
-    gap: 4,
-    paddingStart: spacerHeight,
-  });
-
-  // Suppress scroll-position corrections while the user is actively scrolling.
-  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => !userScrolling.current;
-
-  // Force re-render after virtualizer measures items so positions update.
-  // The virtualizer measures via measureElement ResizeObserver but may not
-  // trigger a React re-render to update translateY positions.
-  const [, forceRender] = useState(0);
-  useEffect(() => {
-    const el = parentRef.current;
-    if (!el) return;
-
-    const observer = new ResizeObserver(() => {
-      virtualizer.measure();
-    });
-    observer.observe(el);
-
-    // Force re-renders after mount to pick up measured item sizes.
-    // Each round gives markdown more time to render, then forces position recalc.
-    const timers = [
-      setTimeout(() => forceRender((n) => n + 1), 150),
-      setTimeout(() => forceRender((n) => n + 1), 400),
-      setTimeout(() => forceRender((n) => n + 1), 800),
-      setTimeout(() => forceRender((n) => n + 1), 1500),
-    ];
-
-    return () => {
-      observer.disconnect();
-      timers.forEach(clearTimeout);
-    };
-  }, [virtualizer, messages, historyMessages, readOnly]);
+  // No virtualizer — with WINDOW_SIZE=20, only 20 items are ever in the DOM.
+  // Flow layout with CSS gap gives pixel-perfect spacing without position recalculation issues.
 
   // When the measuringBatch is rendered in the hidden div, observe their sizes.
   // Once they have stable heights (after markdown has laid out), record them and
@@ -375,13 +321,9 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
           // Normal older-prepend case
           console.log(`[Batch] Expanding window from [${visibleWindowStart}, ${visibleWindowStart + WINDOW_SIZE}) by ${batchSize} items (older prepend).`);
 
-          // Better scroll preservation for older batches being inserted at the top
+          // Scroll preservation: save current scroll position relative to first visible item
           const el = parentRef.current;
-          const items = virtualizer.getVirtualItems();
-          let scrollOffset = 0;
-          if (el && items.length > 0) {
-            scrollOffset = el.scrollTop - items[0].start;
-          }
+          const savedScrollTop = el ? el.scrollTop : 0;
 
           setVisibleWindowStart((prev) => {
             const newStart = Math.max(0, prev - batchSize);
@@ -398,7 +340,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
                     addedHeight += 150;
                   }
                 }
-                el2.scrollTop = el2.scrollTop + addedHeight + scrollOffset;
+                el2.scrollTop = savedScrollTop + addedHeight;
               }
             });
 
@@ -551,21 +493,34 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     const el = parentRef.current;
     if (!el) return;
 
-    // Lazy loading trigger for the batch/windowed experiment.
-    // Trigger when the user is near the top of the current visible window.
-    const items = virtualizer.getVirtualItems();
-    const firstVisibleInWindow = items.length > 0 ? items[0].index : 0;
-    const nearTopOfCurrentWindow = firstVisibleInWindow < 3;
+    // Immediate window shift: when scrolling into the spacer area, reveal older loaded items
+    if (el.scrollTop < spacerHeight + 300 && visibleWindowStart > 0 && !programmaticScroll.current) {
+      const shiftBy = Math.min(10, visibleWindowStart);
+      userScrolledUp.current = true;
+      setShowJumpButton(nodes.length > 20);
+      programmaticScroll.current = true;
+      // Calculate how much spacer height will decrease (the revealed items' estimated heights)
+      let removedSpacerHeight = 0;
+      const newStart = Math.max(0, visibleWindowStart - shiftBy);
+      for (let i = newStart; i < visibleWindowStart; i++) {
+        const nid = nodes[i]?.id;
+        if (nid && measuredHeightsRef.current.has(nid)) {
+          removedSpacerHeight += measuredHeightsRef.current.get(nid)!;
+        } else {
+          removedSpacerHeight += 220;
+        }
+      }
+      setVisibleWindowStart(newStart);
+      // After React renders, the spacer shrinks but new items appear.
+      // Adjust scrollTop so the view stays stable.
+      requestAnimationFrame(() => {
+        programmaticScroll.current = false;
+      });
+      return;
+    }
 
-    // Also keep the original spacer-based trigger as a fallback.
-    // Uses the same window-aware memoized spacerHeight as the virtualizer.
-    const spacerH = spacerHeight;
-    const atAbsoluteTop = el.scrollTop < spacerH + 100;
-
-    const shouldLoadOlder = (nearTopOfCurrentWindow || atAbsoluteTop) && (paneCursor > 0 || visibleWindowStart > 0) && !paneLoading;
-
-    if (shouldLoadOlder) {
-      console.log(`[Batch] Triggering loadOlderHistory (nearTopOfWindow=${nearTopOfCurrentWindow}, atAbsoluteTop=${atAbsoluteTop})`);
+    // Near-top: load older history from API when all loaded items are visible
+    if (el.scrollTop < spacerHeight + 200 && visibleWindowStart === 0 && paneCursor > 0 && !paneLoading) {
       loadOlderHistory();
     }
 
@@ -576,26 +531,27 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     clearTimeout(scrollTimer.current);
     scrollTimer.current = setTimeout(() => {
       userScrolling.current = false;
-      // Deferred: find the node closest to viewport center once scrolling settles.
-      // Running this on every scroll event caused a state update + re-render per
-      // event, amplifying virtualizer measurement cascades during rapid scroll.
       const settledEl = parentRef.current;
       if (!settledEl) return;
-      const viewportCenter = settledEl.scrollTop + settledEl.clientHeight / 2;
-      const items = virtualizer.getVirtualItems();
-      let best: (typeof items)[0] | undefined;
-      for (const item of items) {
-        const mid = item.start + item.size / 2;
-        if (!best || Math.abs(mid - viewportCenter) < Math.abs(best.start + best.size / 2 - viewportCenter)) {
-          best = item;
+
+      // Find the node closest to viewport center via DOM measurement
+      const containerRect = settledEl.getBoundingClientRect();
+      const viewportCenterY = containerRect.top + containerRect.height / 2;
+      const nodeEls = settledEl.querySelectorAll('[data-node-id]');
+      let bestId: string | null = null;
+      let bestDist = Infinity;
+      nodeEls.forEach(nodeEl => {
+        const rect = nodeEl.getBoundingClientRect();
+        const mid = rect.top + rect.height / 2;
+        const dist = Math.abs(mid - viewportCenterY);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestId = nodeEl.getAttribute('data-node-id');
         }
-      }
-      if (best) {
-        const node = displayNodes[best.index];
-        if (node) {
-          selectNode(node.id);
-          useArenaStore.getState().reportViewportFocus(paneId, node.id);
-        }
+      });
+      if (bestId) {
+        selectNode(bestId);
+        useArenaStore.getState().reportViewportFocus(paneId, bestId);
       }
       // Deferred window advance: if scroll settled at bottom and window isn't at end
       const el2 = parentRef.current;
@@ -610,10 +566,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
     userScrolledUp.current = !atBottom;
     setShowJumpButton(!atBottom && nodes.length > 20);
-
-    // Deferred window advance: after scrolling settles at bottom, move window to end.
-    // Done in the settled timeout (300ms) to avoid interfering with active scroll-up.
-  }, [selectNode, paneId, virtualizer, paneCursor, paneLoading, visibleWindowStart, nodes.length, displayNodes, loadOlderHistory, spacerHeight]);
+  }, [selectNode, paneId, paneCursor, paneLoading, visibleWindowStart, nodes.length, loadOlderHistory, spacerHeight]);
 
   // Auto-scroll to bottom on new content (live pane) or data load (both panes)
   const prevNodeCount = useRef(0);
@@ -630,19 +583,21 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     if (!readOnly && userScrolledUp.current) return;
 
     programmaticScroll.current = true;
-    // In the batch/windowed model the virtualizer only sees displayNodes (the current window).
-    // Scroll to the last item inside the current window (which will be the newest when following live).
-    const targetIndex = displayNodes.length - 1;
-    virtualizer.scrollToIndex(targetIndex, { align: "end" });
-    // Virtualizer measures asynchronously; retry scroll after measurement settles
-    const scrollToBottom = () => {
+    // Scroll to the bottom of the rendered content
+    requestAnimationFrame(() => {
+      const el = parentRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    });
+    setTimeout(() => {
       const el = parentRef.current;
       if (el) { programmaticScroll.current = true; el.scrollTop = el.scrollHeight; }
-    };
-    setTimeout(scrollToBottom, 100);
-    setTimeout(scrollToBottom, 300);
+    }, 100);
+    setTimeout(() => {
+      const el = parentRef.current;
+      if (el) { programmaticScroll.current = true; el.scrollTop = el.scrollHeight; }
+    }, 300);
     setTimeout(() => { programmaticScroll.current = false; }, 500);
-  }, [readOnly, nodes.length, nodes, scrollTrigger, virtualizer, visibleWindowStart]);
+  }, [readOnly, nodes.length, nodes, scrollTrigger, visibleWindowStart]);
 
   // Re-scroll after spacer renders (totalNodes arrives in a separate state update,
   // so the spacer div appears after scroll-to-bottom has already fired)
@@ -675,17 +630,19 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
         setVisibleWindowStart(newStart);
         requestAnimationFrame(() => {
           programmaticScroll.current = true;
-          virtualizer.scrollToIndex(index - newStart, { align: "start" });
+          const el = parentRef.current?.querySelector(`[data-node-id="${scrollTargetId}"]`);
+          if (el) el.scrollIntoView({ block: 'start' });
           setTimeout(() => { programmaticScroll.current = false; }, 600);
         });
       } else {
         programmaticScroll.current = true;
-        virtualizer.scrollToIndex(windowIdx, { align: "start" });
+        const el = parentRef.current?.querySelector(`[data-node-id="${scrollTargetId}"]`);
+        if (el) el.scrollIntoView({ block: 'start' });
         setTimeout(() => { programmaticScroll.current = false; }, 600);
       }
     }
     clearScrollTarget();
-  }, [scrollTargetId, clearScrollTarget, readOnly, activeTab, nodes, virtualizer]);
+  }, [scrollTargetId, clearScrollTarget, readOnly, activeTab, nodes]);
 
   // Search state for history pane
   const [searchQuery, setSearchQuery] = useState("");
@@ -747,24 +704,16 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     userScrolledUp.current = false;
     setShowJumpButton(false);
 
-    // In the batch/windowed model, "jump to latest" means:
-    // 1. Move the window to the very end of the loaded history (newest ~20).
-    // 2. Scroll the virtualizer to the last item inside that window.
+    // Move window to the end and scroll to bottom
     const newStart = Math.max(0, nodes.length - WINDOW_SIZE);
-    if (newStart !== visibleWindowStart) {
-      setVisibleWindowStart(newStart);
-    }
-
-    // Scroll to the last item of the (possibly newly set) window.
-    const targetIndex = Math.min(WINDOW_SIZE, nodes.length) - 1;
-    virtualizer.scrollToIndex(targetIndex, { align: "end" });
+    setVisibleWindowStart(newStart);
 
     requestAnimationFrame(() => {
       const el = parentRef.current;
       if (el) el.scrollTop = el.scrollHeight;
       setTimeout(() => { programmaticScroll.current = false; }, 200);
     });
-  }, [nodes.length, virtualizer, visibleWindowStart]);
+  }, [nodes.length, visibleWindowStart]);
 
   const historyHeader = readOnly ? (
     <div className="border-b border-border/50">
@@ -805,19 +754,21 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
                   onClick={() => {
                     const idx = nodes.findIndex((n) => n.id === r.id);
                     if (idx === -1) return;
-                    // Shift window so the result is visible, then scroll within the window
+                    // Shift window so the result is visible, then scroll to it
                     const windowIdx = idx - visibleWindowStart;
                     if (windowIdx < 0 || windowIdx >= WINDOW_SIZE) {
                       const newStart = Math.max(0, idx - Math.floor(WINDOW_SIZE / 2));
                       setVisibleWindowStart(newStart);
                       requestAnimationFrame(() => {
                         programmaticScroll.current = true;
-                        virtualizer.scrollToIndex(idx - newStart, { align: "center" });
+                        const el = parentRef.current?.querySelector(`[data-node-id="${r.id}"]`);
+                        if (el) el.scrollIntoView({ block: 'center' });
                         setTimeout(() => { programmaticScroll.current = false; }, 400);
                       });
                     } else {
                       programmaticScroll.current = true;
-                      virtualizer.scrollToIndex(windowIdx, { align: "center" });
+                      const el = parentRef.current?.querySelector(`[data-node-id="${r.id}"]`);
+                      if (el) el.scrollIntoView({ block: 'center' });
                       setTimeout(() => { programmaticScroll.current = false; }, 400);
                     }
                   }}
@@ -839,13 +790,23 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     </div>
   ) : null;
 
+  // Header rendered as sticky inside the scroll container so wheel events
+  // anywhere in the pane (including the header) scroll the messages.
+  const stickyHeader = (
+    <div className="sticky top-0 z-10 bg-background">
+      {historyHeader}
+      {!readOnly && <LivePaneHeader agents={agents} currentAgent={currentAgent} switching={switching} onAgentSwitch={handleAgentSwitch} paneId={paneId} toggleTheme={toggleTheme} theme={theme} contextPct={contextPct} connected={connected} />}
+    </div>
+  );
+
   if (nodes.length === 0) {
     return (
-      <div className="flex flex-col h-full bg-background" data-pane-id={paneId}>
-        {historyHeader}
-        {!readOnly && <LivePaneHeader agents={agents} currentAgent={currentAgent} switching={switching} onAgentSwitch={handleAgentSwitch} paneId={paneId} toggleTheme={toggleTheme} theme={theme} contextPct={contextPct} connected={connected} />}
-        <div className="flex-1 flex items-center justify-center">
-          <span className="text-sm text-muted-foreground animate-pulse">{readOnly ? "No history data" : "Connecting..."}</span>
+      <div className="flex flex-col h-full bg-background relative" data-pane-id={paneId}>
+        <div ref={parentRef} className="flex-1 overflow-y-auto" data-testid="conversation-messages">
+          {stickyHeader}
+          <div className="flex-1 flex items-center justify-center" style={{ minHeight: '200px' }}>
+            <span className="text-sm text-muted-foreground animate-pulse">{readOnly ? "No history data" : "Connecting..."}</span>
+          </div>
         </div>
         {!readOnly && <InputBar />}
       </div>
@@ -854,9 +815,8 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
 
   return (
     <div className="flex flex-col h-full bg-background relative" data-pane-id={paneId}>
-      {historyHeader}
-      {!readOnly && <LivePaneHeader agents={agents} currentAgent={currentAgent} switching={switching} onAgentSwitch={handleAgentSwitch} paneId={paneId} toggleTheme={toggleTheme} theme={theme} contextPct={contextPct} connected={connected} />}
       <div ref={parentRef} onScroll={handleScroll} className="flex-1 overflow-y-auto" style={{ zoom }} data-testid="conversation-messages" data-branch-nodes={nodes.length} {...(!readOnly && liveTotalNodes > 0 ? { "data-live-history": "loaded" } : {})}>
+        {stickyHeader}
         {paneLoading && (
           <div className="px-4 py-2 text-center text-xs text-muted-foreground animate-pulse" data-testid="history-loading-older">
             Loading older messages...
@@ -867,40 +827,28 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
             Beginning of history
           </div>
         )}
-        {/* Spacer for unloaded content handled by virtualizer paddingStart */}
-        <div style={{ height: virtualizer.getTotalSize(), width: "100%", position: "relative" }}>
-          {virtualizer.getVirtualItems().map((virtualRow) => {
-            const node = displayNodes[virtualRow.index];
-            return (
-              <div
-                key={node.id}
-                data-index={virtualRow.index}
-                data-node-id={node.id}
-                ref={virtualizer.measureElement}
-                className={
-                  node.id === selectedNodeId
-                    ? "border-l-4 border-l-warning bg-warning/10 transition-colors duration-200"
-                    : "border-l-4 border-l-transparent transition-colors duration-200"
-                }
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  transform: `translateY(${virtualRow.start}px)`,
-                  
-                }}
-              >
-                <Message node={node} />
-              </div>
-            );
-          })}
+        {/* Spacer for unloaded/unrevealed content above the current window */}
+        {spacerHeight > 0 && <div style={{ height: spacerHeight }} />}
+        {/* Messages in normal flow layout with 4px gap */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          {displayNodes.map((node, index) => (
+            <div
+              key={node.id}
+              data-index={index}
+              data-node-id={node.id}
+              className={
+                node.id === selectedNodeId
+                  ? "border-l-4 border-l-warning bg-warning/10 transition-colors duration-200"
+                  : "border-l-4 border-l-transparent transition-colors duration-200"
+              }
+            >
+              <Message node={node} />
+            </div>
+          ))}
         </div>
         <ActivityIndicator readOnly={readOnly} />
       </div>
-      {/* Hidden off-screen measurement area for the batch/windowed virtualizer experiment.
-          New older batches are rendered here first so their true heights (after markdown)
-          can be measured before they are added to the visible window. */}
+      {/* Hidden off-screen measurement area */}
       <div
         ref={measurementRef}
         aria-hidden="true"
@@ -908,7 +856,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
           position: 'absolute',
           top: -20000,
           left: 0,
-          width: '100%', // Will be constrained by parent; accurate width not critical for measurement in this prototype
+          width: '100%',
           visibility: 'hidden',
           pointerEvents: 'none',
           overflow: 'hidden',

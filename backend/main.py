@@ -1829,12 +1829,30 @@ async def get_agent_notebook(name: str):
 async def get_agent_history(name: str, sessionId: str | None = None, tailMB: int = 5):
     """Load a specific agent's conversation history as a flat message list.
 
-    Uses tail-based loading for performance (large files can be 800MB+).
-    Optional sessionId query param loads a specific historical session.
-    tailMB controls how much of the file to read (default 5MB = ~50+ turns).
-    Returns cursor (byte offset) for pagination and totalNodes estimate.
+    For the currently loaded agent (no sessionId), returns in-memory messages
+    so IDs stay consistent with the WebSocket state.  For other agents or
+    historical sessions, parses from the updates.jsonl file.
     """
     from updates_parser import build_flat_messages, count_conversation_turns
+
+    # Current agent, live session: return in-memory state (IDs match WS snapshot)
+    if name == _current_agent and not sessionId and state and state.messages:
+        updates_path = get_agent_updates_path(name)
+        file_size = updates_path.stat().st_size if updates_path else 0
+        tail_bytes = 5 * 1024 * 1024
+        cursor = max(0, file_size - tail_bytes) if file_size > tail_bytes else 0
+        total_nodes = len(state.messages)
+        if updates_path and file_size > tail_bytes:
+            total_nodes_est, _ = await asyncio.to_thread(count_conversation_turns, str(updates_path))
+            total_nodes = total_nodes_est
+        return {
+            "status": "ok", "agent": name,
+            "messages": [m.model_dump() for m in state.messages],
+            "truncated": file_size > tail_bytes, "fileSize": file_size,
+            "cursor": cursor, "totalNodes": total_nodes,
+        }
+
+    # Other agents or historical sessions: parse from file
     if sessionId:
         updates_path = _get_updates_path_for_session(name, sessionId)
     else:
