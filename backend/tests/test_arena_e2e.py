@@ -13,6 +13,8 @@ import json
 import pytest
 import websockets
 import aiohttp
+import httpx
+from collections import Counter
 
 WS_URL = "ws://localhost:8000/ws"
 API_URL = "http://localhost:8000"
@@ -51,6 +53,62 @@ async def send_and_recv(ws, msg_type, payload):
             return last_snapshot
         # Otherwise keep consuming (stream chunks, turn_complete, etc.)
     return last_snapshot
+
+
+async def collect_ws_messages(ws, timeout=5.0):
+    """Drain all pending WS messages within timeout. Returns list of parsed messages."""
+    msgs = []
+    while True:
+        try:
+            raw = await asyncio.wait_for(ws.recv(), timeout=timeout)
+            msgs.append(json.loads(raw))
+        except (asyncio.TimeoutError, TimeoutError):
+            break
+    return msgs
+
+
+async def send_user_message(ws, content):
+    """Send a user message and wait for turn_complete or node_update.
+
+    Returns all WS messages received during this turn.
+    """
+    await ws.send(json.dumps({
+        "type": "conversation.send",
+        "payload": {"content": content},
+    }))
+
+    turn_msgs = []
+    # Wait for the turn to complete (agent response delivered)
+    while True:
+        try:
+            raw = await asyncio.wait_for(ws.recv(), timeout=30)
+            msg = json.loads(raw)
+            turn_msgs.append(msg)
+
+            if msg["type"] in ("conversation.turn_complete", "conversation.node_update"):
+                # Drain any trailing messages (snapshots, etc.)
+                try:
+                    while True:
+                        raw2 = await asyncio.wait_for(ws.recv(), timeout=1.0)
+                        turn_msgs.append(json.loads(raw2))
+                except (asyncio.TimeoutError, TimeoutError):
+                    pass
+                break
+        except (asyncio.TimeoutError, TimeoutError):
+            break
+
+    return turn_msgs
+
+
+async def get_messages_via_rest():
+    """Fetch current message list from REST API."""
+    async with httpx.AsyncClient(base_url=API_URL) as client:
+        r = await client.get("/api/agent/Jr/history")
+        if r.status_code == 200:
+            d = r.json()
+            if d.get("status") == "ok":
+                return d.get("messages", [])
+    return None
 
 
 # ─── TEST 1: Connection → State ───────────────────────────────────────────
@@ -577,6 +635,149 @@ async def test_tab_change_clears_workbench_focus():
                 vp = await r.json()
         assert vp["workbenchTab"] == "notebook"
         assert vp["workbenchFocus"] == {}
+    finally:
+        await ws.close()
+
+
+# ─── TEST: Multi-Turn Session (Duplicate Detection) ──────────────────────
+
+@pytest.mark.asyncio
+async def test_multiturn_no_duplicate_messages():
+    """Multi-turn conversation: no duplicate message IDs, correct ordering.
+
+    Sends 3 user messages and waits for agent responses. After all turns,
+    verifies:
+    1. No duplicate message IDs in the state
+    2. Messages are in correct chronological order (user, assistant alternating)
+    3. Each user message appears exactly once
+    4. WS message stream has no duplicate tree.live_node adds for same ID
+
+    This catches the dual-tailer race condition where LiveTailer and
+    arena_adapter both create nodes from the same updates.jsonl content.
+    """
+    ws, initial_state = await connect()
+    try:
+        initial_messages = initial_state.get("messages", [])
+        initial_count = len(initial_messages)
+        initial_ids = {m["id"] for m in initial_messages}
+
+        test_messages = [
+            "E2E test message alpha — turn 1",
+            "E2E test message beta — turn 2",
+            "E2E test message gamma — turn 3",
+        ]
+
+        all_ws_msgs = []
+        for content in test_messages:
+            turn_msgs = await send_user_message(ws, content)
+            all_ws_msgs.extend(turn_msgs)
+            # Small gap between turns to let LiveTailer poll
+            await asyncio.sleep(2)
+
+        # Wait extra time for any late LiveTailer duplicates to arrive
+        await asyncio.sleep(5)
+        trailing = await collect_ws_messages(ws, timeout=3.0)
+        all_ws_msgs.extend(trailing)
+
+        # Get final state via fresh WS sync
+        await ws.send(json.dumps({"type": "state.sync", "payload": {}}))
+        raw = await asyncio.wait_for(ws.recv(), timeout=10)
+        final_state = json.loads(raw)
+        assert final_state["type"] == "state.snapshot"
+        final_messages = final_state["payload"].get("messages", [])
+
+        # ── ASSERTION 1: No duplicate IDs ──
+        all_ids = [m["id"] for m in final_messages]
+        id_counts = Counter(all_ids)
+        dupes = {k: v for k, v in id_counts.items() if v > 1}
+        assert not dupes, f"Duplicate message IDs in state: {dupes}"
+
+        # ── ASSERTION 2: Correct number of new messages ──
+        new_messages = [m for m in final_messages if m["id"] not in initial_ids]
+        # 3 turns × 2 messages (user + assistant) = 6 new messages
+        assert len(new_messages) == 6, (
+            f"Expected 6 new messages (3 user + 3 assistant), got {len(new_messages)}. "
+            f"Roles: {[m['role'] for m in new_messages]}"
+        )
+
+        # ── ASSERTION 3: Each test message appears exactly once ──
+        user_contents = [m["content"] for m in new_messages if m["role"] == "user"]
+        for test_msg in test_messages:
+            matches = [c for c in user_contents if test_msg in c]
+            assert len(matches) == 1, (
+                f"Expected exactly 1 occurrence of '{test_msg}', found {len(matches)}. "
+                f"All user contents: {user_contents}"
+            )
+
+        # ── ASSERTION 4: Alternating user/assistant ordering ──
+        new_roles = [m["role"] for m in new_messages]
+        for i in range(0, len(new_roles), 2):
+            assert new_roles[i] == "user", (
+                f"Expected user at position {i}, got {new_roles[i]}. "
+                f"Full role sequence: {new_roles}"
+            )
+            if i + 1 < len(new_roles):
+                assert new_roles[i + 1] == "assistant", (
+                    f"Expected assistant at position {i+1}, got {new_roles[i+1]}. "
+                    f"Full role sequence: {new_roles}"
+                )
+
+        # ── ASSERTION 5: No duplicate tree.live_node adds in WS stream ──
+        add_node_ids = []
+        for msg in all_ws_msgs:
+            if msg.get("type") == "tree.live_node":
+                payload = msg.get("payload", {})
+                if payload.get("action") == "add":
+                    node = payload.get("node", {})
+                    if node.get("id"):
+                        add_node_ids.append(node["id"])
+        add_counts = Counter(add_node_ids)
+        ws_dupes = {k: v for k, v in add_counts.items() if v > 1}
+        assert not ws_dupes, (
+            f"Duplicate tree.live_node 'add' events for same ID: {ws_dupes}. "
+            f"LiveTailer and arena path are both creating nodes."
+        )
+
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_multiturn_message_content_integrity():
+    """Multi-turn: agent responses have non-empty content, no interleaving."""
+    ws, initial_state = await connect()
+    try:
+        initial_ids = {m["id"] for m in initial_state.get("messages", [])}
+
+        for i in range(3):
+            await send_user_message(ws, f"Integrity test turn {i+1}: say 'ack-{i+1}'")
+            await asyncio.sleep(2)
+
+        await asyncio.sleep(5)
+        await ws.send(json.dumps({"type": "state.sync", "payload": {}}))
+        raw = await asyncio.wait_for(ws.recv(), timeout=10)
+        final = json.loads(raw)
+        new_msgs = [m for m in final["payload"].get("messages", []) if m["id"] not in initial_ids]
+
+        # Every assistant message should have non-empty content
+        assistant_msgs = [m for m in new_msgs if m["role"] == "assistant"]
+        empty_assistants = [m["id"] for m in assistant_msgs if not m.get("content", "").strip()]
+        assert not empty_assistants, (
+            f"Assistant messages with empty content (response not delivered?): "
+            f"{empty_assistants}"
+        )
+
+        # Messages should be contiguous — no gaps in the sequence
+        # (i.e., all new messages should be at the end of the list)
+        all_msgs = final["payload"].get("messages", [])
+        new_indices = [i for i, m in enumerate(all_msgs) if m["id"] not in initial_ids]
+        if new_indices:
+            expected_indices = list(range(new_indices[0], new_indices[0] + len(new_indices)))
+            assert new_indices == expected_indices, (
+                f"New messages are not contiguous. Indices: {new_indices}. "
+                f"Expected: {expected_indices}. Interleaving detected."
+            )
+
     finally:
         await ws.close()
 
