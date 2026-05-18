@@ -84,6 +84,8 @@ interface ArenaState {
   toggleTheme: () => void;
   fontSize: number;
   setFontSize: (size: number) => void;
+  chatSide: "left" | "right";
+  toggleChatSide: () => void;
 
   // Agent
   currentAgent: string;
@@ -363,6 +365,13 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
       document.documentElement.style.setProperty("--sa-font-size", `${clamped}px`);
       document.documentElement.style.setProperty("--sa-zoom", String(clamped / 14));
       return { fontSize: clamped };
+    }),
+  chatSide: (localStorage.getItem("arena-chat-side") as "left" | "right") || "left",
+  toggleChatSide: () =>
+    set((state) => {
+      const next = state.chatSide === "left" ? "right" : "left";
+      localStorage.setItem("arena-chat-side", next);
+      return { chatSide: next };
     }),
 
   promptDraft: { systemPrompt: "", contextPrompt: "", probe: "", bridgeProbe: "", expectedBehavior: "", failureBehavior: "" },

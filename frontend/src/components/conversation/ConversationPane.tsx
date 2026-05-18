@@ -43,9 +43,10 @@ function ActivityIndicator({ readOnly }: { readOnly: boolean }) {
   );
 }
 
-function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, paneId, toggleTheme, theme, contextPct, connected }: {
+function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, paneId, toggleTheme, theme, contextPct, connected, chatSide, toggleChatSide }: {
   agents: any[]; currentAgent: string; switching: boolean; onAgentSwitch: (name: string) => void;
   paneId: string; toggleTheme: () => void; theme: string; contextPct: number | null; connected: boolean;
+  chatSide: "left" | "right"; toggleChatSide: () => void;
 }) {
   const healthDot = (status: string | null) =>
     status === "working" || status === "active" ? "bg-success" : status === "ready" ? "bg-blue-400" : "bg-muted-foreground";
@@ -76,6 +77,13 @@ function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, paneId
       </div>
       <div className="flex items-center gap-2">
         <FontSizeControl paneId={paneId} />
+        <button
+          onClick={toggleChatSide}
+          className="px-1 py-0.5 text-[11px] text-muted-foreground hover:text-foreground rounded border border-border hover:bg-muted transition-colors"
+          title={`Move chat to ${chatSide === "left" ? "right" : "left"}`}
+        >
+          {chatSide === "left" ? "\u21C0" : "\u21BC"}
+        </button>
         <button
           onClick={toggleTheme}
           className="px-1 py-0.5 text-[11px] text-muted-foreground hover:text-foreground rounded border border-border hover:bg-muted transition-colors"
@@ -144,6 +152,8 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   const connected = useArenaStore((s) => s.connected);
   const theme = useArenaStore((s) => s.theme);
   const toggleTheme = useArenaStore((s) => s.toggleTheme);
+  const chatSide = useArenaStore((s) => s.chatSide);
+  const toggleChatSide = useArenaStore((s) => s.toggleChatSide);
   const agents = useArenaStore((s) => s.agents);
   const setAgents = useArenaStore((s) => s.setAgents);
   const setCurrentAgent = useArenaStore((s) => s.setCurrentAgent);
@@ -795,7 +805,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   const stickyHeader = (
     <div className="sticky top-0 z-10 bg-background">
       {historyHeader}
-      {!readOnly && <LivePaneHeader agents={agents} currentAgent={currentAgent} switching={switching} onAgentSwitch={handleAgentSwitch} paneId={paneId} toggleTheme={toggleTheme} theme={theme} contextPct={contextPct} connected={connected} />}
+      {!readOnly && <LivePaneHeader agents={agents} currentAgent={currentAgent} switching={switching} onAgentSwitch={handleAgentSwitch} paneId={paneId} toggleTheme={toggleTheme} theme={theme} contextPct={contextPct} connected={connected} chatSide={chatSide} toggleChatSide={toggleChatSide} />}
     </div>
   );
 
