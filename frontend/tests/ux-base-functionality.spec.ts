@@ -276,7 +276,46 @@ test("scrolling down from mid-history advances gradually, not jumps to latest", 
 });
 
 // ============================================================================
-// Test 6: Rendered content matches API for the last N messages
+// Test 6: Workbench tabs can be reordered by dragging
+// ============================================================================
+
+test("workbench tabs can be reordered by dragging", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForTimeout(2000);
+
+  const getTabs = async () => {
+    const tabs = await page.locator('[data-testid^="workbench-tab-"]').all();
+    const ids: string[] = [];
+    for (const t of tabs) {
+      const testid = await t.getAttribute("data-testid");
+      if (testid) ids.push(testid.replace("workbench-tab-", ""));
+    }
+    return ids;
+  };
+
+  const before = await getTabs();
+  expect(before.length, "Need at least 2 tabs to test reorder").toBeGreaterThanOrEqual(2);
+
+  const firstTab = page.locator(`[data-testid="workbench-tab-${before[0]}"]`);
+  const secondTab = page.locator(`[data-testid="workbench-tab-${before[1]}"]`);
+
+  // Use Playwright's built-in drag
+  await firstTab.dragTo(secondTab);
+  await page.waitForTimeout(500);
+
+  const after = await getTabs();
+
+  // If drag worked, the first two tabs should be swapped
+  expect(
+    after[0],
+    `Tab drag did not reorder: before=[${before.slice(0, 3)}...] after=[${after.slice(0, 3)}...]. ` +
+    `Expected '${before[1]}' at position 0, got '${after[0]}'.`
+  ).toBe(before[1]);
+  expect(after[1]).toBe(before[0]);
+});
+
+// ============================================================================
+// Test 7: Rendered content matches API for the last N messages
 // ============================================================================
 
 test("rendered messages match the API response for the last N visible messages", async ({ page }) => {
