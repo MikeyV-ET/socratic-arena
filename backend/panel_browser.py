@@ -385,6 +385,21 @@ async def act(cdp_port: int, ref: str, action: str, value: str = "") -> dict:
         return {"ok": False, "error": f"Unknown action: {action}"}
 
 
+async def clipboard(cdp_port: int) -> dict:
+    """Read the clipboard contents from the browser via CDP."""
+    ws_url = await _get_ws_url(cdp_port)
+    async with websockets.connect(ws_url, max_size=10 * 1024 * 1024) as ws:
+        cdp = CDPSession(ws)
+        await cdp.send("Runtime.enable")
+        result = await cdp.send("Runtime.evaluate", {
+            "expression": "navigator.clipboard.readText()",
+            "awaitPromise": True,
+        })
+        await cdp.send("Runtime.disable")
+        value = result.get("result", {}).get("value", "")
+        return {"ok": True, "text": value}
+
+
 async def navigate(cdp_port: int, url: str) -> dict:
     """Navigate the active page to a URL."""
     ws_url = await _get_ws_url(cdp_port)

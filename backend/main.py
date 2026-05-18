@@ -2228,6 +2228,22 @@ async def panel_navigate(panel_id: str, body: dict):
         return {"status": "error", "message": str(e)}
 
 
+@app.get("/api/panel/{panel_id}/clipboard")
+async def panel_clipboard(panel_id: str):
+    """Read the clipboard from a Chrome panel."""
+    session = panel_manager.get(panel_id)
+    if not session:
+        return {"status": "error", "message": f"panel {panel_id} not found"}
+    if not session.selenium_port:
+        return {"status": "error", "message": f"panel {panel_id} has no CDP port"}
+    try:
+        result = await _panel_browser.clipboard(session.selenium_port)
+        return {"status": "ok", **result}
+    except Exception as e:
+        log.error("Panel %s clipboard failed: %s", panel_id, e)
+        return {"status": "error", "message": str(e)}
+
+
 # --- Panel proxy (same-origin Xpra access) ---
 
 import httpx as _httpx
