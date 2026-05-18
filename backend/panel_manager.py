@@ -167,7 +167,7 @@ class PanelManager:
             "xpra", "start", f":{display}",
             f"--bind-tcp=127.0.0.1:{port}",
             "--html=on",
-            "--clipboard=no",
+            "--clipboard=yes",
             "--notifications=no",
             "--sharing=yes",
             "--encodings=png,rgb,jpeg",
@@ -207,7 +207,7 @@ class PanelManager:
         # Proxied URL: frontend iframe stays same-origin via /api/panel/{id}/proxy
         # The 'path' param tells Xpra HTML5 client where to connect its WebSocket
         proxy_base = f"/api/panel/{panel_id}/proxy"
-        client_url = f"{proxy_base}/index.html?path={proxy_base}&clipboard=no&floating_menu=no&toolbar=no&keyboard=false&keyboard_layout=us"
+        client_url = f"{proxy_base}/index.html?path={proxy_base}&clipboard=yes&floating_menu=no&toolbar=no&keyboard=false&keyboard_layout=us"
 
         session = PanelSession(
             id=panel_id,
