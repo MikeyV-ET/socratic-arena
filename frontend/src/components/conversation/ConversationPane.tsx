@@ -563,18 +563,21 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
         selectNode(bestId);
         useArenaStore.getState().reportViewportFocus(paneId, bestId);
       }
-      // Deferred window advance: if scroll settled at bottom and window isn't at end
+      // Deferred window advance: if scroll settled at bottom and window isn't at end,
+      // advance incrementally (not jump to end) so mid-history browsing stays gradual
       const el2 = parentRef.current;
       if (el2) {
         const atBot = el2.scrollHeight - el2.scrollTop - el2.clientHeight < 50;
         if (atBot && visibleWindowStart + WINDOW_SIZE < nodesRef.current.length) {
-          setVisibleWindowStart(Math.max(0, nodesRef.current.length - WINDOW_SIZE));
+          const nextStart = Math.min(visibleWindowStart + 10, Math.max(0, nodesRef.current.length - WINDOW_SIZE));
+          setVisibleWindowStart(nextStart);
         }
       }
     }, 300);
 
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
-    userScrolledUp.current = !atBottom;
+    const windowAtEnd = visibleWindowStart + WINDOW_SIZE >= nodesRef.current.length;
+    userScrolledUp.current = !(atBottom && windowAtEnd);
     setShowJumpButton(!atBottom && nodes.length > 20);
   }, [selectNode, paneId, paneCursor, paneLoading, visibleWindowStart, nodes.length, loadOlderHistory, spacerHeight]);
 
