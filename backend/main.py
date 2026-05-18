@@ -318,13 +318,6 @@ async def _live_tail_loop():
                     node_data = entry["node"]
                     node_id = node_data["id"]
 
-                    # When an arena turn is in progress, skip assistant nodes
-                    if (_pending_arena_node_id
-                            and node_data.get("role") == "assistant"
-                            and node_id not in _arena_node_ids):
-                        log.debug("LiveTailer: skipping assistant node %s (arena turn in progress)", node_id)
-                        continue
-
                     # Skip duplicates
                     if node_id in _msg_index:
                         log.debug("LiveTailer: skipping duplicate node %s", node_id)
@@ -577,22 +570,10 @@ async def handle_conversation_send(ws: WebSocket, payload: dict):
     _msg_index[user_node.id] = user_node
     _arena_node_ids.add(user_node.id)
 
-    # Create placeholder assistant message (populated when agent responds via adapter)
-    assistant_node = ConversationNode(
-        id=new_id(),
-        branch_id=branch_id,
-        role="assistant",
-        content="",
-        agent_label=_current_agent,
-    )
-    state.messages.append(assistant_node)
-    _msg_index[assistant_node.id] = assistant_node
-    _arena_node_ids.add(assistant_node.id)
-
     # Persist user node to sidecar file
     _persist_arena_node(user_node.model_dump())
 
-    # Broadcast new messages incrementally
+    # Broadcast user message immediately (agent response comes via LiveTailer)
     await broadcast({
         "type": "tree.live_node",
         "payload": {
@@ -602,30 +583,11 @@ async def handle_conversation_send(ws: WebSocket, payload: dict):
             "advance": True,
         },
     })
-    await broadcast({
-        "type": "tree.live_node",
-        "payload": {
-            "action": "add",
-            "node": assistant_node.model_dump(),
-            "parentId": None,
-            "advance": True,
-        },
-    })
-
-    # Signal waiting for agent (adapter delivers response asynchronously)
-    await broadcast({
-        "type": "conversation.turn_start",
-        "payload": {"nodeId": assistant_node.id},
-    })
-
-    # Mark this node as awaiting streaming from LiveTailer
-    global _pending_arena_node_id
-    _pending_arena_node_id = assistant_node.id
 
     # Enqueue for asdaaas adapter pickup
     _pending_user_messages.append({
         "content": content,
-        "nodeId": assistant_node.id,
+        "nodeId": user_node.id,
         "branchId": branch_id,
         "agent": _current_agent,
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),

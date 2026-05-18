@@ -308,13 +308,11 @@ class ArenaAdapter:
         log.info("Starting arena adapter (default=%s) arena=%s", self.default_agent, self.arena_url)
         ensure_dirs(self.agents_home, self.default_agent)
         self._active_agents.add(self.default_agent)
-        self._init_tailer(self.default_agent)
         register(self.agents_home, self.default_agent)
 
         while self.running:
             try:
                 self._poll_arena_for_user_messages()
-                self._poll_updates_for_agent_responses()
                 self._heartbeat()
             except KeyboardInterrupt:
                 break
@@ -323,8 +321,6 @@ class ArenaAdapter:
 
             time.sleep(self.poll_interval)
 
-        for t in self._tailers.values():
-            t.close()
         log.info("Arena adapter stopped")
 
     def _init_tailer(self, agent_name: str):
