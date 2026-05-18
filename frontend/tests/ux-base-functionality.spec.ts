@@ -221,7 +221,62 @@ test("scrolling up reveals older messages, scrolling back down shows the origina
 });
 
 // ============================================================================
-// Test 5: Rendered content matches API for the last N messages
+// Test 5: Scrolling down from mid-history does NOT jump to latest
+// ============================================================================
+
+test("scrolling down from mid-history advances gradually, not jumps to latest", async ({ page }) => {
+  const apiMessages = await getHistoryMessages(AGENT);
+  test.skip(apiMessages.length <= 30, "Need >30 messages to test mid-history scroll");
+
+  await page.goto("/");
+  await waitForMessages(page);
+
+  const container = page.locator('[data-testid="conversation-messages"]').first();
+
+  // Record the latest message ID (the one we should NOT jump to)
+  const latestId = apiMessages[apiMessages.length - 1].id;
+
+  // Scroll up substantially to get into mid-history
+  for (let i = 0; i < 25; i++) {
+    await page.mouse.wheel(0, -400);
+    await page.waitForTimeout(100);
+  }
+  await page.waitForTimeout(2000);
+
+  // Record what messages are visible after scrolling up
+  const midHistoryIds = await container.evaluate((el) => {
+    const nodes = el.querySelectorAll("[data-node-id]");
+    return Array.from(nodes).map((n) => n.getAttribute("data-node-id"));
+  });
+
+  // Confirm we're NOT seeing the latest message (we scrolled away from it)
+  const seeLatestBeforeDown = midHistoryIds.includes(latestId);
+  test.skip(seeLatestBeforeDown, "Could not scroll far enough from latest — history too short");
+
+  // Now scroll DOWN a moderate amount (not all the way — just a few wheel ticks)
+  for (let i = 0; i < 5; i++) {
+    await page.mouse.wheel(0, 400);
+    await page.waitForTimeout(200);
+  }
+  await page.waitForTimeout(1500);
+
+  // Check what's visible now
+  const afterDownIds = await container.evaluate((el) => {
+    const nodes = el.querySelectorAll("[data-node-id]");
+    return Array.from(nodes).map((n) => n.getAttribute("data-node-id"));
+  });
+
+  // The latest message should NOT be visible — we only scrolled down a bit,
+  // not all the way. If it IS visible, the UI jumped to latest.
+  expect(
+    afterDownIds.includes(latestId),
+    `Scrolling down 5 ticks from mid-history jumped to the latest message (${latestId?.slice(0, 12)}). ` +
+    `Expected gradual scroll, got teleport. Visible IDs went from mid-history to latest.`
+  ).toBe(false);
+});
+
+// ============================================================================
+// Test 6: Rendered content matches API for the last N messages
 // ============================================================================
 
 test("rendered messages match the API response for the last N visible messages", async ({ page }) => {
