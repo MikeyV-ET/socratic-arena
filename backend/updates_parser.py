@@ -231,7 +231,7 @@ def parse_updates_tail(filepath: str, tail_bytes: int = 102400, agent_label: str
     offset = max(0, file_size - tail_bytes)
 
     raw_events = []
-    with open(filepath) as f:
+    with open(filepath, errors="replace") as f:
         if offset > 0:
             f.seek(offset)
             f.readline()  # discard partial first line

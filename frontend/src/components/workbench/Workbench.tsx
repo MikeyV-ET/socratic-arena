@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Panel, Group, Separator } from "react-resizable-panels";
 import { useArenaStore } from "@/stores/arenaStore";
 import { NotebookPane } from "@/components/notebook/NotebookPane";
@@ -94,51 +94,46 @@ function TabBar({ activeTab, onSelect, splitControls }: {
   const reorderTabs = useArenaStore((s) => s.reorderTabs);
   const [showMenu, setShowMenu] = useState(false);
   const [dragOver, setDragOver] = useState<string | null>(null);
+  const dragSrc = useRef<string | null>(null);
+  const didDrag = useRef(false);
 
-  const openTabs = WORKBENCH_TABS.filter((t) => openTabIds.includes(t.id));
+  const openTabs = openTabIds.map((id) => WORKBENCH_TABS.find((t) => t.id === id)).filter(Boolean) as typeof WORKBENCH_TABS;
   const closedTabs = WORKBENCH_TABS.filter((t) => !openTabIds.includes(t.id));
 
-  const handleDragStart = (e: React.DragEvent, tabId: string) => {
-    e.dataTransfer.setData("text/plain", tabId);
-    e.dataTransfer.effectAllowed = "move";
-  };
-
-  const handleDragOver = (e: React.DragEvent, tabId: string) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    setDragOver(tabId);
-  };
-
-  const handleDrop = (e: React.DragEvent, targetId: string) => {
-    e.preventDefault();
-    setDragOver(null);
-    const sourceId = e.dataTransfer.getData("text/plain");
-    if (sourceId === targetId) return;
+  const handleBarPointerMove = (e: React.PointerEvent) => {
+    if (!dragSrc.current) return;
+    const target = (e.target as HTMLElement).closest<HTMLElement>('[data-testid^="workbench-tab-"]');
+    if (!target) return;
+    const targetId = target.dataset.testid?.replace("workbench-tab-", "");
+    if (!targetId || targetId === dragSrc.current) { setDragOver(null); return; }
+    didDrag.current = true;
+    setDragOver(targetId);
     const ids = [...openTabIds];
-    const srcIdx = ids.indexOf(sourceId);
+    const srcIdx = ids.indexOf(dragSrc.current);
     const tgtIdx = ids.indexOf(targetId);
     if (srcIdx < 0 || tgtIdx < 0) return;
     ids.splice(srcIdx, 1);
-    ids.splice(tgtIdx, 0, sourceId);
+    ids.splice(tgtIdx, 0, dragSrc.current);
     reorderTabs(ids);
   };
 
   return (
-    <div className="flex items-center border-b border-border bg-card px-1">
+    <div
+      className="flex items-center border-b border-border bg-card px-1"
+      onPointerMove={handleBarPointerMove}
+      onPointerUp={() => { dragSrc.current = null; setDragOver(null); }}
+      onPointerLeave={() => { dragSrc.current = null; setDragOver(null); }}
+    >
       {openTabs.map((tab) => (
         <div
           key={tab.id}
-          draggable
-          onDragStart={(e) => handleDragStart(e, tab.id)}
-          onDragOver={(e) => handleDragOver(e, tab.id)}
-          onDrop={(e) => handleDrop(e, tab.id)}
-          onDragLeave={() => setDragOver(null)}
-          className={`group flex items-center gap-0.5 px-2 py-1.5 text-xs font-medium transition-colors border-b-2 cursor-pointer ${
+          onPointerDown={(e) => { e.preventDefault(); dragSrc.current = tab.id; didDrag.current = false; }}
+          className={`group flex items-center gap-0.5 px-2 py-1.5 text-xs font-medium transition-colors border-b-2 cursor-pointer select-none ${
             activeTab === tab.id
               ? "border-b-primary text-foreground"
               : "border-b-transparent text-muted-foreground hover:text-foreground"
           } ${dragOver === tab.id ? "bg-primary/10" : ""}`}
-          onClick={() => onSelect(tab.id)}
+          onClick={() => { if (!didDrag.current) onSelect(tab.id); }}
           data-testid={`workbench-tab-${tab.id}`}
         >
           <span>{tab.label}</span>

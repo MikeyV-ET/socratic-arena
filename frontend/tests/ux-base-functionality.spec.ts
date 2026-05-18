@@ -299,8 +299,13 @@ test("workbench tabs can be reordered by dragging", async ({ page }) => {
   const firstTab = page.locator(`[data-testid="workbench-tab-${before[0]}"]`);
   const secondTab = page.locator(`[data-testid="workbench-tab-${before[1]}"]`);
 
-  // Use Playwright's built-in drag
-  await firstTab.dragTo(secondTab);
+  // Use explicit mouse steps (pointer events)
+  const srcBox = (await firstTab.boundingBox())!;
+  const tgtBox = (await secondTab.boundingBox())!;
+  await page.mouse.move(srcBox.x + srcBox.width / 2, srcBox.y + srcBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(tgtBox.x + tgtBox.width / 2, tgtBox.y + tgtBox.height / 2, { steps: 10 });
+  await page.mouse.up();
   await page.waitForTimeout(500);
 
   const after = await getTabs();
