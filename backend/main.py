@@ -107,7 +107,7 @@ app.include_router(replay_router)
 init_replayer()
 
 # Shared collaborative documents
-from shared_docs import router as docs_router, files_router, set_broadcast as docs_set_broadcast
+from shared_docs import router as docs_router, files_router, set_broadcast as docs_set_broadcast, start_file_watcher
 app.include_router(docs_router)
 app.include_router(files_router)
 
@@ -1509,6 +1509,9 @@ async def load_persisted_data():
 
     # Start live tailer to stream session updates
     _start_live_tailer(_current_agent, tail_offset=_tail_offset)
+
+    # Start inotify file watcher for editor docs opened from disk
+    start_file_watcher(asyncio.get_event_loop())
 
 
 @app.on_event("shutdown")

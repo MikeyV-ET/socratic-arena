@@ -4,6 +4,7 @@ Provides:
 - In-memory document store with disk persistence
 - REST CRUD for document metadata and content
 - WebSocket endpoint for Yjs binary sync protocol (pycrdt)
+- inotify file watcher: detects external edits and pushes to editor
 
 Both browser (CodeMirror + y-websocket) and agent (REST or WS) can
 read/write the same document with conflict-free merging.
@@ -21,6 +22,8 @@ import pycrdt
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler, FileModifiedEvent
 
 from models import new_id
 
@@ -61,6 +64,124 @@ class _LiveDoc:
                 await ws.send_bytes(msg)
             except Exception:
                 self.clients.remove(ws)
+
+
+# ---------------------------------------------------------------------------
+# inotify file watcher — detects external edits to open documents
+# ---------------------------------------------------------------------------
+
+class _DocFileHandler(FileSystemEventHandler):
+    """Watchdog handler that queues reload events for open documents."""
+
+    def __init__(self):
+        super().__init__()
+        # file_path (resolved str) -> doc_id
+        self._watched: dict[str, str] = {}
+        self._loop: asyncio.AbstractEventLoop | None = None
+        # debounce: track last-handled mtime per path to avoid double-fires
+        self._last_mtime: dict[str, float] = {}
+
+    def watch(self, file_path: str, doc_id: str):
+        resolved = str(Path(file_path).resolve())
+        self._watched[resolved] = doc_id
+
+    def unwatch(self, file_path: str):
+        resolved = str(Path(file_path).resolve())
+        self._watched.pop(resolved, None)
+        self._last_mtime.pop(resolved, None)
+
+    def on_modified(self, event):
+        if event.is_directory:
+            return
+        resolved = str(Path(event.src_path).resolve())
+        if resolved not in self._watched:
+            return
+        # Debounce: skip if mtime hasn't changed
+        try:
+            mtime = Path(resolved).stat().st_mtime
+        except OSError:
+            return
+        if self._last_mtime.get(resolved) == mtime:
+            return
+        self._last_mtime[resolved] = mtime
+
+        doc_id = self._watched[resolved]
+        if self._loop and self._loop.is_running():
+            self._loop.call_soon_threadsafe(
+                asyncio.ensure_future,
+                _reload_doc_from_disk(doc_id, resolved)
+            )
+
+
+_file_handler = _DocFileHandler()
+_observer: Observer | None = None
+_watched_dirs: set[str] = set()
+
+
+async def _reload_doc_from_disk(doc_id: str, file_path: str):
+    """Re-read file from disk and update the Yjs doc, broadcasting to clients."""
+    live = _docs.get(doc_id)
+    if not live:
+        return
+    try:
+        new_content = Path(file_path).read_text(errors="replace")
+    except Exception as e:
+        log.warning("File watcher: failed to read %s: %s", file_path, e)
+        return
+
+    current = str(live.text)
+    if new_content == current:
+        return
+
+    log.info("File watcher: %s changed on disk, updating doc %s", file_path, doc_id)
+    state_before = live.ydoc.get_state()
+    with live.ydoc.transaction():
+        if len(live.text) > 0:
+            del live.text[0:len(live.text)]
+        live.text += new_content
+
+    # Broadcast Yjs update to all connected WebSocket clients
+    update = live.ydoc.get_update(state_before)
+    if update and update != b"\x00\x00" and live.clients:
+        fwd = pycrdt.create_update_message(update)
+        for ws in live.clients[:]:
+            try:
+                await ws.send_bytes(fwd)
+            except Exception:
+                live.clients.remove(ws)
+
+    live.meta.updated_at = time.time()
+    _persist_doc(live)
+
+
+def _ensure_watching(file_path: str, doc_id: str):
+    """Start watching the directory containing file_path if not already watched."""
+    global _observer
+    _file_handler.watch(file_path, doc_id)
+
+    parent_dir = str(Path(file_path).resolve().parent)
+    if parent_dir in _watched_dirs:
+        return
+
+    if _observer is None:
+        _observer = Observer()
+        _observer.daemon = True
+        _observer.start()
+        log.info("File watcher: started observer")
+
+    _observer.schedule(_file_handler, parent_dir, recursive=False)
+    _watched_dirs.add(parent_dir)
+    log.info("File watcher: watching dir %s", parent_dir)
+
+
+def start_file_watcher(loop: asyncio.AbstractEventLoop):
+    """Called at app startup to give the watcher access to the event loop."""
+    _file_handler._loop = loop
+    # Watch all already-open docs that have file_path
+    for doc_id, live in _docs.items():
+        if live.meta.file_path:
+            _ensure_watching(live.meta.file_path, doc_id)
+    log.info("File watcher: initialized, watching %d files", len(_file_handler._watched))
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +363,8 @@ async def delete_doc(doc_id: str):
     live = _docs.pop(doc_id, None)
     if not live:
         return JSONResponse({"error": "not found"}, status_code=404)
+    if live.meta.file_path:
+        _file_handler.unwatch(live.meta.file_path)
     # Close all WS clients
     for ws in live.clients[:]:
         try:
@@ -270,6 +393,11 @@ async def save_doc_to_file(doc_id: str):
         fp.write_text(str(live.text))
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+    # Pre-set mtime so the file watcher ignores this self-triggered event
+    try:
+        _file_handler._last_mtime[str(fp.resolve())] = fp.stat().st_mtime
+    except OSError:
+        pass
     live.meta.updated_at = time.time()
     _persist_index()
     return {"status": "ok", "path": str(fp)}
@@ -373,6 +501,7 @@ async def open_file(body: dict):
     _docs[doc_id] = live
     _persist_index()
     _persist_doc(live)
+    _ensure_watching(str(fp.resolve()), doc_id)
     await _notify("doc.created", meta.model_dump())
     return meta.model_dump()
 
