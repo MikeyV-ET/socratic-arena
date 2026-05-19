@@ -409,3 +409,90 @@ async def navigate(cdp_port: int, url: str) -> dict:
         # Wait for load
         await asyncio.sleep(1)
         return {"ok": True, "url": url, "frameId": result.get("frameId", "")}
+
+
+async def list_tabs(cdp_port: int) -> dict:
+    """List all open Chrome tabs via CDP /json endpoint.
+
+    Returns: {"tabs": [{"id": "...", "title": "...", "url": "...", "type": "page"}, ...]}
+    """
+    import aiohttp
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"http://127.0.0.1:{cdp_port}/json") as resp:
+            targets = await resp.json()
+    tabs = []
+    for t in targets:
+        tabs.append({
+            "id": t.get("id", ""),
+            "title": t.get("title", ""),
+            "url": t.get("url", ""),
+            "type": t.get("type", ""),
+            "ws": t.get("webSocketDebuggerUrl", ""),
+        })
+    return {"tabs": tabs}
+
+
+async def activate_tab(cdp_port: int, tab_id: str) -> dict:
+    """Activate (bring to front) a Chrome tab by its target ID.
+
+    Returns: {"ok": True, "tabId": "..."}
+    """
+    import aiohttp
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"http://127.0.0.1:{cdp_port}/json/activate/{tab_id}") as resp:
+            text = await resp.text()
+    return {"ok": "Target activated" in text, "tabId": tab_id, "response": text.strip()}
+
+
+async def page_content(cdp_port: int, tab_id: str | None = None) -> dict:
+    """Extract the full text content of a page (much faster than AX tree).
+
+    If tab_id is given, extracts from that specific tab. Otherwise uses the active tab.
+    Returns: {"url": "...", "title": "...", "text": "full page text"}
+    """
+    if tab_id:
+        # Get the WS URL for the specific tab
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"http://127.0.0.1:{cdp_port}/json") as resp:
+                targets = await resp.json()
+        ws_url = None
+        for t in targets:
+            if t.get("id") == tab_id:
+                ws_url = t.get("webSocketDebuggerUrl")
+                break
+        if not ws_url:
+            return {"ok": False, "error": f"Tab {tab_id} not found"}
+    else:
+        ws_url = await _get_ws_url(cdp_port)
+
+    async with websockets.connect(ws_url, max_size=10 * 1024 * 1024) as ws:
+        cdp = CDPSession(ws)
+
+        # Get page URL and title
+        nav = await cdp.send("Page.getNavigationHistory")
+        entries = nav.get("entries", [])
+        idx = nav.get("currentIndex", 0)
+        url = entries[idx]["url"] if entries else ""
+        title = entries[idx].get("title", "") if entries else ""
+
+        # Extract full text via DOM — innerText is fastest
+        result = await cdp.send("Runtime.evaluate", {
+            "expression": "document.body.innerText",
+            "returnByValue": True,
+        })
+        text = result.get("result", {}).get("value", "")
+
+    return {"ok": True, "url": url, "title": title, "text": text}
+
+
+async def close_tab(cdp_port: int, tab_id: str) -> dict:
+    """Close a Chrome tab by its target ID.
+
+    Returns: {"ok": True, "tabId": "..."}
+    """
+    import aiohttp
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"http://127.0.0.1:{cdp_port}/json/close/{tab_id}") as resp:
+            text = await resp.text()
+    return {"ok": "Target is closing" in text, "tabId": tab_id, "response": text.strip()}

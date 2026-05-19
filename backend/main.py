@@ -2247,6 +2247,83 @@ async def panel_clipboard(panel_id: str):
         return {"status": "error", "message": str(e)}
 
 
+@app.get("/api/panel/{panel_id}/tabs")
+async def panel_tabs(panel_id: str):
+    """List all open tabs in a Chrome panel."""
+    session = panel_manager.get(panel_id)
+    if not session:
+        return {"status": "error", "message": f"panel {panel_id} not found"}
+    if not session.selenium_port:
+        return {"status": "error", "message": f"panel {panel_id} has no CDP port"}
+    try:
+        result = await _panel_browser.list_tabs(session.selenium_port)
+        return {"status": "ok", **result}
+    except Exception as e:
+        log.error("Panel %s tabs failed: %s", panel_id, e)
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/panel/{panel_id}/tabs/activate")
+async def panel_activate_tab(panel_id: str, body: dict):
+    """Activate a specific Chrome tab by its target ID.
+
+    Body: {"tabId": "TARGET_ID"}
+    """
+    session = panel_manager.get(panel_id)
+    if not session:
+        return {"status": "error", "message": f"panel {panel_id} not found"}
+    if not session.selenium_port:
+        return {"status": "error", "message": f"panel {panel_id} has no CDP port"}
+    tab_id = body.get("tabId", "")
+    if not tab_id:
+        return {"status": "error", "message": "tabId is required"}
+    try:
+        result = await _panel_browser.activate_tab(session.selenium_port, tab_id)
+        return {"status": "ok", **result}
+    except Exception as e:
+        log.error("Panel %s activate tab failed: %s", panel_id, e)
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/panel/{panel_id}/content")
+async def panel_content(panel_id: str, tab_id: str | None = None):
+    """Extract the full text content of a page in a Chrome panel.
+
+    Query params:
+        tab_id: optional target ID to read a specific tab (from /tabs).
+                If omitted, reads the active tab.
+
+    Much faster than /snapshot for text extraction.
+    """
+    session = panel_manager.get(panel_id)
+    if not session:
+        return {"status": "error", "message": f"panel {panel_id} not found"}
+    if not session.selenium_port:
+        return {"status": "error", "message": f"panel {panel_id} has no CDP port"}
+    try:
+        result = await _panel_browser.page_content(session.selenium_port, tab_id)
+        return {"status": "ok", **result}
+    except Exception as e:
+        log.error("Panel %s content failed: %s", panel_id, e)
+        return {"status": "error", "message": str(e)}
+
+
+@app.delete("/api/panel/{panel_id}/tabs/{tab_id}")
+async def panel_close_tab(panel_id: str, tab_id: str):
+    """Close a specific Chrome tab by its target ID."""
+    session = panel_manager.get(panel_id)
+    if not session:
+        return {"status": "error", "message": f"panel {panel_id} not found"}
+    if not session.selenium_port:
+        return {"status": "error", "message": f"panel {panel_id} has no CDP port"}
+    try:
+        result = await _panel_browser.close_tab(session.selenium_port, tab_id)
+        return {"status": "ok", **result}
+    except Exception as e:
+        log.error("Panel %s close tab failed: %s", panel_id, e)
+        return {"status": "error", "message": str(e)}
+
+
 # --- Panel proxy (same-origin Xpra access) ---
 
 import httpx as _httpx
