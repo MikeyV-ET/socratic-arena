@@ -1611,9 +1611,22 @@ def _get_agent_info(name: str) -> dict:
     # Health status from asdaaas
     health_path = agent_dir / "asdaaas" / "health.json"
     health_status = None
+    context_pct = None
     try:
         h = json.loads(health_path.read_text())
         health_status = h.get("status")
+        total = h.get("totalTokens")
+        window = h.get("contextWindow")
+        if total and window:
+            context_pct = round(total / window * 100, 1)
+    except Exception:
+        pass
+
+    # Compaction state from asdaaas
+    compact_path = agent_dir / "asdaaas" / "compaction_state.json"
+    compaction = None
+    try:
+        compaction = json.loads(compact_path.read_text())
     except Exception:
         pass
 
@@ -1623,6 +1636,8 @@ def _get_agent_info(name: str) -> dict:
         "hasSession": has_session,
         "hasNotes": has_notes,
         "healthStatus": health_status,
+        "contextPct": context_pct,
+        "compaction": compaction,
         "sessionId": sid or None,
     }
 

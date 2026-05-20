@@ -43,6 +43,47 @@ function ActivityIndicator({ readOnly }: { readOnly: boolean }) {
   );
 }
 
+function CompactionIndicator({ compaction }: { compaction: any | null }) {
+  if (!compaction || !compaction.phase) return null;
+  const phase = compaction.phase;
+  // Only show for active phases (not idle/complete unless recent)
+  if (phase === "complete") {
+    const completedAt = compaction.completed_at;
+    if (completedAt && (Date.now() / 1000 - completedAt) > 120) return null;
+  }
+  if (phase === "idle") return null;
+
+  const colors: Record<string, string> = {
+    requested: "bg-warning/80 text-warning-foreground",
+    confirmed: "bg-warning text-warning-foreground",
+    in_flight: "bg-blue-500 text-white animate-pulse",
+    complete: "bg-success/80 text-success-foreground",
+    failed: "bg-destructive text-destructive-foreground",
+  };
+
+  const labels: Record<string, string> = {
+    requested: "compact?",
+    confirmed: "compact...",
+    in_flight: "compacting",
+    complete: "compacted",
+    failed: "compact fail",
+  };
+
+  const cls = colors[phase] || "bg-muted text-muted-foreground";
+
+  const parts: string[] = [labels[phase] || phase];
+  if (compaction.tokens_before && compaction.tokens_after) {
+    const saved = compaction.tokens_before - compaction.tokens_after;
+    if (saved > 0) parts.push(`-${Math.round(saved / 1000)}k`);
+  }
+
+  return (
+    <span className={`px-1.5 py-0 rounded text-[9px] font-medium ${cls}`} title={`Compaction: ${phase}`}>
+      {parts.join(" ")}
+    </span>
+  );
+}
+
 function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, paneId, toggleTheme, theme, contextPct, connected, chatSide, toggleChatSide }: {
   agents: any[]; currentAgent: string; switching: boolean; onAgentSwitch: (name: string) => void;
   paneId: string; toggleTheme: () => void; theme: string; contextPct: number | null; connected: boolean;
@@ -104,6 +145,10 @@ function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, paneId
             </span>
           </div>
         )}
+        {(() => {
+          const a = agents.find((x: any) => x.name === currentAgent);
+          return a?.compaction ? <CompactionIndicator compaction={a.compaction} /> : null;
+        })()}
         <div className="flex items-center gap-1">
           <div className={`w-1.5 h-1.5 rounded-full ${connected ? "bg-success" : "bg-muted-foreground"}`} />
           <span className={`text-[10px] ${connected ? "text-muted-foreground" : "text-destructive"}`}>
@@ -441,7 +486,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
     if (readOnly) return;
     fetchAgents();
     fetchContext();
-    const iv = setInterval(fetchContext, 15_000);
+    const iv = setInterval(() => { fetchContext(); fetchAgents(); }, 15_000);
     return () => clearInterval(iv);
   }, [readOnly, fetchAgents, fetchContext, currentAgent]);
 
