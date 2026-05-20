@@ -4,6 +4,7 @@ The live conversation between you and the human.
 
 ## How It Works
 
+- **Just speak normally.** Your stdout goes to `updates.jsonl` and the LiveTailer streams it to the arena automatically. You do not need to write to the arena outbox — the arena adapter is inbox-only (user → agent). Outbound delivery is automatic.
 - Your responses stream in real time as you generate them
 - Tool call names appear as badges on your messages (the human can see what tools you're using)
 - The human types messages at the bottom; they arrive as arena doorbells
@@ -31,6 +32,6 @@ POST /api/agent/action
 
 Flagged messages appear in the Moments pane.
 
-## Branching
+## Message Model
 
-The conversation is a tree, not a linear chat. The human can view branches via the Tree pane. Your responses always append to the active branch.
+The conversation is a flat linear list (not a tree). Your responses append to the end. History is paginated and searchable.

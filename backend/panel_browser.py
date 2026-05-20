@@ -390,6 +390,157 @@ async def act(cdp_port: int, ref: str, action: str, value: str = "") -> dict:
         return {"ok": False, "error": f"Unknown action: {action}"}
 
 
+async def scroll_to_bottom(cdp_port: int, ref: str | None = None, timeout_ms: int = 5000, scroll_step: int = 800) -> dict:
+    """Incrementally scroll a container to trigger lazy loading.
+
+    Sites like LinkedIn use IntersectionObserver on a sentinel element.
+    window.scrollTo(0, body.scrollHeight) misses these because:
+      1. The scroll container is often a nested div, not window/body.
+      2. Jumping to the absolute bottom may skip the sentinel.
+
+    This function:
+      1. Finds the scrollable container (from a ref, or auto-detects).
+      2. Records the current child count.
+      3. Scrolls down in steps, pausing between each.
+      4. Uses MutationObserver to detect newly added child nodes.
+      5. Returns when new items appear or timeout is reached.
+
+    Args:
+        ref: Optional ref of an element inside the scrollable list.
+             If given, finds the nearest scrollable ancestor.
+             If None, scrolls the main document scrolling element.
+        timeout_ms: Max time to wait for new content (default 5000ms).
+        scroll_step: Pixels per scroll step (default 800).
+
+    Returns:
+        {"ok": True, "new_items": N, "scroll_height_before": X, "scroll_height_after": Y}
+    """
+    ws_url = await _get_ws_url(cdp_port)
+    async with websockets.connect(ws_url, max_size=10 * 1024 * 1024) as ws:
+        cdp = CDPSession(ws)
+
+        await cdp.send("Runtime.enable")
+
+        # If ref given, resolve its backendNodeId to find the scroll container
+        container_selector = "null"
+        if ref:
+            await cdp.send("Accessibility.enable")
+            await cdp.send("DOM.enable")
+            ax_result = await cdp.send("Accessibility.getFullAXTree")
+            _, ref_map = _process_ax_tree(ax_result.get("nodes", []))
+            target = ref_map.get(ref)
+            if target and target.backend_node_id:
+                # Resolve to a JS object we can use
+                resolve = await cdp.send("DOM.resolveNode", {
+                    "backendNodeId": target.backend_node_id,
+                })
+                object_id = resolve.get("object", {}).get("objectId")
+                if object_id:
+                    container_selector = f'"{object_id}"'
+            await cdp.send("Accessibility.disable")
+            await cdp.send("DOM.disable")
+
+        # JS that does incremental scroll + MutationObserver detection.
+        # Runs entirely in-page, returns a promise that resolves when
+        # new items appear or timeout expires.
+        js = f"""
+        (async () => {{
+            const TIMEOUT = {timeout_ms};
+            const STEP = {scroll_step};
+            const objectId = {container_selector};
+
+            // Find the scroll container
+            let container;
+            if (objectId && typeof objectId === 'string') {{
+                // We can't directly use objectId from here; fall back to auto-detect
+                container = null;
+            }}
+
+            if (!container) {{
+                // Auto-detect: find the largest scrollable element on the page
+                // (LinkedIn uses a specific div, not document.scrollingElement)
+                const candidates = document.querySelectorAll('*');
+                let best = null;
+                let bestScore = 0;
+                for (const el of candidates) {{
+                    if (el.scrollHeight > el.clientHeight + 50) {{
+                        const score = el.scrollHeight - el.clientHeight;
+                        if (score > bestScore) {{
+                            bestScore = score;
+                            best = el;
+                        }}
+                    }}
+                }}
+                container = best || document.scrollingElement || document.documentElement;
+            }}
+
+            const childCountBefore = container.children.length;
+            const scrollHeightBefore = container.scrollHeight;
+
+            // Set up MutationObserver to detect new child nodes
+            let newItems = 0;
+            const observer = new MutationObserver((mutations) => {{
+                for (const m of mutations) {{
+                    newItems += m.addedNodes.length;
+                }}
+            }});
+            observer.observe(container, {{ childList: true, subtree: true }});
+
+            // Incremental scroll
+            const deadline = Date.now() + TIMEOUT;
+            while (Date.now() < deadline) {{
+                const maxScroll = container.scrollHeight - container.clientHeight;
+                if (container.scrollTop >= maxScroll - 5) {{
+                    // Already at bottom; wait a beat for content to load
+                    await new Promise(r => setTimeout(r, 500));
+                    if (newItems > 0) break;
+                    // Try one more scroll in case scrollHeight grew
+                    container.scrollTop = container.scrollHeight;
+                    await new Promise(r => setTimeout(r, 500));
+                    break;
+                }}
+                container.scrollTop = Math.min(container.scrollTop + STEP, maxScroll);
+                await new Promise(r => setTimeout(r, 300));
+                if (newItems > 0) {{
+                    // Content appeared; keep scrolling to trigger more
+                    await new Promise(r => setTimeout(r, 200));
+                }}
+            }}
+
+            observer.disconnect();
+            const scrollHeightAfter = container.scrollHeight;
+            const childCountAfter = container.children.length;
+
+            return JSON.stringify({{
+                newItems: newItems,
+                childCountBefore: childCountBefore,
+                childCountAfter: childCountAfter,
+                scrollHeightBefore: scrollHeightBefore,
+                scrollHeightAfter: scrollHeightAfter,
+                containerTag: container.tagName,
+                containerClass: (container.className || '').substring(0, 100),
+            }});
+        }})()
+        """
+
+        result = await cdp.send("Runtime.evaluate", {
+            "expression": js,
+            "awaitPromise": True,
+            "returnByValue": True,
+            "timeout": timeout_ms + 3000,  # CDP timeout slightly longer than JS timeout
+        })
+
+        await cdp.send("Runtime.disable")
+
+        value_str = result.get("result", {}).get("value", "{}")
+        try:
+            info = json.loads(value_str)
+        except (json.JSONDecodeError, TypeError):
+            info = {"error": "Failed to parse scroll result", "raw": value_str}
+
+        return {"ok": True, **info}
+
+
 async def clipboard(cdp_port: int) -> dict:
     """Read the clipboard contents from the browser via CDP."""
     ws_url = await _get_ws_url(cdp_port)
