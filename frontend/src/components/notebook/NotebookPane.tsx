@@ -224,7 +224,7 @@ export function NotebookPane() {
                   onClick={() => handleEntryClick(entry)}
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <h3 className="text-xs font-medium text-foreground leading-tight flex-1">
+                    <h3 className="text-sm font-semibold text-foreground leading-tight flex-1">
                       {entry.title}
                     </h3>
                     <div className="flex items-center gap-1">
