@@ -44,15 +44,18 @@ interface ArenaState {
   toggleBranch: (branchId: string) => void;
   requestTreeWindow: (centerNodeId: string) => void;
 
-  // Workbench tabs (right pane)
-  activeTab: string;
-  splitTab: string | null; // second tab when split view is active
-  openTabIds: string[]; // ordered list of visible tab IDs
-  setActiveTab: (tab: string) => void;
-  setSplitTab: (tab: string | null) => void;
-  closeTab: (tabId: string) => void;
-  openTab: (tabId: string) => void;
-  reorderTabs: (tabIds: string[]) => void;
+  // Workbench panels (right pane) — instance-based
+  workbenchPanels: { instanceId: string; type: string; label: string; config: Record<string, any> }[];
+  activeTab: string;       // instanceId of active panel
+  splitTab: string | null; // instanceId of split panel
+  setActiveTab: (instanceId: string) => void;
+  setSplitTab: (instanceId: string | null) => void;
+  closeTab: (instanceId: string) => void;
+  openTab: (typeOrInstanceId: string) => void;
+  addPanel: (type: string, config?: Record<string, any>) => string;
+  reorderTabs: (instanceIds: string[]) => void;
+  updatePanelConfig: (instanceId: string, config: Record<string, any>) => void;
+  updatePanelLabel: (instanceId: string, label: string) => void;
 
   // Prompt draft (editable state for prompt dev editor)
   promptDraft: {
@@ -239,39 +242,91 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
   awaitingResponse: false,
   setAwaitingResponse: (v) => set({ awaitingResponse: v }),
   expandedBranches: new Set<string>(),
+  // --- Instance-based workbench panels ---
+  workbenchPanels: (() => {
+    const toLabel = (id: string) => id.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+    const defaultTypes = ["history", "moments", "notebook", "prompt-dev", "prompt-test", "inspector", "artifact", "apps", "boundaries", "corrections", "episodes", "editor"];
+    try {
+      const saved = localStorage.getItem("sa-workbench-panels");
+      if (saved) return JSON.parse(saved);
+      const savedOld = localStorage.getItem("sa-open-tabs");
+      if (savedOld) {
+        const ids: string[] = JSON.parse(savedOld);
+        return ids.map((id) => ({ instanceId: id, type: id, label: toLabel(id), config: {} }));
+      }
+    } catch {}
+    return defaultTypes.map((t) => ({ instanceId: t, type: t, label: toLabel(t), config: {} }));
+  })(),
   activeTab: "history",
   splitTab: null,
-  openTabIds: (() => {
-    try {
-      const saved = localStorage.getItem("sa-open-tabs");
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return ["history", "moments", "notebook", "prompt-dev", "prompt-test", "inspector", "artifact", "apps", "boundaries", "corrections", "episodes"];
-  })(),
-  setActiveTab: (tab) => {
-    set({ activeTab: tab });
-    get().sendWs?.({ type: "viewport.tab_change", payload: { tab } });
+
+  addPanel: (type, config = {}) => {
+    const state = get();
+    const existing = state.workbenchPanels.find((p) => p.type === type && p.instanceId === type);
+    if (existing) {
+      set({ activeTab: existing.instanceId });
+      return existing.instanceId;
+    }
+    const instanceId = `${type}-${Math.random().toString(36).slice(2, 8)}`;
+    const typeLabel = type.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+    const count = state.workbenchPanels.filter((p) => p.type === type).length;
+    const label = count > 0 ? `${typeLabel} ${count + 1}` : typeLabel;
+    const panel = { instanceId, type, label, config };
+    const next = [...state.workbenchPanels, panel];
+    localStorage.setItem("sa-workbench-panels", JSON.stringify(next));
+    set({ workbenchPanels: next, activeTab: instanceId });
+    return instanceId;
+  },
+  setActiveTab: (instanceId) => {
+    set({ activeTab: instanceId });
+    const panel = get().workbenchPanels.find((p) => p.instanceId === instanceId);
+    get().sendWs?.({ type: "viewport.tab_change", payload: { tab: panel?.type ?? instanceId } });
   },
   setSplitTab: (tab) => set({ splitTab: tab }),
-  closeTab: (tabId) => set((s) => {
-    const next = s.openTabIds.filter((id) => id !== tabId);
+  closeTab: (instanceId) => set((s) => {
+    const next = s.workbenchPanels.filter((p) => p.instanceId !== instanceId);
     if (next.length === 0) return s;
-    localStorage.setItem("sa-open-tabs", JSON.stringify(next));
-    const updates: Partial<ArenaState> = { openTabIds: next };
-    if (s.activeTab === tabId) updates.activeTab = next[0];
-    if (s.splitTab === tabId) updates.splitTab = null;
+    localStorage.setItem("sa-workbench-panels", JSON.stringify(next));
+    const updates: Partial<ArenaState> = { workbenchPanels: next };
+    if (s.activeTab === instanceId) updates.activeTab = next[0].instanceId;
+    if (s.splitTab === instanceId) updates.splitTab = null;
     return updates as any;
   }),
-  openTab: (tabId) => set((s) => {
-    if (s.openTabIds.includes(tabId)) return { activeTab: tabId };
-    const next = [...s.openTabIds, tabId];
-    localStorage.setItem("sa-open-tabs", JSON.stringify(next));
-    return { openTabIds: next, activeTab: tabId };
-  }),
-  reorderTabs: (tabIds) => {
-    localStorage.setItem("sa-open-tabs", JSON.stringify(tabIds));
-    set({ openTabIds: tabIds });
+  openTab: (typeOrId) => {
+    const s = get();
+    // If an instance with this ID exists, just activate it
+    const byId = s.workbenchPanels.find((p) => p.instanceId === typeOrId);
+    if (byId) { set({ activeTab: typeOrId }); return; }
+    // If it's a type name and a singleton exists, activate that
+    const byType = s.workbenchPanels.find((p) => p.type === typeOrId);
+    if (byType) { set({ activeTab: byType.instanceId }); return; }
+    // Otherwise create it as a singleton-style panel
+    const label = typeOrId.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+    const panel = { instanceId: typeOrId, type: typeOrId, label, config: {} };
+    const next = [...s.workbenchPanels, panel];
+    localStorage.setItem("sa-workbench-panels", JSON.stringify(next));
+    set({ workbenchPanels: next, activeTab: typeOrId });
   },
+  reorderTabs: (instanceIds) => {
+    const s = get();
+    const ordered = instanceIds.map((id) => s.workbenchPanels.find((p) => p.instanceId === id)).filter(Boolean) as typeof s.workbenchPanels;
+    localStorage.setItem("sa-workbench-panels", JSON.stringify(ordered));
+    set({ workbenchPanels: ordered });
+  },
+  updatePanelConfig: (instanceId, config) => set((s) => {
+    const panels = s.workbenchPanels.map((p) =>
+      p.instanceId === instanceId ? { ...p, config: { ...p.config, ...config } } : p
+    );
+    localStorage.setItem("sa-workbench-panels", JSON.stringify(panels));
+    return { workbenchPanels: panels };
+  }),
+  updatePanelLabel: (instanceId, label) => set((s) => {
+    const panels = s.workbenchPanels.map((p) =>
+      p.instanceId === instanceId ? { ...p, label } : p
+    );
+    localStorage.setItem("sa-workbench-panels", JSON.stringify(panels));
+    return { workbenchPanels: panels };
+  }),
 
   paneFontSizes: {},
   adjustPaneFont: (paneId, delta) =>

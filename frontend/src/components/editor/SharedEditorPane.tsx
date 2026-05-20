@@ -226,7 +226,7 @@ class SimpleYjsProvider {
   }
 }
 
-export function SharedEditorPane() {
+export function SharedEditorPane({ instanceId, config }: { instanceId?: string; config?: Record<string, any> } = {}) {
   const theme = useArenaStore((s) => s.theme);
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const editorViewRef = useRef<EditorView | null>(null);
