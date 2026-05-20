@@ -249,7 +249,7 @@ export function NotebookPane() {
                       ))}
                     </div>
                   )}
-                  <div className={`text-xs text-muted-foreground leading-relaxed prose prose-sm max-w-none prose-p:my-1 prose-li:my-0 prose-table:text-xs prose-th:text-left prose-td:px-2 prose-td:py-1 prose-th:px-2 prose-th:py-1${theme === "dark" ? " prose-invert" : ""}`}>
+                  <div className={`text-sm text-foreground leading-relaxed prose prose-sm max-w-none prose-p:my-1.5 prose-li:my-0.5 prose-table:text-xs prose-th:text-left prose-td:px-2 prose-td:py-1 prose-th:px-2 prose-th:py-1${theme === "dark" ? " prose-invert" : ""}`}>
                     <Markdown remarkPlugins={[remarkGfm]}>{entry.content}</Markdown>
                   </div>
                   {entry.tags && entry.tags.length > 0 && (
