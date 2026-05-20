@@ -6,10 +6,10 @@ import { test, expect, Page } from "@playwright/test";
  * Tests the workbench panel system: singleton tabs, multi-instance editors,
  * drag-reorder, localStorage persistence, sidebar collapse.
  *
- * Target: dev instance on port 5175
+ * Target: SA_URL env var (default: http://localhost:5175 = dev)
  */
 
-test.use({ baseURL: "http://localhost:5175" });
+test.use({ baseURL: process.env.SA_URL || "http://localhost:5175" });
 
 // Known singleton panel types (instanceId === type)
 const KNOWN_SINGLETONS = [

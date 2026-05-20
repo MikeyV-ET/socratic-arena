@@ -15,14 +15,16 @@ import time
 import httpx
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+import os
+
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import websockets
 
 
-SA_URL = "http://localhost:5173"  # Vite dev server (proxies to backend)
-BACKEND_URL = "http://localhost:8000"
+SA_URL = os.environ.get("SA_URL", "http://localhost:5175")
+BACKEND_URL = SA_URL
 TEST_MSG = "BROWSER_TEST: ping"
 TEST_RESPONSE = "BROWSER_TEST_RESPONSE: This response should render in the DOM."
 
@@ -163,7 +165,7 @@ def test_rendering():
         
         async def send_and_capture():
             nonlocal assistant_node_id
-            async with websockets.connect("ws://localhost:8000/ws", max_size=30_000_000) as ws:
+            async with websockets.connect(SA_URL.replace("http://", "ws://").replace("https://", "wss://") + "/ws", max_size=30_000_000) as ws:
                 # Skip initial snapshot
                 await asyncio.wait_for(ws.recv(), timeout=10)
                 

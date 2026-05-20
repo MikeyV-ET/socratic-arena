@@ -9,12 +9,14 @@ tree.live_node add and the conversation.node_update response.
 
 import asyncio
 import json
+import os
 import sys
 import websockets
 
+SA_URL = os.environ.get("SA_URL", "http://localhost:5175")
 
 async def test_roundtrip():
-    uri = "ws://localhost:8000/ws"
+    uri = SA_URL.replace("http://", "ws://").replace("https://", "wss://") + "/ws"
     messages = []
 
     async with websockets.connect(uri, max_size=30_000_000) as ws:
