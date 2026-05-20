@@ -131,7 +131,8 @@ test.describe("Multi-panel architecture", () => {
     for (let i = 0; i < count; i++) {
       await editorTabs.nth(i).click();
       await page.waitForTimeout(300);
-      await expect(page.locator('[data-testid="shared-editor"]')).toBeVisible();
+      // Verify the clicked tab becomes active (has active styling)
+      await expect(editorTabs.nth(i)).toHaveClass(/border-b-primary/, { timeout: 5_000 });
     }
   });
 
