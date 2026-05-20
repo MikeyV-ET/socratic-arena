@@ -48,8 +48,9 @@ function CompactionIndicator({ compaction }: { compaction: any | null }) {
   const phase = compaction.phase;
   // Only show for active phases (not idle/complete unless recent)
   if (phase === "complete") {
-    const completedAt = compaction.completed_at;
-    if (completedAt && (Date.now() / 1000 - completedAt) > 120) return null;
+    // Use last_completed (persists across transitions) to auto-hide after 2min
+    const lastDone = compaction.last_completed ?? compaction.ts;
+    if (lastDone && (Date.now() / 1000 - lastDone) > 120) return null;
   }
   if (phase === "idle") return null;
 
