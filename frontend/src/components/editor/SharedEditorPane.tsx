@@ -245,6 +245,7 @@ export function SharedEditorPane() {
   const [browseResult, setBrowseResult] = useState<BrowseResult | null>(null);
   const [browseLoading, setBrowseLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // Clean up editor + provider when switching or unmounting
   const cleanup = useCallback(() => {
@@ -559,30 +560,41 @@ export function SharedEditorPane() {
 
       {/* Sidebar + editor area */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Tabbed sidebar */}
-        <div className="w-48 border-r border-border flex flex-col shrink-0">
-          {/* Sidebar tabs */}
-          <div className="flex border-b border-border">
+        {/* Collapsible sidebar */}
+        <div className={`border-r border-border flex flex-col shrink-0 transition-[width] duration-200 ${sidebarOpen ? "w-48" : "w-8"}`}>
+          {/* Sidebar header: toggle + tabs */}
+          <div className="flex items-center border-b border-border">
             <button
-              onClick={() => setSidebarTab("docs")}
-              className={`flex-1 px-2 py-1 text-[10px] font-medium transition-colors ${
-                sidebarTab === "docs" ? "text-primary border-b-2 border-primary" : "text-muted-foreground hover:text-foreground"
-              }`}
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="px-1.5 py-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors shrink-0"
+              title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
             >
-              Docs
+              {sidebarOpen ? "\u25C0" : "\u25B6"}
             </button>
-            <button
-              onClick={() => setSidebarTab("files")}
-              className={`flex-1 px-2 py-1 text-[10px] font-medium transition-colors ${
-                sidebarTab === "files" ? "text-primary border-b-2 border-primary" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Files
-            </button>
+            {sidebarOpen && (
+              <>
+                <button
+                  onClick={() => setSidebarTab("docs")}
+                  className={`flex-1 px-2 py-1 text-[10px] font-medium transition-colors ${
+                    sidebarTab === "docs" ? "text-primary border-b-2 border-primary" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Docs
+                </button>
+                <button
+                  onClick={() => setSidebarTab("files")}
+                  className={`flex-1 px-2 py-1 text-[10px] font-medium transition-colors ${
+                    sidebarTab === "files" ? "text-primary border-b-2 border-primary" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Files
+                </button>
+              </>
+            )}
           </div>
 
-          {/* Docs tab */}
-          {sidebarTab === "docs" && (
+          {/* Sidebar content (hidden when collapsed) */}
+          {sidebarOpen && sidebarTab === "docs" && (
             <div className="flex-1 overflow-y-auto">
               {docs.length === 0 && (
                 <div className="text-xs text-muted-foreground text-center py-4">
@@ -618,8 +630,7 @@ export function SharedEditorPane() {
             </div>
           )}
 
-          {/* Files tab */}
-          {sidebarTab === "files" && (
+          {sidebarOpen && sidebarTab === "files" && (
             <div className="flex-1 overflow-y-auto">
               {browseResult && (
                 <>
