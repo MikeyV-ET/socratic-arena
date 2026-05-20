@@ -74,11 +74,11 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       break;
 
     case "panel.launched":
-      store.addPanel(msg.payload as never);
+      store.addAppPanel(msg.payload as never);
       break;
 
     case "panel.stopped":
-      store.removePanel((msg.payload as { id: string }).id);
+      store.removeAppPanel((msg.payload as { id: string }).id);
       break;
 
     case "panel.agent_claimed":
@@ -301,7 +301,7 @@ export function useWebSocket() {
             const panels = data.panels || [];
             const store2 = useArenaStore.getState();
             for (const p of panels) {
-              store2.addPanel(p);
+              store2.addAppPanel(p);
               if (p.agentControlled) {
                 store2.setAgentPanelClaimed(p.id, p.agentName || "Agent");
                 if (p.agentStatus) {

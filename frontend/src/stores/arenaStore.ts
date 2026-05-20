@@ -179,9 +179,9 @@ interface ArenaState {
   // Hosted application panels (Xpra)
   panels: PanelInfo[];
   activePanelId: string | null;
-  addPanel: (panel: PanelInfo) => void;
-  removePanel: (panelId: string) => void;
-  setActivePanel: (panelId: string | null) => void;
+  addAppPanel: (panel: PanelInfo) => void;
+  removeAppPanel: (panelId: string) => void;
+  setActiveAppPanel: (panelId: string | null) => void;
 
   // Agent panel control state
   agentPanels: Record<string, { agent: string; status: string }>;
@@ -657,15 +657,15 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
     // Hosted application panels
     panels: [],
     activePanelId: null,
-    addPanel: (panel) => set((s) => {
+    addAppPanel: (panel) => set((s) => {
       if (s.panels.some((p) => p.id === panel.id)) return { activePanelId: panel.id };
       return { panels: [...s.panels, panel], activePanelId: panel.id };
     }),
-    removePanel: (panelId) => set((s) => ({
+    removeAppPanel: (panelId) => set((s) => ({
       panels: s.panels.filter((p) => p.id !== panelId),
       activePanelId: s.activePanelId === panelId ? (s.panels.length > 1 ? s.panels.find((p) => p.id !== panelId)?.id ?? null : null) : s.activePanelId,
     })),
-    setActivePanel: (panelId) => set({ activePanelId: panelId }),
+    setActiveAppPanel: (panelId) => set({ activePanelId: panelId }),
 
     // Agent panel control
     agentPanels: {},

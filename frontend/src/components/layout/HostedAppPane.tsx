@@ -117,8 +117,8 @@ function LaunchDialog({ onLaunch, onClose }: {
 export function HostedAppPane() {
   const panels = useArenaStore((s) => s.panels);
   const activePanelId = useArenaStore((s) => s.activePanelId);
-  const setActivePanel = useArenaStore((s) => s.setActivePanel);
-  const removePanel = useArenaStore((s) => s.removePanel);
+  const setActivePanel = useArenaStore((s) => s.setActiveAppPanel);
+  const removePanel = useArenaStore((s) => s.removeAppPanel);
   const agentPanels = useArenaStore((s) => s.agentPanels);
   const [showLauncher, setShowLauncher] = useState(false);
   const [launching, setLaunching] = useState(false);
