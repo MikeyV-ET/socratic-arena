@@ -21,7 +21,7 @@ Your stdout goes to the SA conversation pane. Messages from the human arrive as 
 
 **Human to you:** Human types in browser -> arrives in `adapters/arena/inbox/` as doorbell -> you respond (stdout)
 
-**You to human:** Your stdout -> asdaaas routes to `adapters/arena/outbox/` -> arena adapter delivers to SA -> human sees your response stream in real time
+**You to human:** Your stdout -> asdaaas writes to `updates.jsonl` -> LiveTailer streams it to SA -> human sees your response in real time. **You do not write to the arena outbox.** The arena adapter is inbox-only (user-to-agent). Outbound delivery is automatic via the LiveTailer — just speak normally.
 
 ## What the Human Sees
 
