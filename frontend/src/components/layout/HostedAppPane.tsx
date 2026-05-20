@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useArenaStore } from "@/stores/arenaStore";
 import type { PanelInfo } from "@/stores/arenaStore";
 
@@ -122,6 +122,19 @@ export function HostedAppPane() {
   const agentPanels = useArenaStore((s) => s.agentPanels);
   const [showLauncher, setShowLauncher] = useState(false);
   const [launching, setLaunching] = useState(false);
+  const iframeContainerRef = useRef<HTMLDivElement>(null);
+
+  // Focus the active iframe when switching panels so keyboard input works
+  useEffect(() => {
+    if (!activePanelId || !iframeContainerRef.current) return;
+    const iframe = iframeContainerRef.current.querySelector<HTMLIFrameElement>(
+      `iframe[data-panel-id="${activePanelId}"]`
+    );
+    if (iframe) {
+      // Short delay lets the visibility CSS apply before focus
+      requestAnimationFrame(() => iframe.focus());
+    }
+  }, [activePanelId]);
 
   const activePanel = panels.find((p) => p.id === activePanelId);
   const activeAgentState = activePanelId ? agentPanels[activePanelId] : undefined;
@@ -229,16 +242,29 @@ export function HostedAppPane() {
           {activeAgentState.status && (
             <span className="text-muted-foreground ml-1" data-testid="agent-status-text">{activeAgentState.status}</span>
           )}
+          <button
+            onClick={async () => {
+              try {
+                const base = window.location.pathname.replace(/\/+$/, "");
+                await fetch(`${base}/api/panel/${activePanelId}/agent-release`, { method: "POST" });
+              } catch {}
+            }}
+            className="ml-auto text-[10px] text-muted-foreground hover:text-foreground border border-border rounded px-1.5 py-0.5 transition-colors"
+            title="Release agent control"
+          >
+            Release
+          </button>
         </div>
       )}
 
       {/* Active panel iframe */}
       {activePanel && (
         <div
+          ref={iframeContainerRef}
           className="flex-1 relative"
-          onMouseEnter={(e) => {
-            const iframe = e.currentTarget.querySelector<HTMLIFrameElement>(
-              `iframe[title="${activePanel.label}"]`
+          onClick={(e) => {
+            const iframe = (e.currentTarget as HTMLDivElement).querySelector<HTMLIFrameElement>(
+              `iframe[data-panel-id="${activePanelId}"]`
             );
             if (iframe) iframe.focus();
           }}
@@ -247,9 +273,11 @@ export function HostedAppPane() {
             <iframe
               key={p.id}
               src={p.url}
+              data-panel-id={p.id}
               className={`absolute inset-0 w-full h-full border-0 ${p.id === activePanelId ? "" : "invisible"}`}
               title={p.label}
               sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-clipboard-write allow-clipboard-read"
+              tabIndex={p.id === activePanelId ? 0 : -1}
             />
           ))}
         </div>
