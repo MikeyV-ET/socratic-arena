@@ -2246,6 +2246,37 @@ async def panel_navigate(panel_id: str, body: dict):
         return {"status": "error", "message": str(e)}
 
 
+@app.post("/api/panel/{panel_id}/scroll")
+async def panel_scroll_to_bottom(panel_id: str, body: dict = {}):
+    """Scroll a Chrome panel's page to trigger lazy loading.
+
+    Body (all optional): {
+        "ref": "@e5",         // ref of element in the scrollable list (auto-detects if omitted)
+        "timeout": 5000,      // ms to wait for new content (default 5000)
+        "scrollStep": 800     // pixels per scroll step (default 800)
+    }
+
+    Returns: {"status": "ok", "newItems": N, "childCountBefore": X, "childCountAfter": Y, ...}
+    """
+    session = panel_manager.get(panel_id)
+    if not session:
+        return {"status": "error", "message": f"panel {panel_id} not found"}
+    if not session.selenium_port:
+        return {"status": "error", "message": f"panel {panel_id} has no CDP port (not Chrome)"}
+
+    try:
+        result = await _panel_browser.scroll_to_bottom(
+            session.selenium_port,
+            ref=body.get("ref"),
+            timeout_ms=body.get("timeout", 5000),
+            scroll_step=body.get("scrollStep", 800),
+        )
+        return {"status": "ok" if result.get("ok") else "error", **result}
+    except Exception as e:
+        log.error("Panel %s scroll failed: %s", panel_id, e)
+        return {"status": "error", "message": str(e)}
+
+
 @app.get("/api/panel/{panel_id}/clipboard")
 async def panel_clipboard(panel_id: str):
     """Read the clipboard from a Chrome panel."""

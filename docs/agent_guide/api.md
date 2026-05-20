@@ -63,6 +63,7 @@ Backend runs on port 8000 by default. All endpoints are under `/api/`.
 | `/api/panel/{id}/snapshot` | GET | Accessibility tree with element refs |
 | `/api/panel/{id}/act` | POST | Act on element `{"ref": "@e5", "action": "click"}` |
 | `/api/panel/{id}/navigate` | POST | Navigate Chrome `{"url": "https://..."}` |
+| `/api/panel/{id}/scroll` | POST | Scroll to trigger lazy loading `{"ref": "@e5", "timeout": 5000}` |
 
 ## Moments & Corrections
 

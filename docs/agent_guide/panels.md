@@ -71,6 +71,42 @@ POST /api/panel/{id}/navigate
 {"url": "https://www.google.com"}
 ```
 
+### Scroll (trigger lazy loading)
+
+```
+POST /api/panel/{id}/scroll
+{"ref": "@e5", "timeout": 5000, "scrollStep": 800}
+```
+
+All fields optional:
+- `ref` — ref of an element inside the scrollable list. Helps find the right scroll container. If omitted, auto-detects the largest scrollable element on the page.
+- `timeout` — ms to wait for new content (default 5000)
+- `scrollStep` — pixels per scroll increment (default 800)
+
+Returns:
+```json
+{
+  "status": "ok",
+  "newItems": 15,
+  "childCountBefore": 10,
+  "childCountAfter": 25,
+  "scrollHeightBefore": 2400,
+  "scrollHeightAfter": 5800,
+  "containerTag": "DIV",
+  "containerClass": "scaffold-finite-scroll__content"
+}
+```
+
+**Why this exists:** Sites like LinkedIn use IntersectionObserver on a sentinel element to load more items. `window.scrollTo(0, body.scrollHeight)` doesn't work because (a) the scroll container is often a nested div, not window/body, and (b) jumping to the absolute bottom may skip the sentinel. This endpoint scrolls incrementally and uses a MutationObserver to detect when new DOM nodes appear.
+
+**Pagination pattern for long lists:**
+```
+1. GET /api/panel/{id}/snapshot         → see 10 items
+2. POST /api/panel/{id}/scroll          → triggers lazy load, returns newItems=15
+3. GET /api/panel/{id}/snapshot         → now see 25 items
+4. Repeat 2-3 until newItems=0 (all items loaded)
+```
+
 ### Tips
 - Refs are ephemeral — they change when the page changes. Always snapshot before acting.
 - First snapshot after panel launch may be empty (Chrome still loading). Wait 2-3 seconds or use navigate first.
