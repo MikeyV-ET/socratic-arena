@@ -25,7 +25,12 @@ async def _get_ws_url(cdp_port: int) -> str:
     async with aiohttp.ClientSession() as session:
         async with session.get(f"http://127.0.0.1:{cdp_port}/json") as resp:
             targets = await resp.json()
-    # Prefer the first "page" type target
+    # Prefer the first real page (skip chrome:// internal pages and about:blank)
+    for t in targets:
+        url = t.get("url", "")
+        if t.get("type") == "page" and not url.startswith("chrome://") and url not in ("", "about:blank"):
+            return t["webSocketDebuggerUrl"]
+    # Fall back to any page target
     for t in targets:
         if t.get("type") == "page":
             return t["webSocketDebuggerUrl"]
@@ -464,24 +469,55 @@ async def page_content(cdp_port: int, tab_id: str | None = None) -> dict:
         if not ws_url:
             return {"ok": False, "error": f"Tab {tab_id} not found"}
     else:
-        ws_url = await _get_ws_url(cdp_port)
+        ws_url = None
+        for attempt in range(15):
+            try:
+                ws_url = await _get_ws_url(cdp_port)
+                break
+            except RuntimeError:
+                pass
+            await asyncio.sleep(1)
+        if not ws_url:
+            return {"ok": False, "error": "No CDP page target available"}
 
-    async with websockets.connect(ws_url, max_size=10 * 1024 * 1024) as ws:
-        cdp = CDPSession(ws)
+    # Connect and extract. If we land on about:blank, reconnect to find the real tab.
+    url = ""
+    title = ""
+    text = ""
+    for reconnect in range(3):
+        async with websockets.connect(ws_url, max_size=10 * 1024 * 1024) as ws:
+            cdp = CDPSession(ws)
+            for attempt in range(20):
+                r = await cdp.send("Runtime.evaluate", {
+                    "expression": "JSON.stringify({url: location.href, title: document.title, ready: document.readyState, text: document.body ? document.body.innerText : ''})",
+                    "returnByValue": True,
+                })
+                try:
+                    info = json.loads(r.get("result", {}).get("value", "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    await asyncio.sleep(0.5)
+                    continue
 
-        # Get page URL and title
-        nav = await cdp.send("Page.getNavigationHistory")
-        entries = nav.get("entries", [])
-        idx = nav.get("currentIndex", 0)
-        url = entries[idx]["url"] if entries else ""
-        title = entries[idx].get("title", "") if entries else ""
+                url = info.get("url", "")
+                title = info.get("title", "")
+                text = info.get("text", "")
+                ready = info.get("ready", "")
 
-        # Extract full text via DOM — innerText is fastest
-        result = await cdp.send("Runtime.evaluate", {
-            "expression": "document.body.innerText",
-            "returnByValue": True,
-        })
-        text = result.get("result", {}).get("value", "")
+                if ready in ("complete", "interactive") and url and url != "about:blank":
+                    break
+                await asyncio.sleep(0.5)
+
+        if url and url != "about:blank":
+            break
+        # We were stuck on about:blank — re-query targets for the real page
+        log.info("page_content: stuck on about:blank, re-querying targets (attempt %d)", reconnect + 1)
+        await asyncio.sleep(2)
+        try:
+            ws_url = await _get_ws_url(cdp_port)
+        except RuntimeError:
+            pass
+
+    log.info("page_content result: text_len=%d url=%s", len(text), url)
 
     return {"ok": True, "url": url, "title": title, "text": text}
 
