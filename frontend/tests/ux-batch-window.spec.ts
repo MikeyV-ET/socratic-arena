@@ -7,13 +7,12 @@ import { test, expect, Page } from "@playwright/test";
  * of how many conversation nodes are loaded. Verifies scroll-up lazy loading,
  * agent switch, jump-to-latest, and scroll stability.
  *
- * Target: dev server on port 5175 (Squiggy's SA clone with batch experiment).
- * Backend: port 8001 (stable).
+ * Target: SA_URL env var (default: http://localhost:5175 = dev).
  *
  * Principle: test the behavior, not the plumbing.
  */
 
-const BASE = "http://localhost:8000";
+const BASE = process.env.SA_URL || "http://localhost:5175";
 const MAX_DOM_NODES = 40; // WINDOW_SIZE(20) + overscan(15) = 35, allow some margin
 
 // Scope live pane selectors to avoid strict mode violations when both panes exist.

@@ -7,10 +7,10 @@ import { test, expect } from "@playwright/test";
  * No store inspection, no data-testid counting, no DOM plumbing.
  * Each test asks a question a user would ask and checks the answer.
  *
- * Requires: SA backend on port 8000, frontend serving from same origin.
+ * Requires: SA backend running. Set SA_URL env var or defaults to dev (http://localhost:5175).
  */
 
-const API = "http://localhost:8000";
+const API = process.env.SA_URL || "http://localhost:5175";
 const AGENT = "Q";
 
 /** Fetch the last N messages from the history API. */

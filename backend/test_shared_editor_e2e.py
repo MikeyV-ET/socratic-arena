@@ -17,14 +17,15 @@ Run:
 
 import asyncio
 import json
+import os
 import struct
 import time
 
 import httpx
 import websockets
 
-BASE = "http://localhost:8000"
-WS_BASE = "ws://localhost:8000"
+BASE = os.environ.get("SA_URL", "http://localhost:5175")
+WS_BASE = BASE.replace("http://", "ws://").replace("https://", "wss://")
 
 
 # ---------------------------------------------------------------------------
