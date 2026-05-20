@@ -262,11 +262,7 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
 
   addPanel: (type, config = {}) => {
     const state = get();
-    const existing = state.workbenchPanels.find((p) => p.type === type && p.instanceId === type);
-    if (existing) {
-      set({ activeTab: existing.instanceId });
-      return existing.instanceId;
-    }
+    // Always create a new instance — use openTab() to activate an existing singleton
     const instanceId = `${type}-${Math.random().toString(36).slice(2, 8)}`;
     const typeLabel = type.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
     const count = state.workbenchPanels.filter((p) => p.type === type).length;
