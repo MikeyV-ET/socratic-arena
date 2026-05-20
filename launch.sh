@@ -1,19 +1,33 @@
 #!/usr/bin/env bash
 # Launch Socratic Arena (backend + frontend)
-# Usage: bash launch.sh [start|stop|restart|status]
+# Usage: SA_PROFILE=dev bash launch.sh [start|stop|restart|status]
+# Profiles: prod (8000/5173, default), dev (8002/5175)
+# Override ports: SA_BACKEND_PORT=9000 SA_FRONTEND_PORT=9001 bash launch.sh start
 
 set -euo pipefail
 
 SA_DIR="$(cd "$(dirname "$0")" && pwd)"
-BACKEND_PORT="${SA_BACKEND_PORT:-8000}"
-FRONTEND_PORT="${SA_FRONTEND_PORT:-5173}"
+
+# Profile system: SA_PROFILE selects port preset.
+# Explicit SA_BACKEND_PORT/SA_FRONTEND_PORT override profile defaults.
+SA_PROFILE="${SA_PROFILE:-prod}"
+case "$SA_PROFILE" in
+    prod) _DEF_BACKEND=8000; _DEF_FRONTEND=5173 ;;
+    dev)  _DEF_BACKEND=8002; _DEF_FRONTEND=5175 ;;
+    *)    echo "Unknown profile: $SA_PROFILE (use prod or dev)"; exit 1 ;;
+esac
+BACKEND_PORT="${SA_BACKEND_PORT:-$_DEF_BACKEND}"
+FRONTEND_PORT="${SA_FRONTEND_PORT:-$_DEF_FRONTEND}"
 AGENT="${SA_AGENT:-Q}"
-BACKEND_LOG="/tmp/sa_backend.log"
-FRONTEND_LOG="/tmp/sa_frontend.log"
-ADAPTER_LOG="/tmp/sa_adapter.log"
-BACKEND_PID="/tmp/sa_backend.pid"
-FRONTEND_PID="/tmp/sa_frontend.pid"
-ADAPTER_PID="/tmp/sa_adapter.pid"
+
+# Per-profile file paths so prod and dev don't collide
+BACKEND_LOG="/tmp/sa_${SA_PROFILE}_backend.log"
+FRONTEND_LOG="/tmp/sa_${SA_PROFILE}_frontend.log"
+ADAPTER_LOG="/tmp/sa_${SA_PROFILE}_adapter.log"
+BACKEND_PID="/tmp/sa_${SA_PROFILE}_backend.pid"
+FRONTEND_PID="/tmp/sa_${SA_PROFILE}_frontend.pid"
+ADAPTER_PID="/tmp/sa_${SA_PROFILE}_adapter.pid"
+BREADCRUMB="/tmp/sa_${SA_PROFILE}.json"
 
 stop_all() {
     echo "Stopping Socratic Arena..."
@@ -33,6 +47,7 @@ stop_all() {
             kill $pid 2>/dev/null && echo "  killed orphan on :${port} (PID ${pid})"
         fi
     done
+    rm -f "$BREADCRUMB"
 }
 
 start_backend() {
@@ -46,7 +61,7 @@ start_backend() {
 start_frontend() {
     echo "Starting frontend on :${FRONTEND_PORT}..."
     cd "${SA_DIR}/frontend"
-    nohup npx vite --host 0.0.0.0 --port "${FRONTEND_PORT}" > "${FRONTEND_LOG}" 2>&1 &
+    SA_BACKEND_PORT="${BACKEND_PORT}" nohup npx vite --host 0.0.0.0 --port "${FRONTEND_PORT}" > "${FRONTEND_LOG}" 2>&1 &
     echo $! > "$FRONTEND_PID"
     echo "  Frontend PID: $! (log: ${FRONTEND_LOG})"
 }
@@ -81,11 +96,16 @@ case "${1:-start}" in
         start_backend
         start_frontend
         start_adapter
+        # Write breadcrumb for test/tool discovery
+        cat > "$BREADCRUMB" <<EOF
+{"profile":"${SA_PROFILE}","backend":${BACKEND_PORT},"frontend":${FRONTEND_PORT},"agent":"${AGENT}","pid":$$}
+EOF
         echo ""
-        echo "Socratic Arena started."
+        echo "Socratic Arena started (profile=${SA_PROFILE})."
         echo "  Frontend: http://localhost:${FRONTEND_PORT}"
         echo "  Backend:  http://localhost:${BACKEND_PORT}"
         echo "  Adapter:  agent=${AGENT}"
+        echo "  Breadcrumb: ${BREADCRUMB}"
         ;;
     status)
         show_status
