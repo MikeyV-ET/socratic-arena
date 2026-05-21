@@ -173,7 +173,7 @@ class PanelManager:
             "--encodings=png,rgb,jpeg",
             "--video-encoders=none",
             "--pulseaudio=no",
-            "--resize-display=yes",
+            "--resize-display=1920x1080",
             "--headerbar=no",
             f"--start-child={app_cmd}",
             "--exit-with-children=yes",
@@ -248,7 +248,7 @@ class PanelManager:
         for attempt in range(5):
             await asyncio.sleep(2)
             try:
-                # Get actual display dimensions (dynamic with --resize-display=yes)
+                # Get display dimensions (fixed at 1920x1080 via --resize-display)
                 xdp = await asyncio.create_subprocess_exec(
                     "xdpyinfo", stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE, env=env,
