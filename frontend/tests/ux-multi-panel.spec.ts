@@ -13,7 +13,7 @@ test.use({ baseURL: process.env.SA_URL || "http://localhost:5175" });
 
 // Known singleton panel types (instanceId === type)
 const KNOWN_SINGLETONS = [
-  "history", "notebook", "editor",
+  "notebook",
 ];
 
 /** Wait for workbench to be interactive */
@@ -123,9 +123,9 @@ test.describe("Multi-panel architecture", () => {
       await expect(editorTabs).toHaveCount(countBefore + 1, { timeout: 5_000 });
     }
 
-    // Should have at least 3 editor tabs (1 default + 2 new)
+    // Should have at least 2 editor tabs (2 newly created)
     const count = await editorTabs.count();
-    expect(count).toBeGreaterThanOrEqual(3);
+    expect(count).toBeGreaterThanOrEqual(2);
 
     // Click each editor tab — each should activate without error
     for (let i = 0; i < count; i++) {
@@ -137,14 +137,15 @@ test.describe("Multi-panel architecture", () => {
   });
 
   test("5: Close one editor instance — others unaffected", async ({ page }) => {
-    // Create a new editor instance
+    // Create two editor instances (none by default)
     const editorTabs = page.locator('[data-testid^="workbench-tab-editor"]');
-    const initialCount = await editorTabs.count();
-    await page.locator('[data-testid="open-tab-menu"]').click();
-    const addBtn = page.locator('[data-testid="add-panel-editor"]');
-    await expect(addBtn).toBeVisible({ timeout: 5_000 });
-    await addBtn.click({ force: true });
-    await expect(editorTabs).toHaveCount(initialCount + 1, { timeout: 5_000 });
+    for (let i = 0; i < 2; i++) {
+      await page.locator('[data-testid="open-tab-menu"]').click();
+      const addBtn = page.locator('[data-testid="add-panel-editor"]');
+      await expect(addBtn).toBeVisible({ timeout: 5_000 });
+      await addBtn.click({ force: true });
+      await page.waitForTimeout(300);
+    }
 
     const countBefore = await editorTabs.count();
     expect(countBefore).toBeGreaterThanOrEqual(2);
@@ -166,8 +167,8 @@ test.describe("Multi-panel architecture", () => {
       const countAfter = await editorTabs.count();
       expect(countAfter).toBe(countBefore - 1);
 
-      // Original editor should still exist
-      await expect(page.locator('[data-testid="workbench-tab-editor"]')).toBeAttached();
+      // Remaining editor should still exist
+      await expect(editorTabs.first()).toBeAttached();
     }
   });
 
@@ -243,60 +244,41 @@ test.describe("Multi-panel architecture", () => {
     await expect(page.locator('[data-testid="workbench-tab-notebook"]')).not.toBeAttached();
   });
 
-  test("8: Editor sidebar collapse/expand toggle works", async ({ page }) => {
-    // Activate editor tab
-    await page.locator('[data-testid="workbench-tab-editor"]').click();
+  test("8: Editor has Open and New buttons (no sidebar)", async ({ page }) => {
+    // Add an editor panel first (not in defaults)
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    const addBtn = page.locator('[data-testid="add-panel-editor"]');
+    await expect(addBtn).toBeVisible({ timeout: 5_000 });
+    await addBtn.click({ force: true });
     await page.waitForTimeout(500);
 
-    // Sidebar should start expanded — look for collapse button
-    const collapseBtn = page.locator('button[title="Collapse sidebar"]');
-    const expandBtn = page.locator('button[title="Expand sidebar"]');
+    // Open and New buttons should be visible
+    await expect(page.locator('[data-testid="open-file-btn"]')).toBeVisible();
+    await expect(page.locator('[data-testid="create-doc-btn"]')).toBeVisible();
 
-    if (await collapseBtn.isVisible()) {
-      // Click to collapse
-      await collapseBtn.click();
-      await page.waitForTimeout(300);
-
-      // Expand button should now be visible
-      await expect(expandBtn).toBeVisible();
-      // Collapse button should be gone
-      await expect(collapseBtn).not.toBeVisible();
-
-      // Click to expand again
-      await expandBtn.click();
-      await page.waitForTimeout(300);
-
-      // Collapse button should be back
-      await expect(collapseBtn).toBeVisible();
-    }
+    // No sidebar toggle should exist
+    await expect(page.locator('button[title="Collapse sidebar"]')).not.toBeAttached();
   });
 
-  test("9: Collapsed sidebar reclaims space for editor area", async ({ page }) => {
-    // Activate editor tab
-    await page.locator('[data-testid="workbench-tab-editor"]').click();
+  test("9: Editor Open button shows file browser dropdown", async ({ page }) => {
+    // Add an editor panel first (not in defaults)
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    const addBtn = page.locator('[data-testid="add-panel-editor"]');
+    await expect(addBtn).toBeVisible({ timeout: 5_000 });
+    await addBtn.click({ force: true });
     await page.waitForTimeout(500);
 
-    const editorContent = page.locator('[data-testid="shared-editor-content"]');
-    const collapseBtn = page.locator('button[title="Collapse sidebar"]');
+    // Click Open
+    await page.locator('[data-testid="open-file-btn"]').click();
+    await page.waitForTimeout(1000);
 
-    if (await collapseBtn.isVisible() && await editorContent.isVisible()) {
-      // Measure editor content width before collapse
-      const boxBefore = await editorContent.boundingBox();
-      expect(boxBefore).toBeTruthy();
+    // File browser dropdown should appear with directory entries
+    const dropdown = page.locator('.z-50');
+    await expect(dropdown).toBeVisible({ timeout: 3000 });
 
-      // Collapse sidebar
-      await collapseBtn.click();
-      await page.waitForTimeout(500);
-
-      // Measure editor content width after collapse
-      const boxAfter = await editorContent.boundingBox();
-      expect(boxAfter).toBeTruthy();
-
-      // Editor area should be wider after sidebar collapses
-      // Sidebar goes from 192px to 32px, so ~160px gain
-      if (boxBefore && boxAfter) {
-        expect(boxAfter.width).toBeGreaterThan(boxBefore.width);
-      }
-    }
+    // Click Open again to close
+    await page.locator('[data-testid="open-file-btn"]').click();
+    await page.waitForTimeout(300);
+    await expect(dropdown).not.toBeVisible();
   });
 });

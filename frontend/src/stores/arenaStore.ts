@@ -245,7 +245,7 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
   // --- Instance-based workbench panels ---
   workbenchPanels: (() => {
     const toLabel = (id: string) => id.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
-    const defaultTypes = ["history", "moments", "notebook", "prompt-dev", "prompt-test", "inspector", "artifact", "boundaries", "corrections", "episodes", "editor"];
+    const defaultTypes = ["notebook"];
     try {
       const saved = localStorage.getItem("sa-workbench-panels");
       if (saved) {
