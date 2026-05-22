@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """test_panel_tabs_e2e.py -- E2E tests for panel tab management + content extraction.
 
@@ -23,7 +24,7 @@ import httpx
 import pytest
 import pytest_asyncio
 
-BASE = "http://localhost:8000"
+BASE = os.environ.get("SA_URL", "http://localhost:5175")
 CHROME_STARTUP_WAIT = 8  # seconds for Chrome to load
 
 

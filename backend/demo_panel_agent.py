@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 """Demo: Agent launches a Chrome panel via SA API, then controls it via Selenium.
 
 Shows the full agent control loop:
@@ -27,7 +28,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 
 
-SA_BACKEND = "http://localhost:8000"
+SA_BACKEND = os.environ.get("SA_URL", "http://localhost:8000")
 
 
 def main():

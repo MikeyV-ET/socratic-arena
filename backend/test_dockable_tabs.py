@@ -1,3 +1,4 @@
+import os
 """Tests for dockable/closeable workbench tabs.
 
 Tests the frontend tab management: close, reopen, and layout persistence.
@@ -27,7 +28,7 @@ class TestDockableTabs:
 
         driver = self._get_driver()
         try:
-            driver.get("http://localhost:5173")
+            driver.get(SA_FRONTEND)
 
             # Wait for workbench to load
             tab = WebDriverWait(driver, 10).until(
@@ -54,7 +55,7 @@ class TestDockableTabs:
         driver = self._get_driver()
         try:
             # Clear localStorage first
-            driver.get("http://localhost:5173")
+            driver.get(SA_FRONTEND)
             driver.execute_script("localStorage.removeItem('sa-open-tabs')")
             driver.refresh()
 
@@ -91,7 +92,7 @@ class TestDockableTabs:
 
         driver = self._get_driver()
         try:
-            driver.get("http://localhost:5173")
+            driver.get(SA_FRONTEND)
             driver.execute_script("localStorage.removeItem('sa-open-tabs')")
             driver.refresh()
 
@@ -128,7 +129,7 @@ class TestDockableTabs:
 
         driver = self._get_driver()
         try:
-            driver.get("http://localhost:5173")
+            driver.get(SA_FRONTEND)
             driver.execute_script("localStorage.removeItem('sa-open-tabs')")
             driver.refresh()
 

@@ -10,7 +10,7 @@ import { test, expect } from "@playwright/test";
  * Requires: SA backend on port 8000, frontend serving from same origin.
  */
 
-const API = "http://localhost:8000";
+const API = process.env.SA_URL || "http://localhost:5175";
 const AGENT = "Q";
 
 /** Fetch the last N messages from the history API. */

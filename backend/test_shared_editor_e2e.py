@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 """test_shared_editor_e2e.py -- E2E tests for the shared editor (pycrdt + Yjs).
 
 Tests the full shared document lifecycle:
@@ -23,8 +24,8 @@ import time
 import httpx
 import websockets
 
-BASE = "http://localhost:8000"
-WS_BASE = "ws://localhost:8000"
+BASE = os.environ.get("SA_URL", "http://localhost:5175")
+WS_BASE = BASE.replace("http://", "ws://").replace("https://", "wss://")
 
 
 # ---------------------------------------------------------------------------

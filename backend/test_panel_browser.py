@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """Browser-level panel UI tests for Socratic Arena.
 
@@ -17,8 +18,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-SA_FRONTEND = "http://localhost:5173"
-SA_BACKEND = "http://localhost:8000"
+SA_FRONTEND = os.environ.get("SA_URL", "http://localhost:5175")
+SA_BACKEND = os.environ.get("SA_URL", "http://localhost:5175")
 
 
 @pytest.fixture(scope="module")

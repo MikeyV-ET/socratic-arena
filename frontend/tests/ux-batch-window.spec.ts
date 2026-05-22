@@ -13,7 +13,7 @@ import { test, expect, Page } from "@playwright/test";
  * Principle: test the behavior, not the plumbing.
  */
 
-const BASE = "http://localhost:8000";
+const BASE = process.env.SA_URL || "http://localhost:5175";
 const MAX_DOM_NODES = 40; // WINDOW_SIZE(20) + overscan(15) = 35, allow some margin
 
 // Scope live pane selectors to avoid strict mode violations when both panes exist.

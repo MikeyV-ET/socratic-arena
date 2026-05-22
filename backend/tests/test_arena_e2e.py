@@ -8,6 +8,7 @@ camelCase serialization, prompt test results).
 Run: cd backend && python -m pytest tests/test_arena_e2e.py -v
 """
 
+import os
 import asyncio
 import json
 import pytest
@@ -16,8 +17,8 @@ import aiohttp
 import httpx
 from collections import Counter
 
-WS_URL = "ws://localhost:8000/ws"
-API_URL = "http://localhost:8000"
+API_URL = os.environ.get("SA_URL", "http://localhost:5175")
+WS_URL = API_URL.replace("http://", "ws://").replace("https://", "wss://") + "/ws"
 
 
 async def connect():

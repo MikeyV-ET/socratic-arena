@@ -23,7 +23,7 @@ import time
 import httpx
 import pytest
 
-BASE = "http://localhost:8000"
+BASE = os.environ.get("SA_URL", "http://localhost:5175")
 
 
 @pytest.fixture
