@@ -13,7 +13,7 @@ test.use({ baseURL: process.env.SA_URL || "http://localhost:5175" });
 
 // Known singleton panel types (instanceId === type)
 const KNOWN_SINGLETONS = [
-  "history", "notebook", "editor", "apps",
+  "history", "notebook", "editor",
 ];
 
 /** Wait for workbench to be interactive */

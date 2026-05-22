@@ -73,13 +73,33 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       store.completePromptTest();
       break;
 
-    case "panel.launched":
-      store.addAppPanel(msg.payload as never);
+    case "panel.launched": {
+      const launchedPanel = msg.payload as { id: string; label?: string; appType?: string };
+      store.addAppPanel(launchedPanel as never);
+      // Create a workbench tab if no existing panel is bound to this app
+      const alreadyBound = store.workbenchPanels.some(
+        (p) => p.type === "app" && p.config?.panelId === launchedPanel.id,
+      );
+      if (!alreadyBound) {
+        const label = launchedPanel.label || `App: ${launchedPanel.appType || "app"}`;
+        store.addPanel("app", { panelId: launchedPanel.id });
+        // addPanel auto-activates and assigns a generic label; override it
+        const newest = store.workbenchPanels[store.workbenchPanels.length - 1];
+        if (newest) store.updatePanelLabel(newest.instanceId, label);
+      }
       break;
+    }
 
-    case "panel.stopped":
-      store.removeAppPanel((msg.payload as { id: string }).id);
+    case "panel.stopped": {
+      const stoppedId = (msg.payload as { id: string }).id;
+      store.removeAppPanel(stoppedId);
+      // Close the workbench tab bound to this app
+      const bound = store.workbenchPanels.find(
+        (p) => p.type === "app" && p.config?.panelId === stoppedId,
+      );
+      if (bound) store.closeTab(bound.instanceId);
       break;
+    }
 
     case "panel.agent_claimed":
       store.setAgentPanelClaimed(
@@ -302,6 +322,15 @@ export function useWebSocket() {
             const store2 = useArenaStore.getState();
             for (const p of panels) {
               store2.addAppPanel(p);
+              // Ensure a workbench tab exists for this running app
+              const bound = store2.workbenchPanels.some(
+                (wp: { type: string; config?: Record<string, any> }) =>
+                  wp.type === "app" && wp.config?.panelId === p.id,
+              );
+              if (!bound) {
+                const iid = store2.addPanel("app", { panelId: p.id });
+                store2.updatePanelLabel(iid, p.label || `App: ${p.appType || "app"}`);
+              }
               if (p.agentControlled) {
                 store2.setAgentPanelClaimed(p.id, p.agentName || "Agent");
                 if (p.agentStatus) {

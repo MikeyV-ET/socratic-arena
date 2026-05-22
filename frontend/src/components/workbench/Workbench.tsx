@@ -8,7 +8,7 @@ import { ArtifactPane } from "@/components/layout/ArtifactPane";
 import { ConversationPane } from "@/components/conversation/ConversationPane";
 import { MomentsPane } from "@/components/workbench/MomentsPane";
 import { SessionInspector } from "@/components/inspector/SessionInspector";
-import { HostedAppPane } from "@/components/layout/HostedAppPane";
+import { HostedAppPanel } from "@/components/layout/HostedAppPanel";
 import { BoundariesPane } from "@/components/workbench/BoundariesPane";
 import { CorrectionsPane } from "@/components/workbench/CorrectionsPane";
 import { EpisodeRunnerPane } from "@/components/workbench/EpisodeRunnerPane";
@@ -25,7 +25,7 @@ export const PANEL_TYPES = [
   { type: "prompt-test", label: "Prompt Test", multi: false },
   { type: "inspector", label: "Inspector", multi: false },
   { type: "artifact", label: "Artifact", multi: false },
-  { type: "apps", label: "Apps", multi: false },
+  { type: "app", label: "App", multi: true },
   { type: "boundaries", label: "Boundaries", multi: false },
   { type: "corrections", label: "Corrections", multi: false },
   { type: "episodes", label: "Episodes", multi: false },
@@ -70,8 +70,8 @@ function TabContent({ panel }: { panel: WorkbenchPanel }) {
     case "artifact":
       content = <ArtifactPane />;
       break;
-    case "apps":
-      return <HostedAppPane />;
+    case "app":
+      return <HostedAppPanel instanceId={panel.instanceId} config={panel.config} />;
     case "boundaries":
       content = <BoundariesPane />;
       break;

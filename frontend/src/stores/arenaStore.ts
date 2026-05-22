@@ -245,14 +245,18 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
   // --- Instance-based workbench panels ---
   workbenchPanels: (() => {
     const toLabel = (id: string) => id.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
-    const defaultTypes = ["history", "moments", "notebook", "prompt-dev", "prompt-test", "inspector", "artifact", "apps", "boundaries", "corrections", "episodes", "editor"];
+    const defaultTypes = ["history", "moments", "notebook", "prompt-dev", "prompt-test", "inspector", "artifact", "boundaries", "corrections", "episodes", "editor"];
     try {
       const saved = localStorage.getItem("sa-workbench-panels");
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        // Filter out stale "apps" singleton — replaced by per-instance "app" panels
+        const panels = JSON.parse(saved).filter((p: any) => p.type !== "apps");
+        if (panels.length > 0) return panels;
+      }
       const savedOld = localStorage.getItem("sa-open-tabs");
       if (savedOld) {
         const ids: string[] = JSON.parse(savedOld);
-        return ids.map((id) => ({ instanceId: id, type: id, label: toLabel(id), config: {} }));
+        return ids.filter((id) => id !== "apps").map((id) => ({ instanceId: id, type: id, label: toLabel(id), config: {} }));
       }
     } catch {}
     return defaultTypes.map((t) => ({ instanceId: t, type: t, label: toLabel(t), config: {} }));

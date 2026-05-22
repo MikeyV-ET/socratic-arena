@@ -228,6 +228,7 @@ class SimpleYjsProvider {
 
 export function SharedEditorPane({ instanceId, config }: { instanceId?: string; config?: Record<string, any> } = {}) {
   const theme = useArenaStore((s) => s.theme);
+  const updatePanelLabel = useArenaStore((s) => s.updatePanelLabel);
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const editorViewRef = useRef<EditorView | null>(null);
   const providerRef = useRef<SimpleYjsProvider | null>(null);
@@ -264,6 +265,12 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
   const openDoc = useCallback((docId: string) => {
     cleanup();
     setActiveDocId(docId);
+
+    // Update workbench tab label to show the doc name
+    if (instanceId) {
+      const doc = docs.find((d) => d.id === docId);
+      if (doc) updatePanelLabel(instanceId, `Editor: ${doc.title}`);
+    }
 
     const ydoc = new Y.Doc();
     ydocRef.current = ydoc;
@@ -317,7 +324,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
       });
       editorViewRef.current = view;
     });
-  }, [cleanup, theme]);
+  }, [cleanup, theme, docs, instanceId, updatePanelLabel]);
 
   // Fetch doc list
   const refreshDocs = useCallback(async () => {
@@ -393,6 +400,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
       setShowCreate(false);
       await refreshDocs();
       openDoc(doc.id);
+      if (instanceId) updatePanelLabel(instanceId, `Editor: ${title}`);
     } catch { /* ignore */ }
   };
 
@@ -421,6 +429,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
       const doc: DocMeta = await resp.json();
       await refreshDocs();
       openDoc(doc.id);
+      if (instanceId) updatePanelLabel(instanceId, `Editor: ${doc.title}`);
       setSidebarTab("docs");
     } catch { /* ignore */ }
   }, [refreshDocs, openDoc]);
