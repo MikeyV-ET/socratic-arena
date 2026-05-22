@@ -24,13 +24,23 @@ AGENT="${SA_AGENT:-Q}"
 BACKEND_LOG="/tmp/sa_${SA_PROFILE}_backend.log"
 FRONTEND_LOG="/tmp/sa_${SA_PROFILE}_frontend.log"
 ADAPTER_LOG="/tmp/sa_${SA_PROFILE}_adapter.log"
+WATCHDOG_LOG="/tmp/sa_${SA_PROFILE}_watchdog.log"
 BACKEND_PID="/tmp/sa_${SA_PROFILE}_backend.pid"
 FRONTEND_PID="/tmp/sa_${SA_PROFILE}_frontend.pid"
 ADAPTER_PID="/tmp/sa_${SA_PROFILE}_adapter.pid"
+WATCHDOG_PID="/tmp/sa_${SA_PROFILE}_watchdog.pid"
 BREADCRUMB="/tmp/sa_${SA_PROFILE}.json"
+
+# Timestamp prefix for log lines
+ts_pipe() { while IFS= read -r line; do printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$line"; done; }
 
 stop_all() {
     echo "Stopping Socratic Arena..."
+    # Kill watchdog first so it doesn't restart things we're stopping
+    if [ -f "$WATCHDOG_PID" ] && kill -0 "$(cat "$WATCHDOG_PID")" 2>/dev/null; then
+        kill "$(cat "$WATCHDOG_PID")" 2>/dev/null; echo "  watchdog stopped."
+    fi
+    rm -f "$WATCHDOG_PID"
     for label_pid in "$BACKEND_PID:backend:uvicorn main:app" "$FRONTEND_PID:frontend:node.*vite" "$ADAPTER_PID:adapter:arena_adapter.py"; do
         pf="${label_pid%%:*}"; rest="${label_pid#*:}"; name="${rest%%:*}"; pattern="${rest#*:}"
         if [ -f "$pf" ] && kill -0 "$(cat "$pf")" 2>/dev/null; then
@@ -53,7 +63,9 @@ stop_all() {
 start_backend() {
     echo "Starting backend on :${BACKEND_PORT}..."
     cd "${SA_DIR}/backend"
-    nohup uvicorn main:app --host 0.0.0.0 --port "${BACKEND_PORT}" --ws-max-size 20971520 > "${BACKEND_LOG}" 2>&1 &
+    nohup uvicorn main:app --host 0.0.0.0 --port "${BACKEND_PORT}" \
+        --ws-max-size 20971520 --log-level info \
+        2>&1 | ts_pipe > "${BACKEND_LOG}" &
     echo $! > "$BACKEND_PID"
     echo "  Backend PID: $! (log: ${BACKEND_LOG})"
 }
@@ -61,7 +73,8 @@ start_backend() {
 start_frontend() {
     echo "Starting frontend on :${FRONTEND_PORT}..."
     cd "${SA_DIR}/frontend"
-    SA_BACKEND_PORT="${BACKEND_PORT}" nohup npx vite --host 0.0.0.0 --port "${FRONTEND_PORT}" > "${FRONTEND_LOG}" 2>&1 &
+    SA_BACKEND_PORT="${BACKEND_PORT}" nohup npx vite --host 0.0.0.0 --port "${FRONTEND_PORT}" \
+        2>&1 | ts_pipe > "${FRONTEND_LOG}" &
     echo $! > "$FRONTEND_PID"
     echo "  Frontend PID: $! (log: ${FRONTEND_LOG})"
 }
@@ -69,14 +82,37 @@ start_frontend() {
 start_adapter() {
     echo "Starting arena adapter for ${AGENT}..."
     cd "${SA_DIR}/backend"
-    nohup python3 arena_adapter.py --agent "${AGENT}" --arena-url "http://localhost:${BACKEND_PORT}" > "${ADAPTER_LOG}" 2>&1 &
+    nohup python3 -u arena_adapter.py --agent "${AGENT}" \
+        --arena-url "http://localhost:${BACKEND_PORT}" \
+        2>&1 | ts_pipe > "${ADAPTER_LOG}" &
     echo $! > "$ADAPTER_PID"
     echo "  Adapter PID: $! (log: ${ADAPTER_LOG})"
 }
 
+start_watchdog() {
+    # Background watchdog: checks every 30s, logs unexpected exits
+    (
+        while true; do
+            sleep 30
+            for label_pid in "$BACKEND_PID:backend" "$FRONTEND_PID:frontend" "$ADAPTER_PID:adapter"; do
+                pf="${label_pid%%:*}"; name="${label_pid#*:}"
+                if [ -f "$pf" ]; then
+                    pid=$(cat "$pf")
+                    if ! kill -0 "$pid" 2>/dev/null; then
+                        wait "$pid" 2>/dev/null; rc=$?
+                        echo "$(date '+%Y-%m-%d %H:%M:%S') CRASH ${name} (PID ${pid}) exited with code ${rc}" >> "$WATCHDOG_LOG"
+                        rm -f "$pf"
+                    fi
+                fi
+            done
+        done
+    ) &
+    echo $! > "$WATCHDOG_PID"
+}
+
 show_status() {
     echo "Socratic Arena status:"
-    for label_pid in "$BACKEND_PID:Backend:${BACKEND_PORT}" "$FRONTEND_PID:Frontend:${FRONTEND_PORT}" "$ADAPTER_PID:Adapter:${AGENT}"; do
+    for label_pid in "$BACKEND_PID:Backend:${BACKEND_PORT}" "$FRONTEND_PID:Frontend:${FRONTEND_PORT}" "$ADAPTER_PID:Adapter:${AGENT}" "$WATCHDOG_PID:Watchdog:monitor"; do
         pf="${label_pid%%:*}"; rest="${label_pid#*:}"; name="${rest%%:*}"; info="${rest#*:}"
         if [ -f "$pf" ] && kill -0 "$(cat "$pf")" 2>/dev/null; then
             echo "  ${name}:  RUNNING (PID $(cat "$pf"), ${info})"
@@ -96,6 +132,7 @@ case "${1:-start}" in
         start_backend
         start_frontend
         start_adapter
+        start_watchdog
         # Write breadcrumb for test/tool discovery
         cat > "$BREADCRUMB" <<EOF
 {"profile":"${SA_PROFILE}","backend":${BACKEND_PORT},"frontend":${FRONTEND_PORT},"agent":"${AGENT}","pid":$$}
