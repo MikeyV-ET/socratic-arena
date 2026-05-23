@@ -172,10 +172,7 @@ test.describe("Editor tab swap preserves content", () => {
   });
 
   test("Two editors with docs — swap positions — content survives", async ({ page }) => {
-    // Known bug: both editors go blank after tab swap. Remove test.fail()
-    // once the fix lands. When fixed, this test will "unexpectedly pass"
-    // and Playwright will flag it — that's the signal to remove this line.
-    test.fail();
+    // Fixed: stable DOM order prevents CodeMirror container relocation.
     const textA = "Document Alpha content";
     const textB = "Document Beta content";
 
@@ -224,8 +221,7 @@ test.describe("Editor tab swap preserves content", () => {
   });
 
   test("Swap editors then continue typing — editor still functional", async ({ page }) => {
-    // Known bug: same root cause as above — swap kills CodeMirror.
-    test.fail();
+    // Fixed: stable DOM order prevents CodeMirror container relocation.
     const textA = "AlphaStart";
     const textB = "BetaStart";
 
