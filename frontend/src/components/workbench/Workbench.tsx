@@ -12,6 +12,7 @@ import { HostedAppPanel } from "@/components/layout/HostedAppPanel";
 import { BoundariesPane } from "@/components/workbench/BoundariesPane";
 import { CorrectionsPane } from "@/components/workbench/CorrectionsPane";
 import { EpisodeRunnerPane } from "@/components/workbench/EpisodeRunnerPane";
+import { ChatPanel } from "@/components/workbench/ChatPanel";
 import { SharedEditorPane } from "@/components/editor/SharedEditorPane";
 import { FontSizeControl } from "@/components/common/FontSizeControl";
 
@@ -30,6 +31,7 @@ export const PANEL_TYPES = [
   { type: "corrections", label: "Corrections", multi: false },
   { type: "episodes", label: "Episodes", multi: false },
   { type: "editor", label: "Editor", multi: true },
+  { type: "chat", label: "Chat", multi: true },
 ] as const;
 
 export interface WorkbenchPanel {
@@ -83,6 +85,8 @@ function TabContent({ panel }: { panel: WorkbenchPanel }) {
       break;
     case "editor":
       return <SharedEditorPane instanceId={panel.instanceId} config={panel.config} />;
+    case "chat":
+      return <ChatPanel instanceId={panel.instanceId} config={panel.config} />;
     default:
       content = <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Unknown panel type</div>;
   }

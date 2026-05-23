@@ -260,7 +260,24 @@ test.describe("Multi-panel architecture", () => {
     await expect(page.locator('button[title="Collapse sidebar"]')).not.toBeAttached();
   });
 
-  test("9: Editor Open button shows file browser dropdown", async ({ page }) => {
+  test("9: Chat panel can be added and shows agent selector", async ({ page }) => {
+    // Open the + menu
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    const addBtn = page.locator('[data-testid="add-panel-chat"]');
+    await expect(addBtn).toBeVisible({ timeout: 5_000 });
+    await addBtn.click({ force: true });
+    await page.waitForTimeout(500);
+
+    // Chat tab should appear
+    const chatTab = page.locator('[data-testid^="workbench-tab-chat-"]');
+    await expect(chatTab).toBeVisible({ timeout: 3_000 });
+
+    // Agent selector should be visible (no agent selected yet)
+    const agentSelect = page.locator('select').filter({ has: page.locator('option:has-text("Choose agent")') });
+    await expect(agentSelect).toBeVisible({ timeout: 3_000 });
+  });
+
+  test("10: Editor Open button shows file browser dropdown", async ({ page }) => {
     // Add an editor panel first (not in defaults)
     await page.locator('[data-testid="open-tab-menu"]').click();
     const addBtn = page.locator('[data-testid="add-panel-editor"]');

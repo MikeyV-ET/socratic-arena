@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useArenaStore } from "@/stores/arenaStore";
-import type { ClientMessage } from "@/types";
+import type { ClientMessage, ConversationNode } from "@/types";
 
 const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
 const basePath = window.location.pathname.replace(/\/+$/, "");
@@ -269,6 +269,35 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
           store.resizePanel(name, size);
         }
       }
+      break;
+    }
+
+    case "chat_panel.user_node": {
+      const pId = msg.payload.panelId as string;
+      store.addPanelMessage(pId, msg.payload.node as ConversationNode);
+      break;
+    }
+
+    case "chat_panel.response": {
+      const pId = msg.payload.panelId as string;
+      const node = msg.payload.node as ConversationNode;
+      store.addPanelMessage(pId, node);
+      store.setPanelAwaitingResponse(pId, false);
+      break;
+    }
+
+    case "chat_panel.chunk": {
+      const pId = msg.payload.panelId as string;
+      const nodeId = msg.payload.nodeId as string;
+      const content = msg.payload.content as string;
+      // Update existing node's content (streaming)
+      store.updatePanelMessage(pId, nodeId, content);
+      break;
+    }
+
+    case "chat_panel.turn_complete": {
+      const pId = msg.payload.panelId as string;
+      store.setPanelAwaitingResponse(pId, false);
       break;
     }
 

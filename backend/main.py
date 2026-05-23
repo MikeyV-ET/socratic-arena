@@ -410,6 +410,9 @@ async def websocket_endpoint(ws: WebSocket):
             elif msg_type == "conversation.send":
                 await handle_conversation_send(ws, payload)
 
+            elif msg_type == "conversation.panel_send":
+                await handle_panel_send(ws, payload)
+
             elif msg_type == "branch.create":
                 await handle_branch_create(ws, payload)
 
@@ -592,6 +595,61 @@ async def handle_conversation_send(ws: WebSocket, payload: dict):
         "agent": _current_agent,
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
     })
+
+
+async def handle_panel_send(ws: WebSocket, payload: dict):
+    """Handle a message sent from a workbench chat panel to a specific agent."""
+    panel_id = payload.get("panelId", "")
+    target_agent = payload.get("agent", "")
+    content = payload.get("content", "")
+    if not panel_id or not target_agent or not content:
+        return
+
+    # Create user node
+    user_node = ConversationNode(
+        id=new_id(),
+        branch_id="panel",
+        role="user",
+        content=content,
+    )
+
+    # Track in panel messages
+    if panel_id not in _panel_messages:
+        _panel_messages[panel_id] = []
+    _panel_messages[panel_id].append(user_node.model_dump())
+
+    # Create placeholder assistant node for the response
+    assistant_node = ConversationNode(
+        id=new_id(),
+        branch_id="panel",
+        role="assistant",
+        content="",
+        agent_label=target_agent,
+    )
+    _panel_messages[panel_id].append(assistant_node.model_dump())
+
+    # Map the assistant node to this panel so adapter_response can route it
+    _panel_node_map[assistant_node.id] = panel_id
+    # Also store in the main index so adapter_response can find it
+    _msg_index[assistant_node.id] = assistant_node
+
+    # Echo user node to all clients
+    await broadcast({
+        "type": "chat_panel.user_node",
+        "payload": {"panelId": panel_id, "node": user_node.model_dump()},
+    })
+
+    # Enqueue for adapter with the assistant node ID (response goes here)
+    _pending_user_messages.append({
+        "content": content,
+        "nodeId": assistant_node.id,
+        "branchId": "panel",
+        "agent": target_agent,
+        "panelId": panel_id,
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    })
+
+    log.info("Panel chat: %s -> %s (panel=%s, nodeId=%s)", "user", target_agent, panel_id, assistant_node.id[:12])
 
 
 async def handle_branch_create(ws: WebSocket, payload: dict):
@@ -1937,6 +1995,10 @@ async def search_agent_notebook(name: str, q: str, limit: int = 50):
 
 _pending_user_messages: list[dict] = []
 
+# Panel chat state — maps nodeIds to panelIds so adapter responses route correctly
+_panel_node_map: dict[str, str] = {}     # nodeId -> panelId
+_panel_messages: dict[str, list] = {}     # panelId -> list of node dicts
+
 
 @app.get("/api/adapter/pending")
 async def adapter_pending():
@@ -1946,14 +2008,60 @@ async def adapter_pending():
     return {"messages": msgs}
 
 
+async def _handle_panel_response(panel_id: str, body: dict):
+    """Route an adapter response to a workbench chat panel."""
+    node_id = body.get("nodeId", "")
+    content = body.get("content", "")
+    thinking = body.get("thinking")
+    agent = body.get("agent", "")
+
+    # Update the placeholder assistant node
+    msg = _msg_index.get(node_id)
+    if msg:
+        msg.content = content
+        if thinking:
+            msg.thinking = thinking
+
+    # Clean up the mapping
+    _panel_node_map.pop(node_id, None)
+
+    # Build response node for the frontend
+    response_node = {
+        "id": node_id,
+        "parentId": None,
+        "branchId": "panel",
+        "role": "assistant",
+        "content": content,
+        "thinking": thinking,
+        "timestamp": now_ms(),
+        "eventId": "",
+        "children": [],
+        "flags": [],
+        "agentLabel": agent,
+    }
+
+    await broadcast({
+        "type": "chat_panel.response",
+        "payload": {"panelId": panel_id, "node": response_node},
+    })
+    log.info("Panel chat response: %s -> panel=%s (%d chars)", agent, panel_id, len(content))
+    return {"status": "ok"}
+
+
 @app.post("/api/adapter/response")
 async def adapter_response(body: dict):
     """Receive agent response from asdaaas adapter and populate the assistant node."""
+    node_id = body.get("nodeId", "")
     agent = body.get("agent", "")
+
+    # Check if this response belongs to a panel chat
+    panel_id = _panel_node_map.get(node_id)
+    if panel_id:
+        return await _handle_panel_response(panel_id, body)
+
     if agent and agent != _current_agent:
         return {"status": "ignored", "message": f"response from {agent} ignored (current agent is {_current_agent})"}
 
-    node_id = body.get("nodeId", "")
     content = body.get("content", "")
     thinking = body.get("thinking")
 
@@ -1998,11 +2106,26 @@ async def adapter_response(body: dict):
 @app.post("/api/adapter/chunk")
 async def adapter_chunk(body: dict):
     """Receive streaming chunk from asdaaas adapter."""
+    node_id = body.get("nodeId", "")
+
+    # Route panel chat chunks to the right panel
+    panel_id = _panel_node_map.get(node_id)
+    if panel_id:
+        content = body.get("content", "")
+        chunk_type = body.get("type", "text")
+        if chunk_type == "text":
+            msg = _msg_index.get(node_id)
+            if msg:
+                msg.content = (msg.content or "") + content
+            await broadcast({
+                "type": "chat_panel.chunk",
+                "payload": {"panelId": panel_id, "nodeId": node_id, "content": msg.content if msg else content},
+            })
+        return {"status": "ok"}
+
     agent = body.get("agent", "")
     if agent and agent != _current_agent:
         return {"status": "ignored"}
-
-    node_id = body.get("nodeId", "")
     content = body.get("content", "")
     chunk_type = body.get("type", "text")
 

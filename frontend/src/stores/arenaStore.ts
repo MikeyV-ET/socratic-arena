@@ -189,6 +189,13 @@ interface ArenaState {
   setAgentPanelReleased: (panelId: string) => void;
   setAgentPanelStatus: (panelId: string, status: string) => void;
 
+  // Panel chat messages (per-panel message lists for workbench chat panels)
+  panelMessages: Record<string, ConversationNode[]>;
+  addPanelMessage: (panelId: string, node: ConversationNode) => void;
+  updatePanelMessage: (panelId: string, nodeId: string, content: string, thinking?: string | null) => void;
+  setPanelAwaitingResponse: (panelId: string, v: boolean) => void;
+  panelAwaitingResponse: Record<string, boolean>;
+
   // Corrections (training annotations)
   corrections: Correction[];
   editingCorrectionNodeId: string | null;
@@ -686,6 +693,30 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
       if (!existing) return s;
       return { agentPanels: { ...s.agentPanels, [panelId]: { ...existing, status } } };
     }),
+
+    // Panel chat messages
+    panelMessages: {},
+    panelAwaitingResponse: {},
+    addPanelMessage: (panelId, node) => set((s) => {
+      const existing = s.panelMessages[panelId] || [];
+      if (existing.some((m) => m.id === node.id)) return s;
+      return { panelMessages: { ...s.panelMessages, [panelId]: [...existing, node] } };
+    }),
+    updatePanelMessage: (panelId, nodeId, content, thinking) => set((s) => {
+      const existing = s.panelMessages[panelId];
+      if (!existing) return s;
+      return {
+        panelMessages: {
+          ...s.panelMessages,
+          [panelId]: existing.map((m) =>
+            m.id === nodeId ? { ...m, content, ...(thinking != null ? { thinking } : {}) } : m
+          ),
+        },
+      };
+    }),
+    setPanelAwaitingResponse: (panelId, v) => set((s) => ({
+      panelAwaitingResponse: { ...s.panelAwaitingResponse, [panelId]: v },
+    })),
 
     // Corrections
     corrections: [],
