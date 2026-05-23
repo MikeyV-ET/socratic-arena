@@ -97,7 +97,7 @@ function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, paneId
   return (
     <header className="flex items-center justify-between px-2 py-0.5 border-b border-border/50">
       <div className="flex items-center gap-2">
-        <span className="text-xs font-semibold text-muted-foreground mr-1">Socratic Arena <span className="font-normal text-[10px] opacity-60">v{SA_VERSION}</span></span>
+        <span className="text-sm font-bold text-foreground mr-1">Socratic Arena <span className="font-normal text-[10px] text-muted-foreground">v{SA_VERSION}</span></span>
         <select
           value={currentAgent}
           onChange={(e) => onAgentSwitch(e.target.value)}
