@@ -19,17 +19,17 @@ import { FontSizeControl } from "@/components/common/FontSizeControl";
 /** Panel types available in the workbench. Singleton types can only have one
  *  instance; multi-instance types (editor, chat) can be added repeatedly. */
 export const PANEL_TYPES = [
-  { type: "history", label: "History", multi: false },
-  { type: "moments", label: "Moments", multi: false },
-  { type: "notebook", label: "Notebook", multi: false },
-  { type: "prompt-dev", label: "Prompt Dev", multi: false },
-  { type: "prompt-test", label: "Prompt Test", multi: false },
-  { type: "inspector", label: "Inspector", multi: false },
-  { type: "artifact", label: "Artifact", multi: false },
+  { type: "history", label: "History", multi: true },
+  { type: "moments", label: "Moments", multi: true },
+  { type: "notebook", label: "Notebook", multi: true },
+  { type: "prompt-dev", label: "Prompt Dev", multi: true },
+  { type: "prompt-test", label: "Prompt Test", multi: true },
+  { type: "inspector", label: "Inspector", multi: true },
+  { type: "artifact", label: "Artifact", multi: true },
   { type: "app", label: "App", multi: true },
-  { type: "boundaries", label: "Boundaries", multi: false },
-  { type: "corrections", label: "Corrections", multi: false },
-  { type: "episodes", label: "Episodes", multi: false },
+  { type: "boundaries", label: "Boundaries", multi: true },
+  { type: "corrections", label: "Corrections", multi: true },
+  { type: "episodes", label: "Episodes", multi: true },
   { type: "editor", label: "Editor", multi: true },
   { type: "chat", label: "Chat", multi: true },
 ] as const;

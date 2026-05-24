@@ -50,36 +50,28 @@ test.describe("Multi-panel architecture", () => {
     expect(tabCount).toBeGreaterThanOrEqual(KNOWN_SINGLETONS.length);
   });
 
-  test("2: Close singleton tab then reopen — tab reappears", async ({ page }) => {
-    // Activate notebook tab
+  test("2: Close tab then add new instance — tab reappears", async ({ page }) => {
+    // Close the default notebook tab
     const notebookTab = page.locator('[data-testid="workbench-tab-notebook"]');
     await notebookTab.click();
-    await page.waitForTimeout(300);
-
-    // Close it
-    const closeBtn = page.locator('[data-testid="close-tab-notebook"]');
-    // Close button may only appear on hover
     await notebookTab.hover();
     await page.waitForTimeout(200);
+    const closeBtn = page.locator('[data-testid="close-tab-notebook"]');
+    if (!(await closeBtn.isVisible())) return;
+    await closeBtn.click();
+    await page.waitForTimeout(300);
+    await expect(notebookTab).not.toBeAttached();
 
-    if (await closeBtn.isVisible()) {
-      await closeBtn.click();
-      await page.waitForTimeout(300);
+    // Add a new notebook instance from + menu (all types are multi now)
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    const addBtn = page.locator('[data-testid="add-panel-notebook"]');
+    await expect(addBtn).toBeVisible();
+    await addBtn.click();
+    await page.waitForTimeout(300);
 
-      // Verify it's gone
-      await expect(notebookTab).not.toBeAttached();
-
-      // Reopen from + menu
-      await page.locator('[data-testid="open-tab-menu"]').click();
-      await page.waitForTimeout(300);
-      const reopenBtn = page.locator('[data-testid="reopen-tab-notebook"]');
-      await expect(reopenBtn).toBeVisible();
-      await reopenBtn.click();
-      await page.waitForTimeout(300);
-
-      // Verify it's back
-      await expect(page.locator('[data-testid="workbench-tab-notebook"]')).toBeAttached();
-    }
+    // Verify a notebook tab exists again
+    await expect(page.locator('[data-testid^="workbench-tab-notebook"]')).toBeAttached();
   });
 
   test("3: Create new editor instance — appears as new tab", async ({ page }) => {
