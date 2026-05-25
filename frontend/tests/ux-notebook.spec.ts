@@ -46,7 +46,7 @@ test.describe("Notebook Pane -- Scroll to bottom (R03)", () => {
 
     if (count > 3) {
       // Virtual scroll needs time to measure large entries and settle
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(3000);
       const scrollContainer = notebookPane.locator(".overflow-y-auto").first();
       const isAtBottom = await scrollContainer.evaluate((el) => {
         return el.scrollHeight - el.scrollTop - el.clientHeight < 200;

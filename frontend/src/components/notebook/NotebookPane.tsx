@@ -44,30 +44,48 @@ export function NotebookPane() {
   // Scroll to bottom on initial load or agent switch
   const prevEntryCount = useRef(0);
   const prevNotebookAgent = useRef(notebookAgent);
-  // Reset entry count tracking when agent changes so the new entries trigger scroll
+  // Reset on agent switch: clear entries so scroll-to-bottom triggers on new data
   useEffect(() => {
     if (prevNotebookAgent.current !== notebookAgent) {
       prevEntryCount.current = 0;
       prevNotebookAgent.current = notebookAgent;
+      setNotebook({ entries: [] });
     }
-  }, [notebookAgent]);
+  }, [notebookAgent, setNotebook]);
   useEffect(() => {
     if (entries.length === 0) return;
     const wasEmpty = prevEntryCount.current === 0;
     prevEntryCount.current = entries.length;
     if (!wasEmpty) return;
-    virtualizer.scrollToIndex(entries.length - 1, { align: "end" });
-    // Virtualizer measures large entries asynchronously; keep scrolling to
-    // bottom as measurements arrive (estimateSize=200 but real entries are
-    // often thousands of px tall, so scrollHeight keeps growing).
-    const start = performance.now();
-    const rafScroll = () => {
-      const el = scrollRef.current;
-      if (!el || performance.now() - start > 1500) return;
-      el.scrollTop = el.scrollHeight;
-      requestAnimationFrame(rafScroll);
+
+    const el = scrollRef.current;
+    if (!el) return;
+
+    // Virtualizer measures entries asynchronously — real heights are often
+    // thousands of px vs. estimateSize=150. Each scrollToIndex call
+    // recalculates with updated measurements and pulls new entries into
+    // the viewport for measurement. ResizeObserver catches the resulting
+    // height changes; scheduled calls ensure we chase to the real bottom.
+    const scrollToBottom = () => {
+      virtualizer.scrollToIndex(entries.length - 1, { align: "end" });
+      requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
     };
-    requestAnimationFrame(rafScroll);
+
+    scrollToBottom();
+
+    const inner = el.firstElementChild;
+    let ro: ResizeObserver | null = null;
+    if (inner) {
+      ro = new ResizeObserver(scrollToBottom);
+      ro.observe(inner);
+    }
+
+    // Chase measurements at intervals — each call triggers new renders
+    const timers = [200, 500, 1000, 2000, 3500].map(
+      (d) => setTimeout(scrollToBottom, d),
+    );
+    timers.push(setTimeout(() => ro?.disconnect(), 5000));
+    return () => { ro?.disconnect(); timers.forEach(clearTimeout); };
   }, [entries.length, virtualizer, notebookAgent]);
 
   // Scroll to specific notebook entry (from workspace.navigate or moment navigation)
