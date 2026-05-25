@@ -319,7 +319,7 @@ export function Workbench() {
       <TabBar activeTab={activeTab} onSelect={setActiveTab} splitControls={splitControls} />
       <div className="flex-1 overflow-hidden relative">
         {[...panels].sort((a, b) => a.instanceId.localeCompare(b.instanceId)).map((panel) => (
-          <div key={panel.instanceId} className={`absolute inset-0 ${activeTab === panel.instanceId ? "" : "invisible"}`}>
+          <div key={panel.instanceId} data-instance-id={panel.instanceId} className={`absolute inset-0 ${activeTab === panel.instanceId ? "" : "invisible"}`}>
             <TabContent panel={panel} />
           </div>
         ))}

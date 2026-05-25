@@ -82,36 +82,13 @@ async function activatePanel(page: Page, panel: { id: string; label: string }) {
   const iframe = page.locator(`iframe[data-panel-id="${panel.id}"]`);
   await expect(iframe).toBeAttached({ timeout: 30_000 });
 
-  // Find which workbench tab contains this iframe by walking up to the panel div
-  // Each workbench tab's content area is a div with class "absolute inset-0"
-  // keyed by instanceId. The iframe's data-panel-id lets us find the right tab.
+  // Find which workbench tab contains this iframe by walking up to the
+  // content wrapper div (has data-instance-id attribute from Workbench.tsx).
   const instanceId = await page.evaluate((panelId) => {
     const el = document.querySelector(`iframe[data-panel-id="${panelId}"]`);
-    // Walk up to find the workbench panel container (has class "absolute inset-0")
     let node = el?.parentElement;
     while (node) {
-      // The TabContent wrapper div has the instanceId check
-      if (node.classList.contains("absolute") && node.classList.contains("inset-0")) {
-        // The data-testid on the parent's corresponding tab is workbench-tab-{instanceId}
-        // Find matching tab by checking all tabs
-        const tabs = document.querySelectorAll('[data-testid^="workbench-tab-"]');
-        for (const tab of tabs) {
-          const tid = tab.getAttribute("data-testid")?.replace("workbench-tab-", "");
-          // Check if clicking this tab would show this panel by matching text content
-          if (tid && node.parentElement) {
-            const siblings = node.parentElement.children;
-            for (let i = 0; i < siblings.length; i++) {
-              if (siblings[i] === node) {
-                // Find the i-th tab
-                const allTabs = document.querySelectorAll('[data-testid^="workbench-tab-"]');
-                if (allTabs[i]) {
-                  return allTabs[i].getAttribute("data-testid")?.replace("workbench-tab-", "");
-                }
-              }
-            }
-          }
-        }
-      }
+      if (node.dataset.instanceId) return node.dataset.instanceId;
       node = node.parentElement;
     }
     return null;

@@ -61,8 +61,8 @@ export function PaneAgentSelector({ value, onChange, onDataLoaded, dataType, lab
   useEffect(() => {
     if (!value || value === mountedAgent.current) return;
     mountedAgent.current = value;
+    fetchData(value);
     if (isHistory) {
-      fetchData(value);
       fetchSessions(value);
     }
   }, [value, isHistory, fetchData, fetchSessions]);
@@ -70,17 +70,8 @@ export function PaneAgentSelector({ value, onChange, onDataLoaded, dataType, lab
   const handleAgentChange = (agentName: string) => {
     onChange(agentName);
     mountedAgent.current = agentName;
-    if (isHistory) {
-      fetchData(agentName);
-      fetchSessions(agentName);
-    } else {
-      const currentAgent = useArenaStore.getState().currentAgent;
-      if (agentName === currentAgent) {
-        onDataLoadedRef.current?.(null);
-      } else {
-        fetchData(agentName);
-      }
-    }
+    fetchData(agentName);
+    if (isHistory) fetchSessions(agentName);
   };
 
   const handleSessionChange = (sessionId: string) => {
