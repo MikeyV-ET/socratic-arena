@@ -68,6 +68,117 @@ test.describe("Notebook Pane -- Scroll to bottom (R03)", () => {
   });
 });
 
+test.describe("Notebook Pane -- Agent switch-back (R03a)", () => {
+  test.beforeEach(async ({ page }) => {
+    // Clear cached workbench layout so default panels (notebook) load
+    await page.goto("/");
+    await page.evaluate(() => {
+      localStorage.removeItem("sa-workbench-panels");
+      localStorage.removeItem("sa-open-tabs");
+    });
+  });
+
+  test("R03a: Switching to another agent and back loads original notebook", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForTimeout(2000);
+
+    // Ensure notebook tab exists — click it or add it via store
+    const notebookTab = page.locator('[data-testid="workbench-tab-notebook"]');
+    const tabVisible = await notebookTab.isVisible().catch(() => false);
+    if (!tabVisible) {
+      await page.evaluate(() => {
+        const s = (window as any).__ARENA_STORE__?.getState();
+        if (s?.addPanel) s.addPanel("notebook");
+      });
+      await page.waitForTimeout(1000);
+    }
+    await page.locator('[data-testid="workbench-tab-notebook"]').click();
+    await page.waitForTimeout(2000);
+
+    const notebookPane = page.locator('[data-testid="notebook-pane"]');
+    await expect(notebookPane).toBeVisible({ timeout: 5000 });
+
+    // Get agent selector — skip if only one agent
+    const agentSelector = notebookPane.locator("select").first();
+    const selectorExists = await agentSelector.isVisible().catch(() => false);
+    if (!selectorExists) {
+      test.skip();
+      return;
+    }
+    const options = await agentSelector.locator("option").allTextContents();
+    if (options.length < 2) {
+      test.skip();
+      return;
+    }
+
+    // Record entries for the original agent
+    await page.waitForTimeout(1000);
+    const originalAgent = options[0];
+    const originalEntries = await notebookPane.locator("[data-testid^='notebook-entry-']").count();
+
+    // Switch to second agent
+    await agentSelector.selectOption(options[1]);
+    await page.waitForTimeout(3000);
+
+    // Switch back to original agent
+    await agentSelector.selectOption(originalAgent);
+    await page.waitForTimeout(3000);
+
+    // Entries must be present — the bug was that switching back loaded nothing
+    const afterSwitchBack = await notebookPane.locator("[data-testid^='notebook-entry-']").count();
+    expect(afterSwitchBack).toBeGreaterThan(0);
+  });
+
+  test("R03a: Notebook shows different content for different agents", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForTimeout(2000);
+
+    const notebookTab = page.locator('[data-testid="workbench-tab-notebook"]');
+    const tabVisible = await notebookTab.isVisible().catch(() => false);
+    if (!tabVisible) {
+      await page.evaluate(() => {
+        const s = (window as any).__ARENA_STORE__?.getState();
+        if (s?.addPanel) s.addPanel("notebook");
+      });
+      await page.waitForTimeout(1000);
+    }
+    await page.locator('[data-testid="workbench-tab-notebook"]').click();
+    await page.waitForTimeout(2000);
+
+    const notebookPane = page.locator('[data-testid="notebook-pane"]');
+    await expect(notebookPane).toBeVisible({ timeout: 5000 });
+
+    const agentSelector = notebookPane.locator("select").first();
+    const selectorExists = await agentSelector.isVisible().catch(() => false);
+    if (!selectorExists || (await agentSelector.locator("option").count()) < 2) {
+      test.skip();
+      return;
+    }
+    const options = await agentSelector.locator("option").allTextContents();
+
+    // Get all entry IDs for agent 1 (from data-testid attributes)
+    await page.waitForTimeout(1000);
+    const agent1Ids = await notebookPane
+      .locator("[data-testid^='notebook-entry-']")
+      .evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")));
+
+    // Switch to agent 2 and get their entry IDs
+    await agentSelector.selectOption(options[1]);
+    await page.waitForTimeout(3000);
+    const agent2Ids = await notebookPane
+      .locator("[data-testid^='notebook-entry-']")
+      .evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")));
+
+    // Both should have entries
+    expect(agent1Ids.length).toBeGreaterThan(0);
+    expect(agent2Ids.length).toBeGreaterThan(0);
+
+    // Entry IDs should differ (different agents have different notebooks)
+    const overlap = agent1Ids.filter((id) => agent2Ids.includes(id));
+    expect(overlap.length).toBeLessThan(agent1Ids.length);
+  });
+});
+
 test.describe("Notebook Pane -- Search (R04)", () => {
   test("R04: Search toggle button exists in notebook pane", async ({ page }) => {
     await page.goto("/");
