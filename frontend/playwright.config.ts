@@ -7,7 +7,7 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   use: {
-    baseURL: "http://localhost:8000",
+    baseURL: process.env.SA_URL ?? "http://localhost:5175",
     headless: true,
     viewport: { width: 1440, height: 900 },
     launchOptions: { args: ["--no-sandbox"] },
