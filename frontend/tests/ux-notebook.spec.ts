@@ -160,20 +160,12 @@ test.describe("Notebook Pane -- Agent switch-back (R03a)", () => {
 
 test.describe("Notebook Pane -- Search (R04)", () => {
   test("R04: Search toggle button exists in notebook pane", async ({ page }) => {
-    await page.goto("/");
-    await expect(page.locator("[data-node-id]").first()).toBeVisible({ timeout: 15_000 });
-
-    await page.locator('[data-testid="workbench-tab-notebook"]').click();
-    await page.waitForTimeout(1000);
-
-    const notebookPane = page.locator('[data-testid="notebook-pane"]');
+    const notebookPane = await openNotebookPane(page);
     await expect(notebookPane).toBeVisible({ timeout: 5000 });
 
-    // Search is a toggle button in the header
     const searchToggle = notebookPane.locator('button[title="Search notebook"]');
     await expect(searchToggle).toBeVisible({ timeout: 3000 });
 
-    // Click to reveal search input
     await searchToggle.click();
     await page.waitForTimeout(500);
 
@@ -182,16 +174,9 @@ test.describe("Notebook Pane -- Search (R04)", () => {
   });
 
   test("R04: Notebook search returns and highlights results", async ({ page }) => {
-    await page.goto("/");
-    await expect(page.locator("[data-node-id]").first()).toBeVisible({ timeout: 15_000 });
-
-    await page.locator('[data-testid="workbench-tab-notebook"]').click();
-    await page.waitForTimeout(1000);
-
-    const notebookPane = page.locator('[data-testid="notebook-pane"]');
+    const notebookPane = await openNotebookPane(page);
     await expect(notebookPane).toBeVisible({ timeout: 5000 });
 
-    // Open search panel
     await notebookPane.locator('button[title="Search notebook"]').click();
     await page.waitForTimeout(500);
 
@@ -200,7 +185,6 @@ test.describe("Notebook Pane -- Search (R04)", () => {
     await searchInput.press("Enter");
     await page.waitForTimeout(2000);
 
-    // Results appear as buttons in the results list
     const resultButtons = notebookPane.locator('.max-h-48 button');
     const count = await resultButtons.count();
     expect(count).toBeGreaterThan(0);
