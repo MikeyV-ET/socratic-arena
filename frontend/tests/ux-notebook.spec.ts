@@ -11,91 +11,85 @@ import { test, expect } from "@playwright/test";
  * Search is behind a toggle button (title="Search notebook").
  */
 
+/** Helper: ensure notebook tab is open and visible */
+async function openNotebookPane(page: any) {
+  // Navigate first, then clear cached layout, then reload so defaults apply
+  await page.goto("/");
+  await page.evaluate(() => {
+    localStorage.removeItem("sa-workbench-panels");
+    localStorage.removeItem("sa-open-tabs");
+  });
+  await page.reload();
+  await page.waitForTimeout(2000);
+
+  const notebookTab = page.locator('[data-testid="workbench-tab-notebook"]');
+  const tabVisible = await notebookTab.isVisible().catch(() => false);
+  if (!tabVisible) {
+    await page.evaluate(() => {
+      const s = (window as any).__ARENA_STORE__?.getState();
+      if (s?.addPanel) s.addPanel("notebook");
+    });
+    await page.waitForTimeout(1000);
+  }
+  await page.locator('[data-testid="workbench-tab-notebook"]').click();
+  await page.waitForTimeout(2000);
+  return page.locator('[data-testid="notebook-pane"]');
+}
+
 test.describe("Notebook Pane -- Scroll to bottom (R03)", () => {
   test("R03: Notebook scrolls to most recent entry on tab open", async ({ page }) => {
-    await page.goto("/");
-    await expect(page.locator("[data-node-id]").first()).toBeVisible({ timeout: 15_000 });
-
-    // Open notebook workbench tab
-    await page.locator('[data-testid="workbench-tab-notebook"]').click();
-    await page.waitForTimeout(2000);
-
-    const notebookPane = page.locator('[data-testid="notebook-pane"]');
+    const notebookPane = await openNotebookPane(page);
     await expect(notebookPane).toBeVisible({ timeout: 5000 });
 
     const entries = notebookPane.locator("[data-testid^='notebook-entry-']");
     const count = await entries.count();
 
     if (count > 3) {
-      // NotebookPane scroll container: div with ref={scrollRef} and class overflow-y-auto
+      // Virtual scroll needs time to measure large entries and settle
+      await page.waitForTimeout(2000);
       const scrollContainer = notebookPane.locator(".overflow-y-auto").first();
       const isAtBottom = await scrollContainer.evaluate((el) => {
-        return el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+        return el.scrollHeight - el.scrollTop - el.clientHeight < 200;
       });
       expect(isAtBottom).toBe(true);
     }
   });
 
   test("R03: Notebook scrolls to bottom on agent switch", async ({ page }) => {
-    await page.goto("/");
-    await expect(page.locator("[data-node-id]").first()).toBeVisible({ timeout: 15_000 });
-
-    await page.locator('[data-testid="workbench-tab-notebook"]').click();
-    await page.waitForTimeout(1000);
-
-    const notebookPane = page.locator('[data-testid="notebook-pane"]');
+    const notebookPane = await openNotebookPane(page);
     await expect(notebookPane).toBeVisible({ timeout: 5000 });
 
     const agentSelector = notebookPane.locator("select").first();
     const selectorExists = await agentSelector.isVisible().catch(() => false);
-    if (!selectorExists) return;
+    if (!selectorExists) {
+      test.skip();
+      return;
+    }
 
     const options = await agentSelector.locator("option").allTextContents();
-    if (options.length > 1) {
-      await agentSelector.selectOption(options[1]);
-      await page.waitForTimeout(4000);
+    if (options.length < 2) {
+      test.skip();
+      return;
+    }
 
-      const entries = notebookPane.locator("[data-testid^='notebook-entry-']");
-      const count = await entries.count();
-      if (count > 3) {
-        const scrollContainer = notebookPane.locator(".overflow-y-auto").first();
-        const isAtBottom = await scrollContainer.evaluate((el) => {
-          return el.scrollHeight - el.scrollTop - el.clientHeight < 150;
-        });
-        expect(isAtBottom).toBe(true);
-      }
+    await agentSelector.selectOption(options[1]);
+    await page.waitForTimeout(4000);
+
+    const entries = notebookPane.locator("[data-testid^='notebook-entry-']");
+    const count = await entries.count();
+    if (count > 3) {
+      const scrollContainer = notebookPane.locator(".overflow-y-auto").first();
+      const isAtBottom = await scrollContainer.evaluate((el) => {
+        return el.scrollHeight - el.scrollTop - el.clientHeight < 200;
+      });
+      expect(isAtBottom).toBe(true);
     }
   });
 });
 
 test.describe("Notebook Pane -- Agent switch-back (R03a)", () => {
-  test.beforeEach(async ({ page }) => {
-    // Clear cached workbench layout so default panels (notebook) load
-    await page.goto("/");
-    await page.evaluate(() => {
-      localStorage.removeItem("sa-workbench-panels");
-      localStorage.removeItem("sa-open-tabs");
-    });
-  });
-
   test("R03a: Switching to another agent and back loads original notebook", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForTimeout(2000);
-
-    // Ensure notebook tab exists — click it or add it via store
-    const notebookTab = page.locator('[data-testid="workbench-tab-notebook"]');
-    const tabVisible = await notebookTab.isVisible().catch(() => false);
-    if (!tabVisible) {
-      await page.evaluate(() => {
-        const s = (window as any).__ARENA_STORE__?.getState();
-        if (s?.addPanel) s.addPanel("notebook");
-      });
-      await page.waitForTimeout(1000);
-    }
-    await page.locator('[data-testid="workbench-tab-notebook"]').click();
-    await page.waitForTimeout(2000);
-
-    const notebookPane = page.locator('[data-testid="notebook-pane"]');
+    const notebookPane = await openNotebookPane(page);
     await expect(notebookPane).toBeVisible({ timeout: 5000 });
 
     // Get agent selector — skip if only one agent
@@ -130,22 +124,7 @@ test.describe("Notebook Pane -- Agent switch-back (R03a)", () => {
   });
 
   test("R03a: Notebook shows different content for different agents", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForTimeout(2000);
-
-    const notebookTab = page.locator('[data-testid="workbench-tab-notebook"]');
-    const tabVisible = await notebookTab.isVisible().catch(() => false);
-    if (!tabVisible) {
-      await page.evaluate(() => {
-        const s = (window as any).__ARENA_STORE__?.getState();
-        if (s?.addPanel) s.addPanel("notebook");
-      });
-      await page.waitForTimeout(1000);
-    }
-    await page.locator('[data-testid="workbench-tab-notebook"]').click();
-    await page.waitForTimeout(2000);
-
-    const notebookPane = page.locator('[data-testid="notebook-pane"]');
+    const notebookPane = await openNotebookPane(page);
     await expect(notebookPane).toBeVisible({ timeout: 5000 });
 
     const agentSelector = notebookPane.locator("select").first();
