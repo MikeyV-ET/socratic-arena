@@ -101,9 +101,10 @@ function TabContent({ panel }: { panel: WorkbenchPanel }) {
 
 type SplitOrientation = "horizontal" | "vertical";
 
-function TabBar({ activeTab, onSelect, splitControls }: {
+function TabBar({ activeTab, onSelect, splitControls, paneTarget = "main" }: {
   activeTab: string;
   onSelect: (id: string) => void;
+  paneTarget?: "main" | "split";
   splitControls: {
     isSplit: boolean;
     orientation: SplitOrientation;
@@ -195,7 +196,7 @@ function TabBar({ activeTab, onSelect, splitControls }: {
               {closedSingletons.length > 0 && closedSingletons.map((t) => (
                 <button
                   key={t.type}
-                  onClick={() => { openTab(t.type); setShowMenu(false); }}
+                  onClick={() => { openTab(t.type, paneTarget); setShowMenu(false); }}
                   className="block w-full text-left px-3 py-1 text-xs hover:bg-muted transition-colors"
                   data-testid={`reopen-tab-${t.type}`}
                 >
@@ -208,7 +209,7 @@ function TabBar({ activeTab, onSelect, splitControls }: {
               {multiTypes.map((t) => (
                 <button
                   key={t.type}
-                  onClick={() => { addPanel(t.type); setShowMenu(false); }}
+                  onClick={() => { addPanel(t.type, {}, paneTarget); setShowMenu(false); }}
                   className="block w-full text-left px-3 py-1 text-xs hover:bg-muted transition-colors text-accent"
                   data-testid={`add-panel-${t.type}`}
                 >
@@ -308,7 +309,7 @@ export function Workbench() {
           <Separator className={separatorClass} />
           <Panel defaultSize={50} minSize={20}>
             <div className="flex flex-col h-full">
-              <TabBar activeTab={splitTab} onSelect={setSplitTab} splitControls={splitControls} />
+              <TabBar activeTab={splitTab} onSelect={setSplitTab} paneTarget="split" splitControls={splitControls} />
               <div className="flex-1 overflow-hidden">
                 {splitPanel && <TabContent panel={splitPanel} />}
               </div>

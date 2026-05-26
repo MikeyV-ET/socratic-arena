@@ -51,8 +51,8 @@ interface ArenaState {
   setActiveTab: (instanceId: string) => void;
   setSplitTab: (instanceId: string | null) => void;
   closeTab: (instanceId: string) => void;
-  openTab: (typeOrInstanceId: string) => void;
-  addPanel: (type: string, config?: Record<string, any>) => string;
+  openTab: (typeOrInstanceId: string, target?: "main" | "split") => void;
+  addPanel: (type: string, config?: Record<string, any>, target?: "main" | "split") => string;
   reorderTabs: (instanceIds: string[]) => void;
   updatePanelConfig: (instanceId: string, config: Record<string, any>) => void;
   updatePanelLabel: (instanceId: string, label: string) => void;
@@ -271,7 +271,7 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
   activeTab: "history",
   splitTab: null,
 
-  addPanel: (type, config = {}) => {
+  addPanel: (type, config = {}, target) => {
     const state = get();
     // Always create a new instance — use openTab() to activate an existing singleton
     const instanceId = `${type}-${Math.random().toString(36).slice(2, 8)}`;
@@ -281,7 +281,8 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
     const panel = { instanceId, type, label, config };
     const next = [...state.workbenchPanels, panel];
     localStorage.setItem("sa-workbench-panels", JSON.stringify(next));
-    set({ workbenchPanels: next, activeTab: instanceId });
+    const tabKey = target === "split" ? "splitTab" : "activeTab";
+    set({ workbenchPanels: next, [tabKey]: instanceId });
     return instanceId;
   },
   setActiveTab: (instanceId) => {
@@ -299,20 +300,21 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
     if (s.splitTab === instanceId) updates.splitTab = null;
     return updates as any;
   }),
-  openTab: (typeOrId) => {
+  openTab: (typeOrId, target) => {
     const s = get();
+    const tabKey = target === "split" ? "splitTab" : "activeTab";
     // If an instance with this ID exists, just activate it
     const byId = s.workbenchPanels.find((p) => p.instanceId === typeOrId);
-    if (byId) { set({ activeTab: typeOrId }); return; }
+    if (byId) { set({ [tabKey]: typeOrId }); return; }
     // If it's a type name and a singleton exists, activate that
     const byType = s.workbenchPanels.find((p) => p.type === typeOrId);
-    if (byType) { set({ activeTab: byType.instanceId }); return; }
+    if (byType) { set({ [tabKey]: byType.instanceId }); return; }
     // Otherwise create it as a singleton-style panel
     const label = typeOrId.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
     const panel = { instanceId: typeOrId, type: typeOrId, label, config: {} };
     const next = [...s.workbenchPanels, panel];
     localStorage.setItem("sa-workbench-panels", JSON.stringify(next));
-    set({ workbenchPanels: next, activeTab: typeOrId });
+    set({ workbenchPanels: next, [tabKey]: typeOrId });
   },
   reorderTabs: (instanceIds) => {
     const s = get();
