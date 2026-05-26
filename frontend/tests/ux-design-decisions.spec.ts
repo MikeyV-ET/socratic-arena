@@ -143,7 +143,86 @@ test.describe("Split workspace", () => {
     await expect(page.locator('button[title="Unsplit"]')).toHaveCount(0);
   });
 
-  test("S6: Closing the split panel's tab collapses split mode", async ({ page }) => {
+  test("S6: Split panes show different content", async ({ page }) => {
+    // Core independence test: after split, panes must show DIFFERENT panels.
+    // In split mode there are two "+" buttons (one per pane's tab bar).
+
+    // Ensure 2+ panels exist
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    const addEditor = page.locator('[data-testid="add-panel-editor"]');
+    if (await addEditor.isVisible()) {
+      await addEditor.click();
+      await page.waitForTimeout(300);
+    } else {
+      await page.keyboard.press("Escape");
+    }
+
+    // Split
+    await page.locator('button[title="Split vertical (side by side)"]').click();
+    await page.waitForTimeout(500);
+
+    // In split mode, there should be 2 "+" menu buttons (one per tab bar)
+    const menuButtons = page.locator('[data-testid="open-tab-menu"]');
+    await expect(menuButtons).toHaveCount(2);
+
+    // Check content: get the visible heading in each pane.
+    // Each pane renders a TabContent whose panel type produces a distinct heading.
+    const headings = page.locator('h2');
+    const headingTexts: string[] = [];
+    for (let i = 0; i < await headings.count(); i++) {
+      if (await headings.nth(i).isVisible()) {
+        headingTexts.push(await headings.nth(i).textContent() || "");
+      }
+    }
+    // The two visible panes should show different content
+    const unique = [...new Set(headingTexts)];
+    expect(unique.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test("S7: Opening panel from split pane targets that pane, not the other", async ({ page }) => {
+    // BUG: addPanel() and openTab() always set activeTab (pane 1).
+    // Clicking "+" in split pane 2's tab bar should change splitTab, not activeTab.
+    // Uses window.__ARENA_STORE__ (exposed in dev mode) to read store state.
+
+    // Split
+    await page.locator('button[title="Split vertical (side by side)"]').click();
+    await page.waitForTimeout(500);
+
+    // Record activeTab BEFORE adding from pane 2's menu
+    const activeTabBefore = await page.evaluate(() =>
+      (window as any).__ARENA_STORE__?.getState()?.activeTab
+    );
+    expect(activeTabBefore).toBeTruthy();
+
+    // Click "+" in the SECOND pane's tab bar
+    const menuButtons = page.locator('[data-testid="open-tab-menu"]');
+    await expect(menuButtons).toHaveCount(2);
+    await menuButtons.nth(1).click();
+    await page.waitForTimeout(300);
+
+    // Click "+ New Notebook" (or first multi-instance option)
+    const addItem = page.locator('[data-testid^="add-panel-"]').first();
+    await expect(addItem).toBeVisible();
+    await addItem.click();
+    await page.waitForTimeout(500);
+
+    // activeTab should NOT have changed — the new panel should be in splitTab
+    const activeTabAfter = await page.evaluate(() =>
+      (window as any).__ARENA_STORE__?.getState()?.activeTab
+    );
+    const splitTabAfter = await page.evaluate(() =>
+      (window as any).__ARENA_STORE__?.getState()?.splitTab
+    );
+
+    // This is the assertion that catches the bug:
+    // activeTab should stay the same (pane 1 unchanged)
+    expect(activeTabAfter).toBe(activeTabBefore);
+    // splitTab should have changed to the new panel
+    expect(splitTabAfter).not.toBe(activeTabBefore);
+  });
+
+  test("S8: Closing the split panel's tab collapses split mode", async ({ page }) => {
     // Add editor so we have notebook + editor
     await page.locator('[data-testid="open-tab-menu"]').click();
     await page.waitForTimeout(300);
