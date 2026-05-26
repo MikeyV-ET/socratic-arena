@@ -12,6 +12,7 @@ import { HostedAppPanel } from "@/components/layout/HostedAppPanel";
 import { BoundariesPane } from "@/components/workbench/BoundariesPane";
 import { CorrectionsPane } from "@/components/workbench/CorrectionsPane";
 import { EpisodeRunnerPane } from "@/components/workbench/EpisodeRunnerPane";
+import { DoppelgangerPane } from "@/components/workbench/DoppelgangerPane";
 import { ChatPanel } from "@/components/workbench/ChatPanel";
 import { SharedEditorPane } from "@/components/editor/SharedEditorPane";
 import { FontSizeControl } from "@/components/common/FontSizeControl";
@@ -30,6 +31,7 @@ export const PANEL_TYPES = [
   { type: "boundaries", label: "Boundaries", multi: true },
   { type: "corrections", label: "Corrections", multi: true },
   { type: "episodes", label: "Episodes", multi: true },
+  { type: "doppelganger", label: "Doppelganger", multi: true },
   { type: "editor", label: "Editor", multi: true },
   { type: "chat", label: "Chat", multi: true },
 ] as const;
@@ -82,6 +84,9 @@ function TabContent({ panel }: { panel: WorkbenchPanel }) {
       break;
     case "episodes":
       content = <EpisodeRunnerPane />;
+      break;
+    case "doppelganger":
+      content = <DoppelgangerPane />;
       break;
     case "editor":
       return <SharedEditorPane instanceId={panel.instanceId} config={panel.config} />;
