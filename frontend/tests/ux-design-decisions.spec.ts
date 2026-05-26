@@ -263,13 +263,14 @@ test.describe("Tab lifecycle", () => {
     await waitForWorkbench(page);
   });
 
-  test("T1: Cannot close the last remaining tab", async ({ page }) => {
-    // Close all tabs except one
+  test("T1: Can close ALL tabs — empty workbench shows '+' button", async ({ page }) => {
+    // Should be able to close every tab, including the last one.
+    // When all tabs are closed, the workbench shows an empty state with "+".
     const allTabs = page.locator('[data-testid^="workbench-tab-"]');
     let count = await allTabs.count();
 
-    // Close tabs until only 1 remains
-    while (count > 1) {
+    // Close every tab
+    while (count > 0) {
       const tab = allTabs.first();
       const testId = await tab.getAttribute("data-testid");
       const instanceId = testId?.replace("workbench-tab-", "");
@@ -281,27 +282,19 @@ test.describe("Tab lifecycle", () => {
           await closeBtn.click();
           await page.waitForTimeout(300);
         } else {
+          // BUG: close button hidden on last tab — should be closeable
+          expect(true, "Close button should be visible on the last tab").toBe(false);
           break;
         }
       }
       count = await allTabs.count();
     }
 
-    // Exactly one tab should remain
-    expect(await allTabs.count()).toBeGreaterThanOrEqual(1);
+    // All tabs should be gone
+    expect(await allTabs.count()).toBe(0);
 
-    // The last tab should NOT have a close button
-    const lastTab = allTabs.first();
-    await lastTab.hover();
-    await page.waitForTimeout(200);
-    const lastTestId = await lastTab.getAttribute("data-testid");
-    const lastId = lastTestId?.replace("workbench-tab-", "");
-    if (lastId) {
-      const closeBtn = page.locator(`[data-testid="close-tab-${lastId}"]`);
-      // Close button should be hidden or not exist when only 1 tab
-      const isVisible = await closeBtn.isVisible();
-      expect(isVisible).toBe(false);
-    }
+    // The "+" button should still be visible so user can add tabs back
+    await expect(page.locator('[data-testid="open-tab-menu"]')).toBeVisible();
   });
 
   test("T2: Closing active tab activates first remaining tab", async ({ page }) => {
@@ -482,5 +475,67 @@ test.describe("Layout defaults", () => {
     const panels = page.locator('[data-panel-id]');
     const count = await panels.count();
     expect(count).toBeGreaterThanOrEqual(2);
+  });
+
+  test("L4: Fresh load with no saved state opens empty workspace", async ({ page }) => {
+    // Clear all workspace localStorage and reload
+    await page.evaluate(() => {
+      localStorage.removeItem("sa-workbench-panels");
+      localStorage.removeItem("sa-open-tabs");
+    });
+    await page.reload();
+    await page.waitForTimeout(1000);
+
+    // No tabs should be open — workspace should be empty
+    const tabs = page.locator('[data-testid^="workbench-tab-"]');
+    expect(await tabs.count()).toBe(0);
+
+    // The "+" button should be visible so user can add panels
+    await expect(page.locator('[data-testid="open-tab-menu"]')).toBeVisible();
+  });
+
+  test("L5: Workspace restores last session's tabs on reload", async ({ page }) => {
+    // Open a specific set of tabs (notebook + editor)
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    const addEditor = page.locator('[data-testid^="add-panel-"]').first();
+    if (await addEditor.isVisible()) {
+      await addEditor.click();
+      await page.waitForTimeout(300);
+    }
+
+    // Record which tabs are open
+    const tabsBefore: string[] = [];
+    const allTabs = page.locator('[data-testid^="workbench-tab-"]');
+    for (let i = 0; i < await allTabs.count(); i++) {
+      const id = await allTabs.nth(i).getAttribute("data-testid");
+      if (id) tabsBefore.push(id);
+    }
+
+    // Reload
+    await page.reload();
+    await page.locator('[data-testid^="workbench-tab-"]').first().waitFor({
+      state: "visible",
+      timeout: 15_000,
+    });
+
+    // Same tabs should be present
+    const tabsAfter: string[] = [];
+    const allTabsAfter = page.locator('[data-testid^="workbench-tab-"]');
+    for (let i = 0; i < await allTabsAfter.count(); i++) {
+      const id = await allTabsAfter.nth(i).getAttribute("data-testid");
+      if (id) tabsAfter.push(id);
+    }
+    expect(tabsAfter).toEqual(tabsBefore);
+  });
+
+  test("L6: '+' add-tab button is easily clickable (min 24px hit target)", async ({ page }) => {
+    const btn = page.locator('[data-testid="open-tab-menu"]');
+    await expect(btn).toBeVisible();
+    const box = await btn.boundingBox();
+    expect(box).toBeTruthy();
+    // Minimum hit target: 24x24px (current is too small per Eric)
+    expect(box!.width).toBeGreaterThanOrEqual(24);
+    expect(box!.height).toBeGreaterThanOrEqual(24);
   });
 });
