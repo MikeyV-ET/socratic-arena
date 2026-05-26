@@ -252,12 +252,12 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
   // --- Instance-based workbench panels ---
   workbenchPanels: (() => {
     const toLabel = (id: string) => id.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
-    const defaultTypes = ["notebook"];
+    const defaultTypes: string[] = [];
+    const validTypes = new Set(["history","moments","notebook","prompt-dev","prompt-test","inspector","artifact","app","boundaries","corrections","episodes","doppelganger","editor","chat"]);
     try {
       const saved = localStorage.getItem("sa-workbench-panels");
       if (saved) {
-        // Filter out stale "apps" singleton — replaced by per-instance "app" panels
-        const panels = JSON.parse(saved).filter((p: any) => p.type !== "apps");
+        const panels = JSON.parse(saved).filter((p: any) => validTypes.has(p.type));
         if (panels.length > 0) return panels;
       }
       const savedOld = localStorage.getItem("sa-open-tabs");
@@ -268,7 +268,7 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
     } catch {}
     return defaultTypes.map((t) => ({ instanceId: t, type: t, label: toLabel(t), config: {} }));
   })(),
-  activeTab: "history",
+  activeTab: "",
   splitTab: null,
 
   addPanel: (type, config = {}, target) => {
@@ -293,10 +293,9 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
   setSplitTab: (tab) => set({ splitTab: tab }),
   closeTab: (instanceId) => set((s) => {
     const next = s.workbenchPanels.filter((p) => p.instanceId !== instanceId);
-    if (next.length === 0) return s;
     localStorage.setItem("sa-workbench-panels", JSON.stringify(next));
     const updates: Partial<ArenaState> = { workbenchPanels: next };
-    if (s.activeTab === instanceId) updates.activeTab = next[0].instanceId;
+    if (s.activeTab === instanceId) updates.activeTab = next.length > 0 ? next[0].instanceId : "";
     if (s.splitTab === instanceId) updates.splitTab = null;
     return updates as any;
   }),

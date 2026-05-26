@@ -168,16 +168,14 @@ function TabBar({ activeTab, onSelect, splitControls, paneTarget = "main" }: {
           data-testid={`workbench-tab-${panel.instanceId}`}
         >
           <span>{panel.label}</span>
-          {panels.length > 1 && (
-            <button
-              onClick={(e) => { e.stopPropagation(); closeTab(panel.instanceId); }}
-              className="ml-1 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive text-lg leading-none px-1 py-0.5 transition-opacity"
-              title="Close tab"
-              data-testid={`close-tab-${panel.instanceId}`}
-            >
-              &times;
-            </button>
-          )}
+          <button
+            onClick={(e) => { e.stopPropagation(); closeTab(panel.instanceId); }}
+            className="ml-1 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive text-lg leading-none px-1 py-0.5 transition-opacity"
+            title="Close tab"
+            data-testid={`close-tab-${panel.instanceId}`}
+          >
+            &times;
+          </button>
         </div>
       ))}
 
@@ -185,7 +183,7 @@ function TabBar({ activeTab, onSelect, splitControls, paneTarget = "main" }: {
         <div className="relative">
           <button
             onClick={() => setShowMenu(!showMenu)}
-            className="px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            className="px-2.5 py-1.5 text-base font-medium text-muted-foreground hover:text-foreground transition-colors min-w-[28px] min-h-[28px] flex items-center justify-center"
             title="Add panel"
             data-testid="open-tab-menu"
           >
