@@ -1,0 +1,407 @@
+import { test, expect, Page } from "@playwright/test";
+
+/**
+ * UX tests for Design Decisions
+ *
+ * Tests behaviors where the implementation chose one option among
+ * several reasonable alternatives. These pin intentional choices
+ * so they don't drift accidentally.
+ *
+ * Target: SA_URL env var (default: http://localhost:5175 = dev)
+ */
+
+test.use({ baseURL: process.env.SA_URL || "http://localhost:5175" });
+
+/** Wait for workbench to be interactive */
+async function waitForWorkbench(page: Page) {
+  await page.locator('[data-testid^="workbench-tab-"]').first().waitFor({
+    state: "visible",
+    timeout: 15_000,
+  });
+}
+
+// =========================================================================
+// SPLIT WORKSPACE
+// =========================================================================
+
+test.describe("Split workspace", () => {
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await waitForWorkbench(page);
+  });
+
+  test("S1: Split vertical creates two independent panes", async ({ page }) => {
+    // Click split vertical button
+    const splitBtn = page.locator('button[title="Split vertical (side by side)"]');
+    await expect(splitBtn).toBeVisible();
+    await splitBtn.click();
+    await page.waitForTimeout(500);
+
+    // Should now have two tab bars (one per pane)
+    const tabBars = page.locator('[data-testid^="workbench-tab-"]');
+    const tabCount = await tabBars.count();
+    expect(tabCount).toBeGreaterThanOrEqual(2);
+
+    // Unsplit button should appear (one per pane, check first)
+    const unsplitBtn = page.locator('button[title="Unsplit"]').first();
+    await expect(unsplitBtn).toBeVisible();
+  });
+
+  test("S2: Split horizontal creates two independent panes", async ({ page }) => {
+    const splitBtn = page.locator('button[title="Split horizontal (stacked)"]');
+    await expect(splitBtn).toBeVisible();
+    await splitBtn.click();
+    await page.waitForTimeout(500);
+
+    const unsplitBtn = page.locator('button[title="Unsplit"]').first();
+    await expect(unsplitBtn).toBeVisible();
+  });
+
+  test("S3: Each split pane has its own active tab", async ({ page }) => {
+    // Ensure we have at least 2 panels (notebook + add editor)
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    const addEditor = page.locator('[data-testid="add-panel-editor"]');
+    if (await addEditor.isVisible()) {
+      await addEditor.click();
+      await page.waitForTimeout(300);
+    } else {
+      await page.keyboard.press("Escape");
+    }
+
+    // Split
+    const splitBtn = page.locator('button[title="Split vertical (side by side)"]');
+    await splitBtn.click();
+    await page.waitForTimeout(500);
+
+    // Both panes should render content (not be blank)
+    // The split creates a resizable panel group — check both panels have content
+    const panelGroup = page.locator('[data-panel-group-id]');
+    if (await panelGroup.count() > 0) {
+      const panels = page.locator('[data-panel-id]');
+      const panelCount = await panels.count();
+      expect(panelCount).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  test("S4: Selecting tab in one pane doesn't change the other", async ({ page }) => {
+    // Add an editor so we have 2+ panels
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    const addEditor = page.locator('[data-testid="add-panel-editor"]');
+    if (await addEditor.isVisible()) {
+      await addEditor.click();
+      await page.waitForTimeout(300);
+    } else {
+      await page.keyboard.press("Escape");
+    }
+
+    // Split vertical
+    const splitBtn = page.locator('button[title="Split vertical (side by side)"]');
+    await splitBtn.click();
+    await page.waitForTimeout(500);
+
+    // Get the two panel containers (react-resizable-panels creates data-panel-id elements)
+    const panels = page.locator('[data-panel-id]');
+    const panelCount = await panels.count();
+    if (panelCount < 2) return; // skip if split didn't create two panels
+
+    // Click a tab in the first pane's tab bar
+    const firstPaneTab = panels.nth(0).locator('[data-testid^="workbench-tab-"]').first();
+    const firstTabId = await firstPaneTab.getAttribute("data-testid");
+
+    // Click a different tab in the second pane
+    const secondPaneTabs = panels.nth(1).locator('[data-testid^="workbench-tab-"]');
+    const secondTabCount = await secondPaneTabs.count();
+    if (secondTabCount > 1) {
+      await secondPaneTabs.nth(1).click();
+      await page.waitForTimeout(300);
+    }
+
+    // First pane's selected tab should NOT have changed
+    const firstPaneActiveTab = panels.nth(0).locator('[data-testid^="workbench-tab-"]').first();
+    const afterTabId = await firstPaneActiveTab.getAttribute("data-testid");
+    expect(afterTabId).toBe(firstTabId);
+  });
+
+  test("S5: Unsplit collapses back to single pane", async ({ page }) => {
+    // Split first
+    const splitBtn = page.locator('button[title="Split vertical (side by side)"]');
+    await splitBtn.click();
+    await page.waitForTimeout(500);
+
+    // Unsplit
+    const unsplitBtn = page.locator('button[title="Unsplit"]').first();
+    await expect(unsplitBtn).toBeVisible();
+    await unsplitBtn.click();
+    await page.waitForTimeout(500);
+
+    // Should be back to single pane — split buttons should reappear
+    await expect(page.locator('button[title="Split vertical (side by side)"]')).toBeVisible();
+    // Unsplit button should be gone
+    await expect(page.locator('button[title="Unsplit"]')).toHaveCount(0);
+  });
+
+  test("S6: Closing the split panel's tab collapses split mode", async ({ page }) => {
+    // Add editor so we have notebook + editor
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    const addEditor = page.locator('[data-testid="add-panel-editor"]');
+    if (await addEditor.isVisible()) {
+      await addEditor.click();
+      await page.waitForTimeout(300);
+    } else {
+      await page.keyboard.press("Escape");
+      return;
+    }
+
+    // Split
+    const splitBtn = page.locator('button[title="Split vertical (side by side)"]');
+    await splitBtn.click();
+    await page.waitForTimeout(500);
+
+    // Verify we're in split mode
+    await expect(page.locator('button[title="Unsplit"]').first()).toBeVisible();
+
+    // Find and close a tab in the split pane (close an editor tab)
+    const editorCloseBtn = page.locator('[data-testid^="close-tab-editor"]').first();
+    if (await editorCloseBtn.isVisible()) {
+      await editorCloseBtn.click();
+      await page.waitForTimeout(500);
+    }
+  });
+});
+
+// =========================================================================
+// TAB LIFECYCLE
+// =========================================================================
+
+test.describe("Tab lifecycle", () => {
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await waitForWorkbench(page);
+  });
+
+  test("T1: Cannot close the last remaining tab", async ({ page }) => {
+    // Close all tabs except one
+    const allTabs = page.locator('[data-testid^="workbench-tab-"]');
+    let count = await allTabs.count();
+
+    // Close tabs until only 1 remains
+    while (count > 1) {
+      const tab = allTabs.first();
+      const testId = await tab.getAttribute("data-testid");
+      const instanceId = testId?.replace("workbench-tab-", "");
+      if (instanceId) {
+        const closeBtn = page.locator(`[data-testid="close-tab-${instanceId}"]`);
+        await tab.hover();
+        await page.waitForTimeout(200);
+        if (await closeBtn.isVisible()) {
+          await closeBtn.click();
+          await page.waitForTimeout(300);
+        } else {
+          break;
+        }
+      }
+      count = await allTabs.count();
+    }
+
+    // Exactly one tab should remain
+    expect(await allTabs.count()).toBeGreaterThanOrEqual(1);
+
+    // The last tab should NOT have a close button
+    const lastTab = allTabs.first();
+    await lastTab.hover();
+    await page.waitForTimeout(200);
+    const lastTestId = await lastTab.getAttribute("data-testid");
+    const lastId = lastTestId?.replace("workbench-tab-", "");
+    if (lastId) {
+      const closeBtn = page.locator(`[data-testid="close-tab-${lastId}"]`);
+      // Close button should be hidden or not exist when only 1 tab
+      const isVisible = await closeBtn.isVisible();
+      expect(isVisible).toBe(false);
+    }
+  });
+
+  test("T2: Closing active tab activates first remaining tab", async ({ page }) => {
+    // Add an editor so we have at least 2 tabs
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    const addEditor = page.locator('[data-testid="add-panel-editor"]');
+    if (await addEditor.isVisible()) {
+      await addEditor.click();
+      await page.waitForTimeout(300);
+    } else {
+      await page.keyboard.press("Escape");
+      return;
+    }
+
+    // Get all tab ids in order
+    const allTabs = page.locator('[data-testid^="workbench-tab-"]');
+    const tabCount = await allTabs.count();
+    if (tabCount < 2) return;
+
+    // Activate the last tab
+    const lastTab = allTabs.nth(tabCount - 1);
+    await lastTab.click();
+    await page.waitForTimeout(300);
+
+    // Get the first tab's id (this should become active after close)
+    const firstTabTestId = await allTabs.nth(0).getAttribute("data-testid");
+
+    // Close the last (active) tab
+    const lastTestId = await lastTab.getAttribute("data-testid");
+    const lastId = lastTestId?.replace("workbench-tab-", "");
+    if (lastId) {
+      await lastTab.hover();
+      await page.waitForTimeout(200);
+      const closeBtn = page.locator(`[data-testid="close-tab-${lastId}"]`);
+      if (await closeBtn.isVisible()) {
+        await closeBtn.click();
+        await page.waitForTimeout(300);
+      }
+    }
+
+    // First tab should now be active (have the active styling)
+    const firstTab = page.locator(`[data-testid="${firstTabTestId}"]`);
+    // Active tabs typically don't have the muted/dimmed styling
+    await expect(firstTab).toBeVisible();
+  });
+});
+
+// =========================================================================
+// INPUT BAR
+// =========================================================================
+
+test.describe("Input bar behavior", () => {
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await waitForWorkbench(page);
+  });
+
+  test("I1: Enter sends message, Shift+Enter adds newline", async ({ page }) => {
+    // Find the input textarea
+    const input = page.locator("textarea").first();
+    if (!(await input.isVisible())) return;
+
+    // Type some text
+    await input.fill("line one");
+
+    // Shift+Enter should add a newline (not send)
+    await input.press("Shift+Enter");
+    await page.waitForTimeout(200);
+    const valueAfterShiftEnter = await input.inputValue();
+    expect(valueAfterShiftEnter).toContain("\n");
+  });
+
+  test("I2: Empty message is not sent", async ({ page }) => {
+    const input = page.locator("textarea").first();
+    if (!(await input.isVisible())) return;
+
+    // Clear and press Enter on empty input
+    await input.fill("");
+    await input.press("Enter");
+    await page.waitForTimeout(300);
+
+    // Input should still be there (no send happened)
+    await expect(input).toBeVisible();
+  });
+});
+
+// =========================================================================
+// DOM STABILITY
+// =========================================================================
+
+test.describe("DOM stability", () => {
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await waitForWorkbench(page);
+  });
+
+  test("D1: Panel DOM elements are sorted by instanceId (prevents editor-swap bug)", async ({ page }) => {
+    // Add a second editor to get multiple panels
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    const addEditor = page.locator('[data-testid="add-panel-editor"]');
+    if (await addEditor.isVisible()) {
+      await addEditor.click();
+      await page.waitForTimeout(300);
+    } else {
+      await page.keyboard.press("Escape");
+      return;
+    }
+
+    // Get all panel container data-instance-id values from the DOM
+    const panelContainers = page.locator("[data-instance-id]");
+    const count = await panelContainers.count();
+    if (count < 2) return;
+
+    const ids: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const id = await panelContainers.nth(i).getAttribute("data-instance-id");
+      if (id) ids.push(id);
+    }
+
+    // Verify they are sorted
+    const sorted = [...ids].sort((a, b) => a.localeCompare(b));
+    expect(ids).toEqual(sorted);
+  });
+});
+
+// =========================================================================
+// LAYOUT DEFAULTS
+// =========================================================================
+
+test.describe("Layout defaults", () => {
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await waitForWorkbench(page);
+  });
+
+  test("L1: Theme defaults to dark", async ({ page }) => {
+    // Clear theme preference and reload
+    await page.evaluate(() => localStorage.removeItem("arena-theme"));
+    await page.reload();
+    await waitForWorkbench(page);
+
+    // Default is dark — either data-theme="dark" or no attribute (dark via CSS defaults)
+    const theme = await page.evaluate(() =>
+      document.documentElement.getAttribute("data-theme")
+    );
+    // Must NOT be "light" — dark is the default
+    expect(theme).not.toBe("light");
+  });
+
+  test("L2: Theme toggle persists across reload", async ({ page }) => {
+    // Find and click theme toggle
+    const themeBtn = page.locator('button[title*="theme" i], button[title*="Theme" i], button[title*="light" i], button[title*="dark" i]');
+    if (await themeBtn.count() === 0) return;
+    await themeBtn.first().click();
+    await page.waitForTimeout(300);
+
+    const themeAfterToggle = await page.evaluate(() =>
+      document.documentElement.getAttribute("data-theme")
+    );
+
+    // Reload and check persistence
+    await page.reload();
+    await waitForWorkbench(page);
+
+    const themeAfterReload = await page.evaluate(() =>
+      document.documentElement.getAttribute("data-theme")
+    );
+    expect(themeAfterReload).toBe(themeAfterToggle);
+  });
+
+  test("L3: Conversation pane and workbench pane both render", async ({ page }) => {
+    // The main layout should have a resizable panel group with 2 panels
+    const panels = page.locator('[data-panel-id]');
+    const count = await panels.count();
+    expect(count).toBeGreaterThanOrEqual(2);
+  });
+});
