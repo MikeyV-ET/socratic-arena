@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Launch Socratic Arena (backend + frontend)
-# Usage: SA_PROFILE=dev bash launch.sh [start|stop|restart|status]
+# Usage: bash launch.sh [--dev] [start|stop|restart|status]
 # Profiles: prod (8000/5173, default), dev (8002/5175)
 # Override ports: SA_BACKEND_PORT=9000 SA_FRONTEND_PORT=9001 bash launch.sh start
 
@@ -8,9 +8,17 @@ set -euo pipefail
 
 SA_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Profile system: SA_PROFILE selects port preset.
-# Explicit SA_BACKEND_PORT/SA_FRONTEND_PORT override profile defaults.
+# Parse --dev flag
 SA_PROFILE="${SA_PROFILE:-prod}"
+ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        --dev) SA_PROFILE="dev" ;;
+        --prod) SA_PROFILE="prod" ;;
+        *) ARGS+=("$arg") ;;
+    esac
+done
+set -- "${ARGS[@]+"${ARGS[@]}"}"
 case "$SA_PROFILE" in
     prod) _DEF_BACKEND=8000; _DEF_FRONTEND=5173 ;;
     dev)  _DEF_BACKEND=8002; _DEF_FRONTEND=5175 ;;
