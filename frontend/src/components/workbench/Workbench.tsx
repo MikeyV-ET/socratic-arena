@@ -284,10 +284,16 @@ export function Workbench() {
   const panels = useArenaStore((s) => s.workbenchPanels);
   const [splitOrientation, setSplitOrientation] = useState<SplitOrientation>("vertical");
 
+  const addPanel = useArenaStore((s) => s.addPanel);
   const startSplit = (orientation: SplitOrientation) => {
     if (!splitTab) {
       const other = panels.find((p) => p.instanceId !== activeTab);
-      setSplitTab(other?.instanceId || "notebook");
+      if (other) {
+        setSplitTab(other.instanceId);
+      } else {
+        const newId = addPanel("notebook", {}, "split");
+        setSplitTab(newId);
+      }
     }
     setSplitOrientation(orientation);
   };
