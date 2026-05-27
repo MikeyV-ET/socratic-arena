@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useCallback, useState, memo, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import Markdown from "react-markdown";
@@ -37,8 +37,12 @@ export function NotebookPane() {
   const virtualizer = useVirtualizer({
     count: entries.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 150,
-    overscan: 3,
+    estimateSize: (index) => {
+      const len = entries[index]?.content?.length ?? 0;
+      // Rough heuristic: ~80 chars per line, ~20px per line, plus header/padding
+      return Math.max(100, Math.min(60 + Math.ceil(len / 80) * 20, 2000));
+    },
+    overscan: 5,
   });
 
   // Scroll to bottom on initial load or agent switch
@@ -222,67 +226,16 @@ export function NotebookPane() {
               const entry = entries[virtualRow.index];
               const active = isNodeInRange(selectedNodeId, entry.eventIdRange);
               return (
-                <div
+                <NotebookEntryRow
                   key={entry.id}
-                  data-index={virtualRow.index}
-                  ref={virtualizer.measureElement}
-                  data-testid={`notebook-entry-${entry.id}`}
-                  className={`p-3 rounded-md border space-y-2 transition-colors cursor-pointer hover:border-accent/40 mb-3 ${
-                    active
-                      ? "border-accent/60 bg-accent/10"
-                      : "border-border bg-background/50"
-                  }`}
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: "100%",
-                    transform: `translateY(${virtualRow.start}px)`,
-                  }}
-                  onClick={() => handleEntryClick(entry)}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <h3 className="text-sm font-semibold text-foreground leading-tight flex-1">
-                      {entry.title}
-                    </h3>
-                    <div className="flex items-center gap-1">
-                      <EntryFlagButton entry={entry} />
-                      <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                        {new Date(entry.timestamp).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </span>
-                    </div>
-                  </div>
-                  {entry.flags && entry.flags.length > 0 && (
-                    <div className="text-[10px] text-warning">
-                      <div className="flex items-center gap-1">
-                        &#9873; Flagged as training candidate
-                      </div>
-                      {entry.flags.map((f) => f.note && (
-                        <div key={f.id} className="text-muted-foreground ml-4 mt-0.5">
-                          {f.note}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className={`text-sm text-foreground leading-relaxed prose prose-sm max-w-none prose-p:my-1.5 prose-li:my-0.5 prose-table:text-xs prose-th:text-left prose-td:px-2 prose-td:py-1 prose-th:px-2 prose-th:py-1${theme === "dark" ? " prose-invert" : ""}`}>
-                    <Markdown remarkPlugins={[remarkGfm]}>{entry.content}</Markdown>
-                  </div>
-                  {entry.tags && entry.tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
-                      {entry.tags.map((tag) => (
-                        <span
-                          key={tag}
-                          className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                  entry={entry}
+                  active={active}
+                  darkTheme={theme === "dark"}
+                  dataIndex={virtualRow.index}
+                  measureRef={virtualizer.measureElement}
+                  startPx={virtualRow.start}
+                  onClick={handleEntryClick}
+                />
               );
             })}
           </div>
@@ -291,6 +244,86 @@ export function NotebookPane() {
     </div>
   );
 }
+
+const MemoizedMarkdown = memo(function MemoizedMarkdown({ content, dark }: { content: string; dark: boolean }) {
+  const rendered = useMemo(() => (
+    <Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown>
+  ), [content]);
+  return (
+    <div className={`text-sm text-foreground leading-relaxed prose prose-sm max-w-none prose-p:my-1.5 prose-li:my-0.5 prose-table:text-xs prose-th:text-left prose-td:px-2 prose-td:py-1 prose-th:px-2 prose-th:py-1${dark ? " prose-invert" : ""}`}>
+      {rendered}
+    </div>
+  );
+});
+
+const NotebookEntryRow = memo(function NotebookEntryRow({
+  entry, active, darkTheme, dataIndex, measureRef, startPx, onClick,
+}: {
+  entry: NE; active: boolean; darkTheme: boolean; dataIndex: number;
+  measureRef: (node: Element | null) => void; startPx: number;
+  onClick: (entry: NE) => void;
+}) {
+  return (
+    <div
+      data-index={dataIndex}
+      ref={measureRef}
+      data-testid={`notebook-entry-${entry.id}`}
+      className={`p-3 rounded-md border space-y-2 transition-colors cursor-pointer hover:border-accent/40 mb-3 ${
+        active
+          ? "border-accent/60 bg-accent/10"
+          : "border-border bg-background/50"
+      }`}
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: "100%",
+        transform: `translateY(${startPx}px)`,
+      }}
+      onClick={() => onClick(entry)}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="text-sm font-semibold text-foreground leading-tight flex-1">
+          {entry.title}
+        </h3>
+        <div className="flex items-center gap-1">
+          <EntryFlagButton entry={entry} />
+          <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+            {new Date(entry.timestamp).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </span>
+        </div>
+      </div>
+      {entry.flags && entry.flags.length > 0 && (
+        <div className="text-[10px] text-warning">
+          <div className="flex items-center gap-1">
+            &#9873; Flagged as training candidate
+          </div>
+          {entry.flags.map((f) => f.note && (
+            <div key={f.id} className="text-muted-foreground ml-4 mt-0.5">
+              {f.note}
+            </div>
+          ))}
+        </div>
+      )}
+      <MemoizedMarkdown content={entry.content} dark={darkTheme} />
+      {entry.tags && entry.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {entry.tags.map((tag) => (
+            <span
+              key={tag}
+              className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}, (prev, next) => prev.entry.id === next.entry.id && prev.active === next.active && prev.darkTheme === next.darkTheme && prev.startPx === next.startPx);
 
 function EntryFlagButton({ entry }: { entry: NE }) {
   const sendWs = useArenaStore((s) => s.sendWs);
