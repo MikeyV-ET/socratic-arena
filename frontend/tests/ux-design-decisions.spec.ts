@@ -484,6 +484,106 @@ test.describe("Input bar behavior", () => {
 });
 
 // =========================================================================
+// FILE ATTACHMENT
+// =========================================================================
+
+test.describe("File attachment", () => {
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await waitForWorkbench(page);
+  });
+
+  test("A1: Single file attachment shows chip in input bar", async ({ page }) => {
+    const fileInput = page.locator('input[type="file"]');
+    if (await fileInput.count() === 0) return;
+
+    // Attach a single text file
+    await fileInput.setInputFiles({
+      name: "test-doc.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("hello world"),
+    });
+    await page.waitForTimeout(300);
+
+    // A chip with the filename should appear
+    const chip = page.getByText("test-doc.txt");
+    await expect(chip).toBeVisible();
+  });
+
+  test("A2: Multi-file attachment shows all chips", async ({ page }) => {
+    // BUG: Eric reports "multi-file isn't working"
+    const fileInput = page.locator('input[type="file"]');
+    if (await fileInput.count() === 0) return;
+
+    // Attach two files at once
+    await fileInput.setInputFiles([
+      { name: "file-one.txt", mimeType: "text/plain", buffer: Buffer.from("one") },
+      { name: "file-two.txt", mimeType: "text/plain", buffer: Buffer.from("two") },
+    ]);
+    await page.waitForTimeout(300);
+
+    // Both chips should appear
+    await expect(page.getByText("file-one.txt")).toBeVisible();
+    await expect(page.getByText("file-two.txt")).toBeVisible();
+  });
+
+  test("A3: Can remove an attached file chip before sending", async ({ page }) => {
+    const fileInput = page.locator('input[type="file"]');
+    if (await fileInput.count() === 0) return;
+
+    await fileInput.setInputFiles({
+      name: "remove-me.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("bye"),
+    });
+    await page.waitForTimeout(300);
+
+    // Chip should be visible
+    const chip = page.getByText("remove-me.txt");
+    await expect(chip).toBeVisible();
+
+    // Click the X button next to it
+    const removeBtn = chip.locator("..").locator("button");
+    if (await removeBtn.isVisible()) {
+      await removeBtn.click();
+      await page.waitForTimeout(300);
+    }
+
+    // Chip should be gone
+    await expect(page.getByText("remove-me.txt")).not.toBeVisible();
+  });
+
+  test("A4: Multi-file via sequential attach accumulates (not replaces)", async ({ page }) => {
+    // Users may click attach twice to add files from different folders.
+    // Second attach should ADD to existing files, not replace them.
+    const fileInput = page.locator('input[type="file"]');
+    if (await fileInput.count() === 0) return;
+
+    // First attach
+    await fileInput.setInputFiles({
+      name: "first.md",
+      mimeType: "text/markdown",
+      buffer: Buffer.from("# First"),
+    });
+    await page.waitForTimeout(300);
+    await expect(page.getByText("first.md")).toBeVisible();
+
+    // Second attach (should accumulate, not replace)
+    await fileInput.setInputFiles({
+      name: "second.md",
+      mimeType: "text/markdown",
+      buffer: Buffer.from("# Second"),
+    });
+    await page.waitForTimeout(300);
+
+    // Both should be visible
+    await expect(page.getByText("first.md")).toBeVisible();
+    await expect(page.getByText("second.md")).toBeVisible();
+  });
+});
+
+// =========================================================================
 // DOM STABILITY
 // =========================================================================
 
