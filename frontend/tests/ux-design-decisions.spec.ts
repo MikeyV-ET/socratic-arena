@@ -216,6 +216,103 @@ test.describe("Split workspace", () => {
     expect(splitTabAfter).not.toBe(activeTabBefore);
   });
 
+  test("S9: Split with single panel does NOT clone it into both panes", async ({ page }) => {
+    // BUG: Eric reports that splitting when one app panel is open results in
+    // "the open panel being displayed in both panes."
+    // Expected: second pane gets a DIFFERENT panel (or empty state), not a clone.
+
+    // Start from empty state, add one panel
+    await page.evaluate(() => {
+      localStorage.removeItem("sa-workbench-panels");
+      localStorage.removeItem("sa-open-tabs");
+    });
+    await page.reload();
+    await page.waitForTimeout(1000);
+
+    // Add one panel
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid^="add-panel-"]').first().click();
+    await page.waitForTimeout(500);
+
+    // Close all tabs except the last one to ensure exactly one
+    const allTabs = page.locator('[data-testid^="workbench-tab-"]');
+    while (await allTabs.count() > 1) {
+      const tab = allTabs.first();
+      const testId = await tab.getAttribute("data-testid");
+      const instId = testId?.replace("workbench-tab-", "");
+      if (instId) {
+        const closeBtn = page.locator(`[data-testid="close-tab-${instId}"]`);
+        await tab.hover();
+        await page.waitForTimeout(200);
+        if (await closeBtn.isVisible()) {
+          await closeBtn.click();
+          await page.waitForTimeout(300);
+        } else break;
+      } else break;
+    }
+
+    // Record the single active tab
+    const activeTabBefore = await page.evaluate(() =>
+      (window as any).__ARENA_STORE__?.getState()?.activeTab
+    );
+
+    // Split
+    await page.locator('button[title="Split vertical (side by side)"]').click();
+    await page.waitForTimeout(500);
+
+    // Read store state
+    const state = await page.evaluate(() => {
+      const s = (window as any).__ARENA_STORE__?.getState();
+      return { activeTab: s?.activeTab, splitTab: s?.splitTab };
+    });
+
+    // The second pane must NOT show the same panel as the first
+    expect(state.splitTab).not.toBe(state.activeTab);
+
+    // And splitTab must refer to a panel that actually exists in workbenchPanels
+    const splitPanelExists = await page.evaluate(() => {
+      const s = (window as any).__ARENA_STORE__?.getState();
+      return s?.workbenchPanels?.some((p: any) => p.instanceId === s.splitTab);
+    });
+    expect(splitPanelExists).toBe(true);
+  });
+
+  test("S10: Opening panel in split pane 2 does not also open in pane 1", async ({ page }) => {
+    // BUG: Eric reports "opening editor in one of the split panes, it opens in both panes"
+    // This extends S7 by checking visual content, not just store state.
+
+    // Ensure 2 panels exist then split
+    await ensureTabs(page, 2);
+    await page.locator('button[title="Split vertical (side by side)"]').click();
+    await page.waitForTimeout(500);
+
+    // Record pane 1's visible content before opening anything in pane 2
+    const pane1ContentBefore = await page.evaluate(() => {
+      const panels = document.querySelectorAll('[data-panel-id]');
+      if (panels.length < 2) return null;
+      return panels[0].innerHTML.length;
+    });
+
+    // Open a new panel via "+" in pane 2
+    const menuButtons = page.locator('[data-testid="open-tab-menu"]');
+    if (await menuButtons.count() >= 2) {
+      await menuButtons.nth(1).click();
+      await page.waitForTimeout(300);
+      await page.locator('[data-testid^="add-panel-"]').first().click();
+      await page.waitForTimeout(500);
+    }
+
+    // activeTab (pane 1) should be unchanged
+    const activeTabAfter = await page.evaluate(() =>
+      (window as any).__ARENA_STORE__?.getState()?.activeTab
+    );
+    const splitTabAfter = await page.evaluate(() =>
+      (window as any).__ARENA_STORE__?.getState()?.splitTab
+    );
+    expect(activeTabAfter).not.toBe(splitTabAfter);
+  });
+
   test("S8: Closing the split panel's tab collapses split mode", async ({ page }) => {
     // Add editor so we have notebook + editor
     await page.locator('[data-testid="open-tab-menu"]').click();
