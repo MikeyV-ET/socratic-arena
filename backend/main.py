@@ -18,7 +18,7 @@ from demo_dataset import build_demo_state
 from live_tailer import LiveTailer
 from replay_router import router as replay_router, init_replayer
 from urllib.parse import quote as _url_quote
-from config import AGENTS_HOME, SESSION_REGISTRY, SESSIONS_BASE, DEFAULT_AGENT
+from config import AGENTS_HOME, SESSION_REGISTRY, SESSIONS_BASE, DEFAULT_AGENT, USERNAME
 
 # Track which agent is currently loaded
 _current_agent: str = DEFAULT_AGENT
@@ -105,6 +105,86 @@ app.add_middleware(
 # Checkpoint replayer
 app.include_router(replay_router)
 init_replayer()
+
+# Doppelganger manager
+from doppelganger_manager import DoppelgangerManager
+_doppel_manager = DoppelgangerManager()
+
+
+@app.post("/api/doppelganger/spawn")
+async def doppelganger_spawn(body: dict):
+    """Spawn a persistent doppelganger from a compaction checkpoint."""
+    agent = body.get("agent", "")
+    checkpoint_id = body.get("checkpoint_id", "")
+    if not agent or not checkpoint_id:
+        return {"error": "agent and checkpoint_id required"}, 400
+
+    doppel = await _doppel_manager.spawn(
+        agent_name=agent,
+        checkpoint_id=checkpoint_id,
+        label=body.get("label", ""),
+        modifications=body.get("modifications"),
+        context_entries=body.get("context_entries"),
+        repo_path=body.get("repo_path"),
+        repo_commit=body.get("repo_commit"),
+    )
+    return {"doppelganger": doppel.to_dict()}
+
+
+@app.get("/api/doppelganger/list")
+async def doppelganger_list():
+    """List all active doppelgangers."""
+    return {"doppelgangers": _doppel_manager.list_active()}
+
+
+@app.get("/api/doppelganger/{doppel_id}")
+async def doppelganger_get(doppel_id: str):
+    """Get details for a specific doppelganger."""
+    doppel = _doppel_manager.get(doppel_id)
+    if not doppel:
+        return {"error": "not found"}
+    return {"doppelganger": doppel.to_dict()}
+
+
+@app.get("/api/doppelganger/{doppel_id}/turns")
+async def doppelganger_turns(doppel_id: str):
+    """Get conversation history for a doppelganger."""
+    return {"turns": _doppel_manager.get_turns(doppel_id)}
+
+
+@app.post("/api/doppelganger/{doppel_id}/send")
+async def doppelganger_send(doppel_id: str, body: dict):
+    """Send a message to a doppelganger and get its response."""
+    message = body.get("message", "")
+    sender = body.get("sender", "eric")
+    if not message:
+        return {"error": "message required"}
+
+    try:
+        result = await _doppel_manager.send(doppel_id, message, sender=sender)
+        # Broadcast to WebSocket clients
+        await broadcast({
+            "type": "doppelganger.response",
+            "payload": {"doppel_id": doppel_id, **result},
+        })
+        return {"result": result}
+    except ValueError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.delete("/api/doppelganger/{doppel_id}")
+async def doppelganger_teardown(doppel_id: str):
+    """Stop a doppelganger and clean up."""
+    ok = await _doppel_manager.teardown(doppel_id)
+    if ok:
+        await broadcast({
+            "type": "doppelganger.stopped",
+            "payload": {"doppel_id": doppel_id},
+        })
+    return {"ok": ok}
+
 
 # Shared collaborative documents
 from shared_docs import router as docs_router, files_router, set_broadcast as docs_set_broadcast, start_file_watcher
@@ -593,7 +673,7 @@ async def handle_conversation_send(ws: WebSocket, payload: dict):
         "nodeId": user_node.id,
         "branchId": branch_id,
         "agent": _current_agent,
-        "sender": "eric",
+        "sender": USERNAME,
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
     })
 
@@ -646,7 +726,7 @@ async def handle_panel_send(ws: WebSocket, payload: dict):
         "nodeId": assistant_node.id,
         "branchId": "panel",
         "agent": target_agent,
-        "sender": "eric",
+        "sender": USERNAME,
         "panelId": panel_id,
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
     })
