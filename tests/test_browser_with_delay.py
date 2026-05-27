@@ -13,6 +13,8 @@ to see if they cause the response to not render.
 import asyncio
 import json
 import time
+import os
+
 import httpx
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -20,8 +22,8 @@ from selenium.webdriver.common.by import By
 import websockets
 
 
-SA_URL = "http://localhost:5173"
-BACKEND_URL = "http://localhost:8000"
+SA_URL = os.environ.get("SA_URL", "http://localhost:5175")
+BACKEND_URL = SA_URL
 TEST_MSG = "DELAY_TEST: testing with live-tailer interference"
 TEST_RESPONSE = "DELAY_TEST_RESPONSE: this should appear after delay."
 DELAY_SECONDS = 10  # Simulate agent processing time
@@ -44,7 +46,7 @@ async def send_message_and_wait():
     assistant_node_id = None
     intervening = []
     
-    async with websockets.connect("ws://localhost:8000/ws", max_size=30_000_000) as ws:
+    async with websockets.connect(SA_URL.replace("http://", "ws://").replace("https://", "wss://") + "/ws", max_size=30_000_000) as ws:
         # Skip initial snapshot
         await asyncio.wait_for(ws.recv(), timeout=10)
         

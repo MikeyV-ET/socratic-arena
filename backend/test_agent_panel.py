@@ -1,3 +1,4 @@
+import os
 """Tests for agent panel control feature.
 
 Tests the backend endpoints (claim, release, status, state) and
@@ -12,8 +13,8 @@ import pytest
 import httpx
 import websockets
 
-SA_BACKEND = "http://localhost:8000"
-SA_WS = "ws://localhost:8000/ws"
+SA_BACKEND = os.environ.get("SA_URL", "http://localhost:5175")
+SA_WS = SA_BACKEND.replace("http://", "ws://").replace("https://", "wss://") + "/ws"
 
 
 # ============================================================================
@@ -255,7 +256,7 @@ class TestAgentPanelBrowser:
 
         driver = self._get_driver()
         try:
-            driver.get("http://localhost:5173")
+            driver.get(SA_BACKEND)
 
             # Click Apps tab
             apps_tab = WebDriverWait(driver, 10).until(

@@ -2,10 +2,10 @@
  * Author coloring for the shared editor.
  *
  * Reads Yjs internal Item structures to determine which client wrote
- * each character, then applies subtle background tinting:
- * - Local client (mentor) = green tint
- * - Remote clients (agent) = blue tint
- * - Canonical (pre-tracking) text = no color
+ * each character, then applies colored text:
+ * - Local client (mentor) = green text
+ * - Remote clients (agent) = blue text
+ * - Canonical (pre-tracking) text = default color
  *
  * Uses Y.Text._start to walk the internal linked list. This is an
  * internal API but is stable across Yjs versions and widely used
@@ -106,6 +106,8 @@ export const authorColorPlugin = ViewPlugin.fromClass(
 );
 
 export const authorColorTheme = EditorView.baseTheme({
-  ".cm-author-mentor": { backgroundColor: "rgba(34, 197, 94, 0.10)" },
-  ".cm-author-agent": { backgroundColor: "rgba(66, 135, 245, 0.12)" },
+  "&light .cm-author-mentor": { color: "#16a34a" },
+  "&light .cm-author-agent": { color: "#2563eb" },
+  "&dark .cm-author-mentor": { color: "#4ade80" },
+  "&dark .cm-author-agent": { color: "#60a5fa" },
 });

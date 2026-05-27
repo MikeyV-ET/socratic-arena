@@ -1,3 +1,4 @@
+import os
 """Agent panel toolkit — launch, control, and narrate panel actions.
 
 Provides a clean interface for agents to:
@@ -36,7 +37,7 @@ from selenium.webdriver.support import expected_conditions as EC
 
 log = logging.getLogger("agent_panel")
 
-SA_BACKEND = "http://localhost:8000"
+SA_BACKEND = os.environ.get("SA_URL", "http://localhost:8000")
 
 
 class AgentPanel:

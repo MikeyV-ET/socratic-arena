@@ -1,3 +1,4 @@
+import os
 """Tests for compaction boundary browser feature.
 
 Tests the backend API endpoints and the frontend BoundariesPane rendering.
@@ -8,7 +9,7 @@ import json
 import pytest
 import httpx
 
-SA_BACKEND = "http://localhost:8000"
+SA_BACKEND = os.environ.get("SA_URL", "http://localhost:5175")
 
 
 class TestCompactionBoundariesAPI:
@@ -99,7 +100,7 @@ class TestCompactionBoundariesBrowser:
 
         driver = self._get_driver()
         try:
-            driver.get("http://localhost:5173")
+            driver.get(SA_BACKEND)
 
             # Click Boundaries tab
             boundaries_tab = WebDriverWait(driver, 10).until(
@@ -131,7 +132,7 @@ class TestCompactionBoundariesBrowser:
 
         driver = self._get_driver()
         try:
-            driver.get("http://localhost:5173")
+            driver.get(SA_BACKEND)
 
             # Click Boundaries tab
             tab = WebDriverWait(driver, 10).until(
@@ -168,7 +169,7 @@ class TestCompactionBoundariesBrowser:
 
         driver = self._get_driver()
         try:
-            driver.get("http://localhost:5173")
+            driver.get(SA_BACKEND)
 
             tab = WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Boundaries')]"))

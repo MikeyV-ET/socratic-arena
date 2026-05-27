@@ -8,33 +8,52 @@ import { ArtifactPane } from "@/components/layout/ArtifactPane";
 import { ConversationPane } from "@/components/conversation/ConversationPane";
 import { MomentsPane } from "@/components/workbench/MomentsPane";
 import { SessionInspector } from "@/components/inspector/SessionInspector";
-import { HostedAppPane } from "@/components/layout/HostedAppPane";
+import { HostedAppPanel } from "@/components/layout/HostedAppPanel";
 import { BoundariesPane } from "@/components/workbench/BoundariesPane";
 import { CorrectionsPane } from "@/components/workbench/CorrectionsPane";
 import { EpisodeRunnerPane } from "@/components/workbench/EpisodeRunnerPane";
+import { DoppelgangerPane } from "@/components/workbench/DoppelgangerPane";
+import { ChatPanel } from "@/components/workbench/ChatPanel";
 import { SharedEditorPane } from "@/components/editor/SharedEditorPane";
 import { FontSizeControl } from "@/components/common/FontSizeControl";
 
-export const WORKBENCH_TABS = [
-  { id: "history", label: "History" },
-  { id: "moments", label: "Moments" },
-  { id: "notebook", label: "Notebook" },
-  { id: "prompt-dev", label: "Prompt Dev" },
-  { id: "prompt-test", label: "Prompt Test" },
-  { id: "inspector", label: "Inspector" },
-  { id: "artifact", label: "Artifact" },
-  { id: "apps", label: "Apps" },
-  { id: "boundaries", label: "Boundaries" },
-  { id: "corrections", label: "Corrections" },
-  { id: "episodes", label: "Episodes" },
-  { id: "editor", label: "Editor" },
+/** Panel types available in the workbench. Singleton types can only have one
+ *  instance; multi-instance types (editor, chat) can be added repeatedly. */
+export const PANEL_TYPES = [
+  { type: "history", label: "History", multi: true },
+  { type: "moments", label: "Moments", multi: true },
+  { type: "notebook", label: "Notebook", multi: true },
+  { type: "prompt-dev", label: "Prompt Dev", multi: true },
+  { type: "prompt-test", label: "Prompt Test", multi: true },
+  { type: "inspector", label: "Inspector", multi: true },
+  { type: "artifact", label: "Artifact", multi: true },
+  { type: "app", label: "App", multi: true },
+  { type: "boundaries", label: "Boundaries", multi: true },
+  { type: "corrections", label: "Corrections", multi: true },
+  { type: "episodes", label: "Episodes", multi: true },
+  { type: "doppelganger", label: "Doppelganger", multi: true },
+  { type: "editor", label: "Editor", multi: true },
+  { type: "chat", label: "Chat", multi: true },
 ] as const;
 
-function TabContent({ tabId }: { tabId: string }) {
-  const zoom = useArenaStore((s) => 1 + (s.paneFontSizes[tabId] ?? 0) * 0.1);
+export interface WorkbenchPanel {
+  instanceId: string;  // singleton: same as type; multi: "type-<uuid>"
+  type: string;
+  label: string;
+  config: Record<string, any>;
+}
+
+// Backward compat: map old tab IDs (which are type names) to panel type info
+const PANEL_TYPE_MAP = Object.fromEntries(PANEL_TYPES.map((t) => [t.type, t]));
+
+// Legacy export for anything that still references WORKBENCH_TABS
+export const WORKBENCH_TABS = PANEL_TYPES.map((t) => ({ id: t.type, label: t.label }));
+
+function TabContent({ panel }: { panel: WorkbenchPanel }) {
+  const zoom = useArenaStore((s) => 1 + (s.paneFontSizes[panel.instanceId] ?? 0) * 0.1);
 
   let content;
-  switch (tabId) {
+  switch (panel.type) {
     case "history":
       return <ConversationPane readOnly paneId="history" />;
     case "moments":
@@ -55,8 +74,8 @@ function TabContent({ tabId }: { tabId: string }) {
     case "artifact":
       content = <ArtifactPane />;
       break;
-    case "apps":
-      return <HostedAppPane />;
+    case "app":
+      return <HostedAppPanel instanceId={panel.instanceId} config={panel.config} />;
     case "boundaries":
       content = <BoundariesPane />;
       break;
@@ -66,10 +85,15 @@ function TabContent({ tabId }: { tabId: string }) {
     case "episodes":
       content = <EpisodeRunnerPane />;
       break;
+    case "doppelganger":
+      content = <DoppelgangerPane />;
+      break;
     case "editor":
-      return <SharedEditorPane />;
+      return <SharedEditorPane instanceId={panel.instanceId} config={panel.config} />;
+    case "chat":
+      return <ChatPanel instanceId={panel.instanceId} config={panel.config} />;
     default:
-      content = <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Unknown tab</div>;
+      content = <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Unknown panel type</div>;
   }
 
   return <div className="h-full overflow-auto" style={{ zoom }}>{content}</div>;
@@ -77,9 +101,10 @@ function TabContent({ tabId }: { tabId: string }) {
 
 type SplitOrientation = "horizontal" | "vertical";
 
-function TabBar({ activeTab, onSelect, splitControls }: {
+function TabBar({ activeTab, onSelect, splitControls, paneTarget = "main" }: {
   activeTab: string;
   onSelect: (id: string) => void;
+  paneTarget?: "main" | "split";
   splitControls: {
     isSplit: boolean;
     orientation: SplitOrientation;
@@ -88,17 +113,26 @@ function TabBar({ activeTab, onSelect, splitControls }: {
     onUnsplit: () => void;
   };
 }) {
-  const openTabIds = useArenaStore((s) => s.openTabIds);
+  const panels = useArenaStore((s) => s.workbenchPanels);
   const closeTab = useArenaStore((s) => s.closeTab);
   const openTab = useArenaStore((s) => s.openTab);
+  const addPanel = useArenaStore((s) => s.addPanel);
   const reorderTabs = useArenaStore((s) => s.reorderTabs);
   const [showMenu, setShowMenu] = useState(false);
   const [dragOver, setDragOver] = useState<string | null>(null);
   const dragSrc = useRef<string | null>(null);
   const didDrag = useRef(false);
 
-  const openTabs = openTabIds.map((id) => WORKBENCH_TABS.find((t) => t.id === id)).filter(Boolean) as typeof WORKBENCH_TABS;
-  const closedTabs = WORKBENCH_TABS.filter((t) => !openTabIds.includes(t.id));
+  // Closed singleton types (can be re-opened) + multi-instance types (always available)
+  const openSingletonTypes = new Set(panels.filter((p) => p.instanceId === p.type).map((p) => p.type));
+  const closedSingletons = PANEL_TYPES.filter((t) => !t.multi && !openSingletonTypes.has(t.type));
+  const multiTypes = PANEL_TYPES.filter((t) => t.multi);
+  const menuItems = [...closedSingletons, ...multiTypes];
+  const commonTypes = new Set(["history", "notebook", "chat", "editor", "artifact", "app"]);
+  const primaryMulti = multiTypes.filter((t) => commonTypes.has(t.type));
+  const advancedMulti = multiTypes.filter((t) => !commonTypes.has(t.type));
+
+  const instanceIds = panels.map((p) => p.instanceId);
 
   const handleBarPointerMove = (e: React.PointerEvent) => {
     if (!dragSrc.current) return;
@@ -108,7 +142,7 @@ function TabBar({ activeTab, onSelect, splitControls }: {
     if (!targetId || targetId === dragSrc.current) { setDragOver(null); return; }
     didDrag.current = true;
     setDragOver(targetId);
-    const ids = [...openTabIds];
+    const ids = [...instanceIds];
     const srcIdx = ids.indexOf(dragSrc.current);
     const tgtIdx = ids.indexOf(targetId);
     if (srcIdx < 0 || tgtIdx < 0) return;
@@ -124,52 +158,76 @@ function TabBar({ activeTab, onSelect, splitControls }: {
       onPointerUp={() => { dragSrc.current = null; setDragOver(null); }}
       onPointerLeave={() => { dragSrc.current = null; setDragOver(null); }}
     >
-      {openTabs.map((tab) => (
+      {panels.map((panel) => (
         <div
-          key={tab.id}
-          onPointerDown={(e) => { e.preventDefault(); dragSrc.current = tab.id; didDrag.current = false; }}
+          key={panel.instanceId}
+          onPointerDown={(e) => { e.preventDefault(); dragSrc.current = panel.instanceId; didDrag.current = false; }}
           className={`group flex items-center gap-0.5 px-2 py-1.5 text-xs font-medium transition-colors border-b-2 cursor-pointer select-none ${
-            activeTab === tab.id
+            activeTab === panel.instanceId
               ? "border-b-primary text-foreground"
               : "border-b-transparent text-muted-foreground hover:text-foreground"
-          } ${dragOver === tab.id ? "bg-primary/10" : ""}`}
-          onClick={() => { if (!didDrag.current) onSelect(tab.id); }}
-          data-testid={`workbench-tab-${tab.id}`}
+          } ${dragOver === panel.instanceId ? "bg-primary/10" : ""}`}
+          onClick={() => { if (!didDrag.current) onSelect(panel.instanceId); }}
+          data-testid={`workbench-tab-${panel.instanceId}`}
         >
-          <span>{tab.label}</span>
-          {openTabIds.length > 1 && (
-            <button
-              onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
-              className="ml-1 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive text-lg leading-none px-1 py-0.5 transition-opacity"
-              title="Close tab"
-              data-testid={`close-tab-${tab.id}`}
-            >
-              &times;
-            </button>
-          )}
+          <span>{panel.label}</span>
+          <button
+            onClick={(e) => { e.stopPropagation(); closeTab(panel.instanceId); }}
+            className="ml-1 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive text-lg leading-none px-1 py-0.5 transition-opacity"
+            title="Close tab"
+            data-testid={`close-tab-${panel.instanceId}`}
+          >
+            &times;
+          </button>
         </div>
       ))}
 
-      {closedTabs.length > 0 && (
+      {menuItems.length > 0 && (
         <div className="relative">
           <button
             onClick={() => setShowMenu(!showMenu)}
-            className="px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-            title="Open tab"
+            className="px-2.5 py-1.5 text-base font-medium text-muted-foreground hover:text-foreground transition-colors min-w-[28px] min-h-[28px] flex items-center justify-center"
+            title="Add panel"
             data-testid="open-tab-menu"
           >
             +
           </button>
           {showMenu && (
             <div className="absolute top-full left-0 z-50 bg-card border border-border rounded-md shadow-lg py-1 min-w-[120px]">
-              {closedTabs.map((tab) => (
+              {closedSingletons.map((t) => (
                 <button
-                  key={tab.id}
-                  onClick={() => { openTab(tab.id); setShowMenu(false); }}
+                  key={t.type}
+                  onClick={() => { openTab(t.type, paneTarget); setShowMenu(false); }}
                   className="block w-full text-left px-3 py-1 text-xs hover:bg-muted transition-colors"
-                  data-testid={`reopen-tab-${tab.id}`}
+                  data-testid={`reopen-tab-${t.type}`}
                 >
-                  {tab.label}
+                  {t.label}
+                </button>
+              ))}
+              {closedSingletons.length > 0 && primaryMulti.length > 0 && (
+                <div className="border-t border-border my-1" />
+              )}
+              {primaryMulti.map((t) => (
+                <button
+                  key={t.type}
+                  onClick={() => { addPanel(t.type, {}, paneTarget); setShowMenu(false); }}
+                  className="block w-full text-left px-3 py-1 text-xs hover:bg-muted transition-colors"
+                  data-testid={`add-panel-${t.type}`}
+                >
+                  {t.label}
+                </button>
+              ))}
+              {advancedMulti.length > 0 && (
+                <div className="border-t border-border my-1" />
+              )}
+              {advancedMulti.map((t) => (
+                <button
+                  key={t.type}
+                  onClick={() => { addPanel(t.type, {}, paneTarget); setShowMenu(false); }}
+                  className="block w-full text-left px-3 py-1 text-xs hover:bg-muted transition-colors text-muted-foreground"
+                  data-testid={`add-panel-${t.type}`}
+                >
+                  {t.label}
                 </button>
               ))}
             </div>
@@ -223,14 +281,13 @@ export function Workbench() {
   const splitTab = useArenaStore((s) => s.splitTab);
   const setActiveTab = useArenaStore((s) => s.setActiveTab);
   const setSplitTab = useArenaStore((s) => s.setSplitTab);
+  const panels = useArenaStore((s) => s.workbenchPanels);
   const [splitOrientation, setSplitOrientation] = useState<SplitOrientation>("vertical");
-
-  const openTabIds = useArenaStore((s) => s.openTabIds);
 
   const startSplit = (orientation: SplitOrientation) => {
     if (!splitTab) {
-      const other = openTabIds.find((id) => id !== activeTab);
-      setSplitTab(other || "notebook");
+      const other = panels.find((p) => p.instanceId !== activeTab);
+      setSplitTab(other?.instanceId || "notebook");
     }
     setSplitOrientation(orientation);
   };
@@ -238,8 +295,8 @@ export function Workbench() {
   const splitControls = {
     isSplit: !!splitTab,
     orientation: splitOrientation,
-    onSplitH: () => startSplit("vertical"),   // "vertical" orientation = stacked (horizontal split line)
-    onSplitV: () => startSplit("horizontal"), // "horizontal" orientation = side by side (vertical split line)
+    onSplitH: () => startSplit("vertical"),
+    onSplitV: () => startSplit("horizontal"),
     onUnsplit: () => setSplitTab(null),
   };
 
@@ -247,7 +304,11 @@ export function Workbench() {
     ? "h-1.5 bg-border/50 hover:bg-accent/40 transition-colors cursor-row-resize"
     : "w-1.5 bg-border/50 hover:bg-accent/40 transition-colors cursor-col-resize";
 
+  const findPanel = (id: string) => panels.find((p) => p.instanceId === id);
+
   if (splitTab) {
+    const activePanel = findPanel(activeTab);
+    const splitPanel = findPanel(splitTab);
     return (
       <div className="flex flex-col h-full">
         <Group orientation={splitOrientation} key={splitOrientation}>
@@ -255,16 +316,16 @@ export function Workbench() {
             <div className="flex flex-col h-full">
               <TabBar activeTab={activeTab} onSelect={setActiveTab} splitControls={splitControls} />
               <div className="flex-1 overflow-hidden">
-                <TabContent tabId={activeTab} />
+                {activePanel && <TabContent panel={activePanel} />}
               </div>
             </div>
           </Panel>
           <Separator className={separatorClass} />
           <Panel defaultSize={50} minSize={20}>
             <div className="flex flex-col h-full">
-              <TabBar activeTab={splitTab} onSelect={setSplitTab} splitControls={splitControls} />
+              <TabBar activeTab={splitTab} onSelect={setSplitTab} paneTarget="split" splitControls={splitControls} />
               <div className="flex-1 overflow-hidden">
-                <TabContent tabId={splitTab} />
+                {splitPanel && <TabContent panel={splitPanel} />}
               </div>
             </div>
           </Panel>
@@ -277,10 +338,9 @@ export function Workbench() {
     <div className="flex flex-col h-full">
       <TabBar activeTab={activeTab} onSelect={setActiveTab} splitControls={splitControls} />
       <div className="flex-1 overflow-hidden relative">
-        {/* Keep open tabs mounted to preserve scroll position across tab switches */}
-        {WORKBENCH_TABS.filter((t) => openTabIds.includes(t.id)).map((tab) => (
-          <div key={tab.id} className={`absolute inset-0 ${activeTab === tab.id ? "" : "invisible"}`}>
-            <TabContent tabId={tab.id} />
+        {[...panels].sort((a, b) => a.instanceId.localeCompare(b.instanceId)).map((panel) => (
+          <div key={panel.instanceId} data-instance-id={panel.instanceId} className={`absolute inset-0 ${activeTab === panel.instanceId ? "" : "invisible"}`}>
+            <TabContent panel={panel} />
           </div>
         ))}
       </div>

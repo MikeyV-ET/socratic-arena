@@ -8,6 +8,7 @@ camelCase serialization, prompt test results).
 Run: cd backend && python -m pytest tests/test_arena_e2e.py -v
 """
 
+import os
 import asyncio
 import json
 import os

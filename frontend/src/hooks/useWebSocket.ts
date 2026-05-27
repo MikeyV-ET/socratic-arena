@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useArenaStore } from "@/stores/arenaStore";
-import type { ClientMessage } from "@/types";
+import type { ClientMessage, ConversationNode } from "@/types";
 
 const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
 const basePath = window.location.pathname.replace(/\/+$/, "");
@@ -73,13 +73,33 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       store.completePromptTest();
       break;
 
-    case "panel.launched":
-      store.addPanel(msg.payload as never);
+    case "panel.launched": {
+      const launchedPanel = msg.payload as { id: string; label?: string; appType?: string };
+      store.addAppPanel(launchedPanel as never);
+      // Create a workbench tab if no existing panel is bound to this app
+      const alreadyBound = store.workbenchPanels.some(
+        (p) => p.type === "app" && p.config?.panelId === launchedPanel.id,
+      );
+      if (!alreadyBound) {
+        const label = launchedPanel.label || `App: ${launchedPanel.appType || "app"}`;
+        store.addPanel("app", { panelId: launchedPanel.id });
+        // addPanel auto-activates and assigns a generic label; override it
+        const newest = store.workbenchPanels[store.workbenchPanels.length - 1];
+        if (newest) store.updatePanelLabel(newest.instanceId, label);
+      }
       break;
+    }
 
-    case "panel.stopped":
-      store.removePanel((msg.payload as { id: string }).id);
+    case "panel.stopped": {
+      const stoppedId = (msg.payload as { id: string }).id;
+      store.removeAppPanel(stoppedId);
+      // Close the workbench tab bound to this app
+      const bound = store.workbenchPanels.find(
+        (p) => p.type === "app" && p.config?.panelId === stoppedId,
+      );
+      if (bound) store.closeTab(bound.instanceId);
       break;
+    }
 
     case "panel.agent_claimed":
       store.setAgentPanelClaimed(
@@ -252,6 +272,35 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       break;
     }
 
+    case "chat_panel.user_node": {
+      const pId = msg.payload.panelId as string;
+      store.addPanelMessage(pId, msg.payload.node as ConversationNode);
+      break;
+    }
+
+    case "chat_panel.response": {
+      const pId = msg.payload.panelId as string;
+      const node = msg.payload.node as ConversationNode;
+      store.addPanelMessage(pId, node);
+      store.setPanelAwaitingResponse(pId, false);
+      break;
+    }
+
+    case "chat_panel.chunk": {
+      const pId = msg.payload.panelId as string;
+      const nodeId = msg.payload.nodeId as string;
+      const content = msg.payload.content as string;
+      // Update existing node's content (streaming)
+      store.updatePanelMessage(pId, nodeId, content);
+      break;
+    }
+
+    case "chat_panel.turn_complete": {
+      const pId = msg.payload.panelId as string;
+      store.setPanelAwaitingResponse(pId, false);
+      break;
+    }
+
     case "artifact.updated":
       // Reload artifact iframe when content changes
       document.querySelectorAll<HTMLIFrameElement>('iframe[title="Artifact preview"]').forEach((iframe) => {
@@ -301,7 +350,16 @@ export function useWebSocket() {
             const panels = data.panels || [];
             const store2 = useArenaStore.getState();
             for (const p of panels) {
-              store2.addPanel(p);
+              store2.addAppPanel(p);
+              // Ensure a workbench tab exists for this running app
+              const bound = store2.workbenchPanels.some(
+                (wp: { type: string; config?: Record<string, any> }) =>
+                  wp.type === "app" && wp.config?.panelId === p.id,
+              );
+              if (!bound) {
+                const iid = store2.addPanel("app", { panelId: p.id });
+                store2.updatePanelLabel(iid, p.label || `App: ${p.appType || "app"}`);
+              }
               if (p.agentControlled) {
                 store2.setAgentPanelClaimed(p.id, p.agentName || "Agent");
                 if (p.agentStatus) {

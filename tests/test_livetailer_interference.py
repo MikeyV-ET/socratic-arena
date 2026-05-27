@@ -15,6 +15,8 @@ that prevent the content from rendering.
 import asyncio
 import json
 import time
+import os
+
 import httpx
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -22,8 +24,8 @@ from selenium.webdriver.common.by import By
 import websockets
 
 
-SA_URL = "http://localhost:5173"
-BACKEND_URL = "http://localhost:8000"
+SA_URL = os.environ.get("SA_URL", "http://localhost:5175")
+BACKEND_URL = SA_URL
 TEST_MSG = "INTERFERENCE_TEST: testing live-tailer interference"
 TEST_RESPONSE = "INTERFERENCE_RESPONSE: this must survive live-tailer events."
 
@@ -83,7 +85,7 @@ async def send_with_snapshot_interference():
     assistant_node_id = None
     user_node_id = None
     
-    async with websockets.connect("ws://localhost:8000/ws", max_size=30_000_000) as ws:
+    async with websockets.connect(SA_URL.replace("http://", "ws://").replace("https://", "wss://") + "/ws", max_size=30_000_000) as ws:
         # Skip initial snapshot
         raw = await asyncio.wait_for(ws.recv(), timeout=10)
         initial = json.loads(raw)

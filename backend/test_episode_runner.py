@@ -1,3 +1,4 @@
+import os
 """Tests for parallel episode runner feature.
 
 Tests the episode scores API and the frontend EpisodeRunnerPane rendering.
@@ -7,7 +8,7 @@ Requires: SA backend running on localhost:8000, frontend on localhost:5173.
 import pytest
 import httpx
 
-SA_BACKEND = "http://localhost:8000"
+SA_BACKEND = os.environ.get("SA_URL", "http://localhost:5175")
 
 
 class TestEpisodeScoresAPI:
@@ -68,7 +69,7 @@ class TestEpisodeRunnerBrowser:
 
         driver = self._get_driver()
         try:
-            driver.get("http://localhost:5173")
+            driver.get(SA_BACKEND)
 
             tab = WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Episodes')]"))
@@ -91,7 +92,7 @@ class TestEpisodeRunnerBrowser:
 
         driver = self._get_driver()
         try:
-            driver.get("http://localhost:5173")
+            driver.get(SA_BACKEND)
 
             tab = WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Episodes')]"))
@@ -115,7 +116,7 @@ class TestEpisodeRunnerBrowser:
 
         driver = self._get_driver()
         try:
-            driver.get("http://localhost:5173")
+            driver.get(SA_BACKEND)
 
             tab = WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Episodes')]"))

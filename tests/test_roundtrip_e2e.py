@@ -15,12 +15,14 @@ the backend + WebSocket broadcast pipeline.
 
 import asyncio
 import json
+import os
+
 import httpx
 import websockets
 
 
-BACKEND = "http://localhost:8000"
-WS_URL = "ws://localhost:8000/ws"
+BACKEND = os.environ.get("SA_URL", "http://localhost:5175")
+WS_URL = BACKEND.replace("http://", "ws://").replace("https://", "wss://") + "/ws"
 TEST_CONTENT = "E2E_TEST_RESPONSE: This is a simulated agent response."
 
 

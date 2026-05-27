@@ -72,14 +72,15 @@ def ensure_dirs(agents_home: Path, agent_name: str):
 # ============================================================================
 
 def write_to_inbox(agents_home: Path, agent_name: str, content: str,
-                   node_id: str, meta: dict | None = None) -> str:
+                   node_id: str, meta: dict | None = None,
+                   sender: str = "arena_user") -> str:
     """Write a user message to the agent's arena adapter inbox."""
     inbox = agent_adapter_dir(agents_home, agent_name) / "inbox"
     msg_id = str(uuid.uuid4())
 
     msg = {
         "id": msg_id,
-        "from": "arena_user",
+        "from": sender,
         "to": agent_name,
         "text": content,
         "adapter": ADAPTER_NAME,
@@ -339,7 +340,7 @@ class ArenaAdapter:
     def _poll_arena_for_user_messages(self):
         """Check arena backend for new user messages and write to agent inbox."""
         try:
-            resp = httpx.get(f"{self.arena_url}/api/adapter/pending", timeout=5)
+            resp = httpx.get(f"{self.arena_url}/api/adapter/pending", params={"agent": self.default_agent}, timeout=5)
             if resp.status_code != 200:
                 return
 
@@ -361,10 +362,12 @@ class ArenaAdapter:
                     self._init_tailer(target_agent)
                     log.info("New agent activated: %s", target_agent)
 
+                sender = msg.get("sender", "arena_user")
                 msg_id = write_to_inbox(
                     self.agents_home, target_agent,
                     content=content,
                     node_id=node_id,
+                    sender=sender,
                 )
                 self._node_map[msg_id] = node_id
                 self._last_node_id = node_id

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EditorView, basicSetup } from "codemirror";
-import { EditorState, StateEffect, StateField } from "@codemirror/state";
+import { EditorState, StateEffect, StateField, Compartment } from "@codemirror/state";
 import { Decoration, type DecorationSet } from "@codemirror/view";
 import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
@@ -226,8 +226,9 @@ class SimpleYjsProvider {
   }
 }
 
-export function SharedEditorPane() {
+export function SharedEditorPane({ instanceId, config }: { instanceId?: string; config?: Record<string, any> } = {}) {
   const theme = useArenaStore((s) => s.theme);
+  const updatePanelLabel = useArenaStore((s) => s.updatePanelLabel);
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const editorViewRef = useRef<EditorView | null>(null);
   const providerRef = useRef<SimpleYjsProvider | null>(null);
@@ -241,10 +242,11 @@ export function SharedEditorPane() {
   const [viewMode, setViewMode] = useState<"edit" | "preview">("edit");
   const [previewText, setPreviewText] = useState("");
   const [showAuthors, setShowAuthors] = useState(true);
-  const [sidebarTab, setSidebarTab] = useState<"docs" | "files">("docs");
   const [browseResult, setBrowseResult] = useState<BrowseResult | null>(null);
   const [browseLoading, setBrowseLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [showOpen, setShowOpen] = useState(false);
+  const themeCompRef = useRef(new Compartment());
 
   // Clean up editor + provider when switching or unmounting
   const cleanup = useCallback(() => {
@@ -263,6 +265,12 @@ export function SharedEditorPane() {
   const openDoc = useCallback((docId: string) => {
     cleanup();
     setActiveDocId(docId);
+
+    // Update workbench tab label to show the doc name
+    if (instanceId) {
+      const doc = docs.find((d) => d.id === docId);
+      if (doc) updatePanelLabel(instanceId, `Editor: ${doc.title}`);
+    }
 
     const ydoc = new Y.Doc();
     ydocRef.current = ydoc;
@@ -301,9 +309,7 @@ export function SharedEditorPane() {
         authorColorPlugin,
         authorColorTheme,
       ];
-      if (theme === "dark") {
-        extensions.push(oneDark);
-      }
+      extensions.push(themeCompRef.current.of(theme === "dark" ? oneDark : []));
 
       const state = EditorState.create({
         doc: ytext.toString(),
@@ -316,7 +322,7 @@ export function SharedEditorPane() {
       });
       editorViewRef.current = view;
     });
-  }, [cleanup, theme]);
+  }, [cleanup, theme, docs, instanceId, updatePanelLabel]);
 
   // Fetch doc list
   const refreshDocs = useCallback(async () => {
@@ -353,6 +359,14 @@ export function SharedEditorPane() {
       window.removeEventListener("sa-open-doc", onOpenDoc);
     };
   }, [refreshDocs, openDoc]);
+
+  // Reconfigure CodeMirror theme when SA theme changes
+  useEffect(() => {
+    if (!editorViewRef.current) return;
+    editorViewRef.current.dispatch({
+      effects: themeCompRef.current.reconfigure(theme === "dark" ? oneDark : []),
+    });
+  }, [theme]);
 
   // Listen for highlight events from the main WS (agent-initiated)
   useEffect(() => {
@@ -392,6 +406,7 @@ export function SharedEditorPane() {
       setShowCreate(false);
       await refreshDocs();
       openDoc(doc.id);
+      if (instanceId) updatePanelLabel(instanceId, `Editor: ${title}`);
     } catch { /* ignore */ }
   };
 
@@ -420,6 +435,7 @@ export function SharedEditorPane() {
       const doc: DocMeta = await resp.json();
       await refreshDocs();
       openDoc(doc.id);
+      if (instanceId) updatePanelLabel(instanceId, `Editor: ${doc.title}`);
       setSidebarTab("docs");
     } catch { /* ignore */ }
   }, [refreshDocs, openDoc]);
@@ -445,10 +461,10 @@ export function SharedEditorPane() {
     }
   }, [activeDocId]);
 
-  // Load initial file browser when switching to files tab
+  // Load file browser when Open is clicked
   useEffect(() => {
-    if (sidebarTab === "files" && !browseResult) browseDir();
-  }, [sidebarTab, browseResult, browseDir]);
+    if (showOpen && !browseResult) browseDir();
+  }, [showOpen, browseResult, browseDir]);
 
   // Delete a doc
   const deleteDoc = async (docId: string) => {
@@ -470,7 +486,7 @@ export function SharedEditorPane() {
       <div className="px-3 py-2 border-b border-border flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider shrink-0">
-            Shared Editor
+            Editor
           </h2>
           {activeDoc && (
             <span className="text-xs text-foreground truncate" data-testid="shared-editor-title">
@@ -519,6 +535,62 @@ export function SharedEditorPane() {
                 title={connected ? "Connected" : "Disconnected"} />
             </>
           )}
+          <div className="relative">
+            <button
+              onClick={() => setShowOpen(!showOpen)}
+              className={`px-2 py-0.5 text-xs rounded transition-colors ${showOpen ? "bg-primary/20 text-primary" : "bg-primary/10 hover:bg-primary/20 text-primary"}`}
+              data-testid="open-file-btn"
+            >
+              Open
+            </button>
+            {showOpen && (
+              <div className="absolute top-full right-0 z-50 mt-1 w-64 max-h-80 bg-card border border-border rounded-md shadow-lg flex flex-col overflow-hidden">
+                {browseResult && (
+                  <>
+                    <div className="px-2 py-1 text-[9px] text-muted-foreground border-b border-border truncate shrink-0" title={browseResult.path}>
+                      {browseResult.path.split("/").slice(-2).join("/")}
+                    </div>
+                    <div className="flex-1 overflow-y-auto">
+                      {browseResult.parent && (
+                        <div
+                          className="flex items-center gap-1 px-2 py-1.5 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                          onClick={() => browseDir(browseResult.parent!)}
+                        >
+                          <span className="text-[10px]">..</span>
+                        </div>
+                      )}
+                      {browseLoading ? (
+                        <div className="text-xs text-muted-foreground text-center py-4">Loading...</div>
+                      ) : (
+                        browseResult.entries.map((entry) => (
+                          <div
+                            key={entry.path}
+                            className="flex items-center gap-1 px-2 py-1.5 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                            onClick={() => {
+                              if (entry.type === "dir") { browseDir(entry.path); }
+                              else { openFile(entry.path); setShowOpen(false); }
+                            }}
+                            title={entry.path}
+                          >
+                            <span className="text-[10px] shrink-0 w-3">{entry.type === "dir" ? "D" : ""}</span>
+                            <span className="truncate flex-1">{entry.name}</span>
+                            {entry.size !== undefined && (
+                              <span className="text-[9px] text-muted-foreground shrink-0">
+                                {entry.size < 1024 ? `${entry.size}B` : `${(entry.size / 1024).toFixed(0)}K`}
+                              </span>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </>
+                )}
+                {!browseResult && !browseLoading && (
+                  <div className="text-xs text-muted-foreground text-center py-4">Loading...</div>
+                )}
+              </div>
+            )}
+          </div>
           <button
             onClick={() => setShowCreate(!showCreate)}
             className="px-2 py-0.5 text-xs bg-primary/10 hover:bg-primary/20 text-primary rounded transition-colors"
@@ -557,146 +629,30 @@ export function SharedEditorPane() {
         </div>
       )}
 
-      {/* Sidebar + editor area */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Tabbed sidebar */}
-        <div className="w-48 border-r border-border flex flex-col shrink-0">
-          {/* Sidebar tabs */}
-          <div className="flex border-b border-border">
-            <button
-              onClick={() => setSidebarTab("docs")}
-              className={`flex-1 px-2 py-1 text-[10px] font-medium transition-colors ${
-                sidebarTab === "docs" ? "text-primary border-b-2 border-primary" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Docs
-            </button>
-            <button
-              onClick={() => setSidebarTab("files")}
-              className={`flex-1 px-2 py-1 text-[10px] font-medium transition-colors ${
-                sidebarTab === "files" ? "text-primary border-b-2 border-primary" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Files
-            </button>
-          </div>
-
-          {/* Docs tab */}
-          {sidebarTab === "docs" && (
-            <div className="flex-1 overflow-y-auto">
-              {docs.length === 0 && (
-                <div className="text-xs text-muted-foreground text-center py-4">
-                  No documents
-                </div>
-              )}
-              {docs.map((doc) => (
-                <div
-                  key={doc.id}
-                  className={`flex items-center gap-1 px-2 py-1.5 text-xs cursor-pointer transition-colors group ${
-                    activeDocId === doc.id
-                      ? "bg-primary/10 text-foreground"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                  }`}
-                  onClick={() => openDoc(doc.id)}
-                  data-testid={`doc-item-${doc.id}`}
-                >
-                  <span className="truncate flex-1">
-                    {doc.file_path ? `${doc.title}` : doc.title}
-                  </span>
-                  {doc.file_path && (
-                    <span className="text-[8px] text-muted-foreground shrink-0" title={doc.file_path}>F</span>
-                  )}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); deleteDoc(doc.id); }}
-                    className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive text-sm leading-none px-0.5 transition-opacity"
-                    title="Delete"
-                  >
-                    &times;
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Files tab */}
-          {sidebarTab === "files" && (
-            <div className="flex-1 overflow-y-auto">
-              {browseResult && (
-                <>
-                  {/* Current path breadcrumb */}
-                  <div className="px-2 py-1 text-[9px] text-muted-foreground border-b border-border truncate" title={browseResult.path}>
-                    {browseResult.path.split("/").slice(-2).join("/")}
-                  </div>
-                  {/* Go up */}
-                  {browseResult.parent && (
-                    <div
-                      className="flex items-center gap-1 px-2 py-1.5 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                      onClick={() => browseDir(browseResult.parent!)}
-                    >
-                      <span className="text-[10px]">..</span>
-                    </div>
-                  )}
-                  {/* Entries */}
-                  {browseLoading ? (
-                    <div className="text-xs text-muted-foreground text-center py-4">Loading...</div>
-                  ) : (
-                    browseResult.entries.map((entry) => (
-                      <div
-                        key={entry.path}
-                        className="flex items-center gap-1 px-2 py-1.5 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                        onClick={() => entry.type === "dir" ? browseDir(entry.path) : openFile(entry.path)}
-                        title={entry.path}
-                      >
-                        <span className="text-[10px] shrink-0 w-3">
-                          {entry.type === "dir" ? "D" : ""}
-                        </span>
-                        <span className="truncate flex-1">{entry.name}</span>
-                        {entry.size !== undefined && (
-                          <span className="text-[9px] text-muted-foreground shrink-0">
-                            {entry.size < 1024 ? `${entry.size}B` : `${(entry.size / 1024).toFixed(0)}K`}
-                          </span>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </>
-              )}
-              {!browseResult && !browseLoading && (
-                <div className="text-xs text-muted-foreground text-center py-4">
-                  <button onClick={() => browseDir()} className="text-primary hover:underline">
-                    Browse files
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Editor / Preview area */}
-        <div className="flex-1 overflow-hidden">
-          {activeDocId ? (
-            <>
+      {/* Editor / Preview area — full width, no sidebar */}
+      <div className="flex-1 overflow-hidden">
+        {activeDocId ? (
+          <>
+            <div
+              ref={editorContainerRef}
+              className="h-full overflow-auto [&_.cm-editor]:h-full [&_.cm-scroller]:!overflow-auto"
+              data-testid="shared-editor-content"
+              style={{ display: viewMode === "edit" ? undefined : "none" }}
+            />
+            {viewMode === "preview" && (
               <div
-                ref={editorContainerRef}
-                className="h-full overflow-auto [&_.cm-editor]:h-full [&_.cm-scroller]:!overflow-auto"
-                data-testid="shared-editor-content"
-                style={{ display: viewMode === "edit" ? undefined : "none" }}
-              />
-              {viewMode === "preview" && (
-                <div
-                  className={`h-full overflow-auto p-4 prose prose-sm max-w-none prose-p:my-2 prose-li:my-0 prose-table:text-xs prose-th:text-left prose-td:px-2 prose-td:py-1 prose-th:px-2 prose-th:py-1${theme === "dark" ? " prose-invert" : ""}`}
-                  data-testid="shared-editor-preview"
-                >
-                  <Markdown remarkPlugins={[remarkGfm]}>{previewText}</Markdown>
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
-              Select or create a document to start editing
-            </div>
-          )}
-        </div>
+                className={`h-full overflow-auto p-4 prose prose-sm max-w-none prose-p:my-2 prose-li:my-0 prose-table:text-xs prose-th:text-left prose-td:px-2 prose-td:py-1 prose-th:px-2 prose-th:py-1${theme === "dark" ? " prose-invert" : ""}`}
+                data-testid="shared-editor-preview"
+              >
+                <Markdown remarkPlugins={[remarkGfm]}>{previewText}</Markdown>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
+            Open a file or create a new document
+          </div>
+        )}
       </div>
     </div>
   );

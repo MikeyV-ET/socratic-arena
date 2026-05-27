@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """User-perspective tests for SA panel architecture.
 
@@ -11,7 +12,7 @@ import time
 import httpx
 import pytest
 
-SA = "http://localhost:8000"
+SA = os.environ.get("SA_URL", "http://localhost:5175")
 
 
 class TestPanelLaunch:

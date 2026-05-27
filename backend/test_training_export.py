@@ -1,3 +1,4 @@
+import os
 """Tests for training data export feature.
 
 Tests the export endpoint and JSONL format.
@@ -8,7 +9,7 @@ import json
 import pytest
 import httpx
 
-SA_BACKEND = "http://localhost:8000"
+SA_BACKEND = os.environ.get("SA_URL", "http://localhost:5175")
 
 
 class TestTrainingExportAPI:
@@ -124,7 +125,7 @@ class TestTrainingExportBrowser:
 
         driver = self._get_driver()
         try:
-            driver.get("http://localhost:5173")
+            driver.get(SA_BACKEND)
             # Wait for WS connect + corrections fetch
             time.sleep(3)
 
