@@ -339,7 +339,7 @@ class ArenaAdapter:
     def _poll_arena_for_user_messages(self):
         """Check arena backend for new user messages and write to agent inbox."""
         try:
-            resp = httpx.get(f"{self.arena_url}/api/adapter/pending", timeout=5)
+            resp = httpx.get(f"{self.arena_url}/api/adapter/pending", params={"agent": self.default_agent}, timeout=5)
             if resp.status_code != 200:
                 return
 

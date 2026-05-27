@@ -2001,8 +2001,18 @@ _panel_messages: dict[str, list] = {}     # panelId -> list of node dicts
 
 
 @app.get("/api/adapter/pending")
-async def adapter_pending():
-    """Return pending user messages for the asdaaas adapter to pick up."""
+async def adapter_pending(agent: str | None = None):
+    """Return pending user messages for the asdaaas adapter to pick up.
+
+    If ?agent=X is provided, only return messages targeted at that agent
+    (leaving others in the queue for other adapters to pick up).
+    Without the param, returns and clears everything (legacy behavior).
+    """
+    if agent:
+        matched = [m for m in _pending_user_messages if m.get("agent", "") == agent]
+        for m in matched:
+            _pending_user_messages.remove(m)
+        return {"messages": matched}
     msgs = list(_pending_user_messages)
     _pending_user_messages.clear()
     return {"messages": msgs}
