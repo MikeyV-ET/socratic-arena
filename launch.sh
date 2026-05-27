@@ -49,12 +49,12 @@ stop_all() {
         kill "$(cat "$WATCHDOG_PID")" 2>/dev/null; echo "  watchdog stopped."
     fi
     rm -f "$WATCHDOG_PID"
-    for label_pid in "$BACKEND_PID:backend:uvicorn main:app" "$FRONTEND_PID:frontend:node.*vite" "$ADAPTER_PID:adapter:arena_adapter.py"; do
-        pf="${label_pid%%:*}"; rest="${label_pid#*:}"; name="${rest%%:*}"; pattern="${rest#*:}"
+    for label_pid in "$BACKEND_PID:backend" "$FRONTEND_PID:frontend" "$ADAPTER_PID:adapter"; do
+        pf="${label_pid%%:*}"; name="${label_pid#*:}"
         if [ -f "$pf" ] && kill -0 "$(cat "$pf")" 2>/dev/null; then
-            kill "$(cat "$pf")" && echo "  ${name} stopped (PID $(cat "$pf"))."
+            kill "$(cat "$pf")" && echo "  ${name} stopped."
         else
-            pkill -f "$pattern" 2>/dev/null && echo "  ${name} stopped." || echo "  ${name} not running."
+            echo "  ${name} not running."
         fi
         rm -f "$pf"
     done
