@@ -593,6 +593,7 @@ async def handle_conversation_send(ws: WebSocket, payload: dict):
         "nodeId": user_node.id,
         "branchId": branch_id,
         "agent": _current_agent,
+        "sender": "eric",
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
     })
 
@@ -645,6 +646,7 @@ async def handle_panel_send(ws: WebSocket, payload: dict):
         "nodeId": assistant_node.id,
         "branchId": "panel",
         "agent": target_agent,
+        "sender": "eric",
         "panelId": panel_id,
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
     })
