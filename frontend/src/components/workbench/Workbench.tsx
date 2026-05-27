@@ -128,6 +128,9 @@ function TabBar({ activeTab, onSelect, splitControls, paneTarget = "main" }: {
   const closedSingletons = PANEL_TYPES.filter((t) => !t.multi && !openSingletonTypes.has(t.type));
   const multiTypes = PANEL_TYPES.filter((t) => t.multi);
   const menuItems = [...closedSingletons, ...multiTypes];
+  const commonTypes = new Set(["history", "notebook", "chat", "editor", "artifact", "app"]);
+  const primaryMulti = multiTypes.filter((t) => commonTypes.has(t.type));
+  const advancedMulti = multiTypes.filter((t) => !commonTypes.has(t.type));
 
   const instanceIds = panels.map((p) => p.instanceId);
 
@@ -191,7 +194,7 @@ function TabBar({ activeTab, onSelect, splitControls, paneTarget = "main" }: {
           </button>
           {showMenu && (
             <div className="absolute top-full left-0 z-50 bg-card border border-border rounded-md shadow-lg py-1 min-w-[120px]">
-              {closedSingletons.length > 0 && closedSingletons.map((t) => (
+              {closedSingletons.map((t) => (
                 <button
                   key={t.type}
                   onClick={() => { openTab(t.type, paneTarget); setShowMenu(false); }}
@@ -201,17 +204,30 @@ function TabBar({ activeTab, onSelect, splitControls, paneTarget = "main" }: {
                   {t.label}
                 </button>
               ))}
-              {closedSingletons.length > 0 && multiTypes.length > 0 && (
+              {closedSingletons.length > 0 && primaryMulti.length > 0 && (
                 <div className="border-t border-border my-1" />
               )}
-              {multiTypes.map((t) => (
+              {primaryMulti.map((t) => (
                 <button
                   key={t.type}
                   onClick={() => { addPanel(t.type, {}, paneTarget); setShowMenu(false); }}
-                  className="block w-full text-left px-3 py-1 text-xs hover:bg-muted transition-colors text-accent"
+                  className="block w-full text-left px-3 py-1 text-xs hover:bg-muted transition-colors"
                   data-testid={`add-panel-${t.type}`}
                 >
-                  + New {t.label}
+                  {t.label}
+                </button>
+              ))}
+              {advancedMulti.length > 0 && (
+                <div className="border-t border-border my-1" />
+              )}
+              {advancedMulti.map((t) => (
+                <button
+                  key={t.type}
+                  onClick={() => { addPanel(t.type, {}, paneTarget); setShowMenu(false); }}
+                  className="block w-full text-left px-3 py-1 text-xs hover:bg-muted transition-colors text-muted-foreground"
+                  data-testid={`add-panel-${t.type}`}
+                >
+                  {t.label}
                 </button>
               ))}
             </div>
