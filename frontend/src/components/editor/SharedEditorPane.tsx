@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EditorView, basicSetup } from "codemirror";
-import { EditorState, StateEffect, StateField } from "@codemirror/state";
+import { EditorState, StateEffect, StateField, Compartment } from "@codemirror/state";
 import { Decoration, type DecorationSet } from "@codemirror/view";
 import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
@@ -246,6 +246,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
   const [browseLoading, setBrowseLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [showOpen, setShowOpen] = useState(false);
+  const themeCompRef = useRef(new Compartment());
 
   // Clean up editor + provider when switching or unmounting
   const cleanup = useCallback(() => {
@@ -308,9 +309,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
         authorColorPlugin,
         authorColorTheme,
       ];
-      if (theme === "dark") {
-        extensions.push(oneDark);
-      }
+      extensions.push(themeCompRef.current.of(theme === "dark" ? oneDark : []));
 
       const state = EditorState.create({
         doc: ytext.toString(),
@@ -360,6 +359,14 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
       window.removeEventListener("sa-open-doc", onOpenDoc);
     };
   }, [refreshDocs, openDoc]);
+
+  // Reconfigure CodeMirror theme when SA theme changes
+  useEffect(() => {
+    if (!editorViewRef.current) return;
+    editorViewRef.current.dispatch({
+      effects: themeCompRef.current.reconfigure(theme === "dark" ? oneDark : []),
+    });
+  }, [theme]);
 
   // Listen for highlight events from the main WS (agent-initiated)
   useEffect(() => {
