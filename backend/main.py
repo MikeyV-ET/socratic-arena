@@ -711,6 +711,7 @@ async def handle_panel_send(ws: WebSocket, payload: dict):
 
     # Map the assistant node to this panel so adapter_response can route it
     _panel_node_map[assistant_node.id] = panel_id
+    _save_panel_state()
     # Also store in the main index so adapter_response can find it
     _msg_index[assistant_node.id] = assistant_node
 
@@ -2078,8 +2079,32 @@ async def search_agent_notebook(name: str, q: str, limit: int = 50):
 _pending_user_messages: list[dict] = []
 
 # Panel chat state — maps nodeIds to panelIds so adapter responses route correctly
-_panel_node_map: dict[str, str] = {}     # nodeId -> panelId
-_panel_messages: dict[str, list] = {}     # panelId -> list of node dicts
+# Persisted to disk so responses survive backend restarts.
+_PANEL_STATE_FILE = Path(__file__).parent / "data" / "panel_chat_state.json"
+
+def _load_panel_state():
+    if _PANEL_STATE_FILE.is_file():
+        try:
+            data = json.loads(_PANEL_STATE_FILE.read_text())
+            return data.get("node_map", {}), data.get("messages", {})
+        except Exception:
+            pass
+    return {}, {}
+
+def _save_panel_state():
+    _PANEL_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _PANEL_STATE_FILE.write_text(json.dumps({
+        "node_map": _panel_node_map,
+        "messages": _panel_messages,
+    }))
+
+_panel_node_map, _panel_messages = _load_panel_state()
+
+
+@app.get("/api/panel/{panel_id}/messages")
+async def get_panel_messages(panel_id: str):
+    """Return persisted chat history for a panel."""
+    return {"messages": _panel_messages.get(panel_id, [])}
 
 
 @app.get("/api/adapter/pending")
@@ -2116,6 +2141,7 @@ async def _handle_panel_response(panel_id: str, body: dict):
 
     # Clean up the mapping
     _panel_node_map.pop(node_id, None)
+    _save_panel_state()
 
     # Build response node for the frontend
     response_node = {

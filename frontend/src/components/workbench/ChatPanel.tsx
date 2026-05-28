@@ -75,6 +75,19 @@ export function ChatPanel({
     }
   }, [config?.targetAgent]);
 
+  // Load persisted chat history on mount
+  const addPanelMessage = useArenaStore((s) => s.addPanelMessage);
+  const basePath = window.location.pathname.replace(/\/+$/, "");
+  useEffect(() => {
+    if (messages.length > 0) return; // already have messages in store
+    fetch(`${basePath}/api/panel/${instanceId}/messages`)
+      .then((r) => r.json())
+      .then((data) => {
+        (data.messages || []).forEach((m: ConversationNode) => addPanelMessage(instanceId, m));
+      })
+      .catch(() => {});
+  }, [instanceId]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!message.trim() || !sendWs || !targetAgent) return;
