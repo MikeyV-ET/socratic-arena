@@ -584,6 +584,217 @@ test.describe("File attachment", () => {
 });
 
 // =========================================================================
+// WORKSPACE CHAT PANEL
+// =========================================================================
+
+test.describe("Workspace chat panel", () => {
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await waitForWorkbench(page);
+  });
+
+  test("C1: Can open a chat panel and select an agent", async ({ page }) => {
+    // Open a chat panel from the "+" menu
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    const chatOption = page.locator('[data-testid="add-panel-chat"]');
+    if (!(await chatOption.isVisible())) {
+      await page.keyboard.press("Escape");
+      return; // chat panel not available in this build
+    }
+    await chatOption.click();
+    await page.waitForTimeout(500);
+
+    // Agent picker should be visible
+    const agentSelect = page.locator("select");
+    await expect(agentSelect.last()).toBeVisible();
+  });
+
+  test("C2: Chat panel shows input bar after agent selection", async ({ page }) => {
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    const chatOption = page.locator('[data-testid="add-panel-chat"]');
+    if (!(await chatOption.isVisible())) {
+      await page.keyboard.press("Escape");
+      return;
+    }
+    await chatOption.click();
+    await page.waitForTimeout(500);
+
+    // Select first available agent
+    const agentSelect = page.locator("select").last();
+    const options = agentSelect.locator("option:not([disabled])");
+    if (await options.count() === 0) return;
+    const firstAgent = await options.first().getAttribute("value");
+    if (firstAgent) await agentSelect.selectOption(firstAgent);
+    await page.waitForTimeout(300);
+
+    // Chat input should appear
+    await expect(page.locator('[data-testid="panel-chat-input"]')).toBeVisible();
+    await expect(page.locator('[data-testid="panel-chat-send"]')).toBeVisible();
+  });
+
+  test("C3: Chat panel should load message history on open (not start empty)", async ({ page }) => {
+    // BUG/FEATURE: Eric wants chat panel to show enough history to be visible.
+    // Currently panelMessages is in-memory only — reopening panel loses history.
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    const chatOption = page.locator('[data-testid="add-panel-chat"]');
+    if (!(await chatOption.isVisible())) {
+      await page.keyboard.press("Escape");
+      return;
+    }
+    await chatOption.click();
+    await page.waitForTimeout(500);
+
+    // Select agent
+    const agentSelect = page.locator("select").last();
+    const options = agentSelect.locator("option:not([disabled])");
+    if (await options.count() === 0) return;
+    const firstAgent = await options.first().getAttribute("value");
+    if (firstAgent) await agentSelect.selectOption(firstAgent);
+    await page.waitForTimeout(300);
+
+    // Send a test message
+    const input = page.locator('[data-testid="panel-chat-input"]');
+    await input.fill("test history persistence");
+    await page.locator('[data-testid="panel-chat-send"]').click();
+    await page.waitForTimeout(500);
+
+    // Message should be visible in panel
+    await expect(page.getByText("test history persistence")).toBeVisible();
+
+    // Close the chat tab and reopen — history should persist
+    const chatTab = page.locator('[data-testid^="workbench-tab-chat"]').first();
+    const tabTestId = await chatTab.getAttribute("data-testid");
+    const instId = tabTestId?.replace("workbench-tab-", "");
+    if (instId) {
+      await chatTab.hover();
+      await page.waitForTimeout(200);
+      const closeBtn = page.locator(`[data-testid="close-tab-${instId}"]`);
+      if (await closeBtn.isVisible()) await closeBtn.click();
+      await page.waitForTimeout(300);
+    }
+
+    // Reopen chat panel
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid="add-panel-chat"]').click();
+    await page.waitForTimeout(500);
+    // Re-select same agent
+    const agentSelect2 = page.locator("select").last();
+    if (firstAgent) await agentSelect2.selectOption(firstAgent);
+    await page.waitForTimeout(500);
+
+    // Previous message should still be visible (history loaded)
+    const historyMsg = page.getByText("test history persistence");
+    // This is the test that should FAIL if history isn't persisted
+    await expect(historyMsg).toBeVisible({ timeout: 5000 });
+  });
+});
+
+// =========================================================================
+// EDITOR TABLE OF CONTENTS
+// =========================================================================
+
+test.describe("Editor table of contents", () => {
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await waitForWorkbench(page);
+  });
+
+  test("E1: Editor has a table of contents toggle button", async ({ page }) => {
+    // FEATURE: Editor should have a slide in/out table of contents
+    // Open an editor panel
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    const editorOption = page.locator('[data-testid="add-panel-editor"]');
+    if (!(await editorOption.isVisible())) {
+      await page.keyboard.press("Escape");
+      return;
+    }
+    await editorOption.click();
+    await page.waitForTimeout(500);
+
+    // Look for TOC toggle button
+    const tocBtn = page.locator('button[title*="contents" i], button[title*="TOC" i], button[title*="outline" i], [data-testid="toc-toggle"]');
+    // This will fail until the feature is implemented
+    await expect(tocBtn.first()).toBeVisible({ timeout: 3000 });
+  });
+
+  test("E2: TOC slides in and lists document headings", async ({ page }) => {
+    // FEATURE: Clicking TOC toggle should reveal a sidebar with headings
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    const editorOption = page.locator('[data-testid="add-panel-editor"]');
+    if (!(await editorOption.isVisible())) {
+      await page.keyboard.press("Escape");
+      return;
+    }
+    await editorOption.click();
+    await page.waitForTimeout(500);
+
+    const tocBtn = page.locator('button[title*="contents" i], button[title*="TOC" i], button[title*="outline" i], [data-testid="toc-toggle"]');
+    if (await tocBtn.count() === 0) {
+      // Feature not built yet — test documents expected behavior
+      expect(false, "TOC toggle button not found — feature not implemented").toBe(true);
+      return;
+    }
+    await tocBtn.first().click();
+    await page.waitForTimeout(300);
+
+    // A TOC pane should slide in
+    const tocPane = page.locator('[data-testid="toc-pane"], [class*="toc"], [class*="outline"]');
+    await expect(tocPane.first()).toBeVisible();
+  });
+});
+
+// =========================================================================
+// COLOR SELECTION
+// =========================================================================
+
+test.describe("Color selection", () => {
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await waitForWorkbench(page);
+  });
+
+  test("U1: User can select their display color", async ({ page }) => {
+    // FEATURE: Settings/preferences should let user pick their color
+    // Look for a settings/preferences button or menu
+    const settingsBtn = page.locator('button[title*="settings" i], button[title*="preferences" i], [data-testid="settings-btn"], [data-testid="user-settings"]');
+    if (await settingsBtn.count() === 0) {
+      // Feature not built yet
+      expect(false, "Settings/color picker not found — feature not implemented").toBe(true);
+      return;
+    }
+    await settingsBtn.first().click();
+    await page.waitForTimeout(300);
+
+    // Should have a color picker for user messages
+    const colorInput = page.locator('input[type="color"], [data-testid="user-color-picker"]');
+    await expect(colorInput.first()).toBeVisible();
+  });
+
+  test("U2: User can select agent display colors", async ({ page }) => {
+    // FEATURE: Agent colors should be customizable
+    const settingsBtn = page.locator('button[title*="settings" i], button[title*="preferences" i], [data-testid="settings-btn"], [data-testid="user-settings"]');
+    if (await settingsBtn.count() === 0) {
+      expect(false, "Settings/color picker not found — feature not implemented").toBe(true);
+      return;
+    }
+    await settingsBtn.first().click();
+    await page.waitForTimeout(300);
+
+    const agentColorInput = page.locator('[data-testid="agent-color-picker"], [data-testid*="color"]');
+    await expect(agentColorInput.first()).toBeVisible();
+  });
+});
+
+// =========================================================================
 // DOM STABILITY
 // =========================================================================
 
