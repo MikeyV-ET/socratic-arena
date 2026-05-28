@@ -658,12 +658,12 @@ test.describe("Workspace chat panel", () => {
 
     // Send a test message
     const input = page.locator('[data-testid="panel-chat-input"]');
-    await input.fill("test history persistence");
+    await input.fill("xyzzy-C3-persist-test");
     await page.locator('[data-testid="panel-chat-send"]').click();
     await page.waitForTimeout(500);
 
-    // Message should be visible in panel
-    await expect(page.getByText("test history persistence")).toBeVisible();
+    // Message should be visible in the chat panel
+    await expect(page.getByText("xyzzy-C3-persist-test")).toBeVisible();
 
     // Close the chat tab and reopen — history should persist
     const chatTab = page.locator('[data-testid^="workbench-tab-chat"]').first();
@@ -688,7 +688,7 @@ test.describe("Workspace chat panel", () => {
     await page.waitForTimeout(500);
 
     // Previous message should still be visible (history loaded)
-    const historyMsg = page.getByText("test history persistence");
+    const historyMsg = page.getByText("xyzzy-C3-persist-test");
     // This is the test that should FAIL if history isn't persisted
     await expect(historyMsg).toBeVisible({ timeout: 5000 });
   });
