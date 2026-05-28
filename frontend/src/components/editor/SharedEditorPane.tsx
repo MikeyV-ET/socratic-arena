@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EditorView, basicSetup } from "codemirror";
 import { EditorState, StateEffect, StateField, Compartment } from "@codemirror/state";
 import { Decoration, type DecorationSet } from "@codemirror/view";
@@ -246,7 +246,31 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
   const [browseLoading, setBrowseLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [showOpen, setShowOpen] = useState(false);
+  const [showToc, setShowToc] = useState(false);
   const themeCompRef = useRef(new Compartment());
+
+  // Extract markdown headings for TOC
+  const headings = useMemo(() => {
+    if (!previewText) return [];
+    const result: { level: number; text: string; line: number }[] = [];
+    const lines = previewText.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/^(#{1,6})\s+(.+)/);
+      if (m) result.push({ level: m[1].length, text: m[2].replace(/\s*#+\s*$/, ""), line: i + 1 });
+    }
+    return result;
+  }, [previewText]);
+
+  const scrollToHeading = useCallback((line: number) => {
+    const view = editorViewRef.current;
+    if (!view) return;
+    const lineInfo = view.state.doc.line(Math.min(line, view.state.doc.lines));
+    view.dispatch({
+      effects: EditorView.scrollIntoView(lineInfo.from, { y: "start", yMargin: 20 }),
+      selection: { anchor: lineInfo.from },
+    });
+    view.focus();
+  }, []);
 
   // Clean up editor + provider when switching or unmounting
   const cleanup = useCallback(() => {
@@ -535,6 +559,16 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
                 title={connected ? "Connected" : "Disconnected"} />
             </>
           )}
+          <button
+            onClick={() => setShowToc(!showToc)}
+            className={`px-2 py-0.5 text-[10px] rounded transition-colors ${
+              showToc ? "bg-primary/20 text-primary" : "bg-primary/10 hover:bg-primary/20 text-primary"
+            }`}
+            title="Table of contents"
+            data-testid="toc-toggle"
+          >
+            TOC
+          </button>
           <div className="relative">
             <button
               onClick={() => setShowOpen(!showOpen)}
@@ -629,13 +663,38 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
         </div>
       )}
 
-      {/* Editor / Preview area — full width, no sidebar */}
-      <div className="flex-1 overflow-hidden">
+      {/* Editor / Preview area with optional TOC sidebar */}
+      <div className="flex-1 overflow-hidden flex">
+        {activeDocId && showToc && (
+          <div
+            className="w-48 shrink-0 border-r border-border overflow-y-auto bg-card"
+            data-testid="toc-pane"
+          >
+            <div className="px-2 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider border-b border-border">
+              Contents
+            </div>
+            {headings.length === 0 ? (
+              <div className="px-2 py-3 text-[10px] text-muted-foreground">No headings</div>
+            ) : (
+              headings.map((h, i) => (
+                <button
+                  key={`${h.line}-${i}`}
+                  onClick={() => scrollToHeading(h.line)}
+                  className="block w-full text-left px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors truncate"
+                  style={{ paddingLeft: `${(h.level - 1) * 12 + 8}px` }}
+                  title={h.text}
+                >
+                  {h.text}
+                </button>
+              ))
+            )}
+          </div>
+        )}
         {activeDocId ? (
           <>
             <div
               ref={editorContainerRef}
-              className="h-full overflow-auto [&_.cm-editor]:h-full [&_.cm-scroller]:!overflow-auto"
+              className="h-full flex-1 overflow-auto [&_.cm-editor]:h-full [&_.cm-scroller]:!overflow-auto"
               data-testid="shared-editor-content"
               style={{ display: viewMode === "edit" ? undefined : "none" }}
             />

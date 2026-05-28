@@ -89,6 +89,10 @@ interface ArenaState {
   setFontSize: (size: number) => void;
   chatSide: "left" | "right";
   toggleChatSide: () => void;
+  userColor: string;
+  agentColor: string;
+  setUserColor: (color: string) => void;
+  setAgentColor: (color: string) => void;
 
   // Agent
   currentAgent: string;
@@ -436,6 +440,16 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
       localStorage.setItem("arena-chat-side", next);
       return { chatSide: next };
     }),
+  userColor: localStorage.getItem("arena-user-color") || "#2e7d32",
+  agentColor: localStorage.getItem("arena-agent-color") || "#1565c0",
+  setUserColor: (color: string) => {
+    localStorage.setItem("arena-user-color", color);
+    set({ userColor: color });
+  },
+  setAgentColor: (color: string) => {
+    localStorage.setItem("arena-agent-color", color);
+    set({ agentColor: color });
+  },
 
   promptDraft: { systemPrompt: "", contextPrompt: "", probe: "", bridgeProbe: "", expectedBehavior: "", failureBehavior: "" },
   populatePromptDraft: (fields) =>

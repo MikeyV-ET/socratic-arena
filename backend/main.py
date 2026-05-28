@@ -2107,6 +2107,20 @@ async def get_panel_messages(panel_id: str):
     return {"messages": _panel_messages.get(panel_id, [])}
 
 
+@app.get("/api/panel/agent/{agent_name}/messages")
+async def get_panel_messages_by_agent(agent_name: str):
+    """Return chat history from the most recent panel that targeted this agent."""
+    best_pid = None
+    best_ts = 0
+    for pid, msgs in _panel_messages.items():
+        if any(m.get("agentLabel") == agent_name or m.get("agent_label") == agent_name for m in msgs):
+            ts = max((m.get("timestamp", 0) for m in msgs), default=0)
+            if ts > best_ts:
+                best_ts = ts
+                best_pid = pid
+    return {"messages": _panel_messages.get(best_pid, []) if best_pid else []}
+
+
 @app.get("/api/adapter/pending")
 async def adapter_pending(agent: str | None = None):
     """Return pending user messages for the asdaaas adapter to pick up.

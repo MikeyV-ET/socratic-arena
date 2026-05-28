@@ -86,11 +86,13 @@ function CompactionIndicator({ compaction }: { compaction: any | null }) {
   );
 }
 
-function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, paneId, toggleTheme, theme, contextPct, connected, chatSide, toggleChatSide }: {
+function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, paneId, toggleTheme, theme, contextPct, connected, chatSide, toggleChatSide, userColor, agentColor, setUserColor, setAgentColor }: {
   agents: any[]; currentAgent: string; switching: boolean; onAgentSwitch: (name: string) => void;
   paneId: string; toggleTheme: () => void; theme: string; contextPct: number | null; connected: boolean;
   chatSide: "left" | "right"; toggleChatSide: () => void;
+  userColor: string; agentColor: string; setUserColor: (c: string) => void; setAgentColor: (c: string) => void;
 }) {
+  const [showSettings, setShowSettings] = useState(false);
   const healthDot = (status: string | null) =>
     status === "working" || status === "active" ? "bg-success" : status === "ready" ? "bg-blue-400" : "bg-muted-foreground";
 
@@ -151,6 +153,31 @@ function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, paneId
           const a = agents.find((x: any) => x.name === currentAgent);
           return a?.compaction ? <CompactionIndicator compaction={a.compaction} /> : null;
         })()}
+        <div className="relative">
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className="px-1 py-0.5 text-[11px] text-muted-foreground hover:text-foreground rounded border border-border hover:bg-muted transition-colors"
+            title="Settings"
+            data-testid="settings-btn"
+          >
+            &#x2699;
+          </button>
+          {showSettings && (
+            <div className="absolute top-full right-0 z-50 mt-1 w-52 bg-card border border-border rounded-md shadow-lg p-2.5 space-y-2">
+              <div className="text-[11px] font-medium text-foreground border-b border-border pb-1">Display</div>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-muted-foreground">User color</span>
+                <input type="color" value={userColor} onChange={(e) => setUserColor(e.target.value)}
+                  className="w-6 h-5 rounded border border-border cursor-pointer" data-testid="user-color-picker" />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-muted-foreground">Agent color</span>
+                <input type="color" value={agentColor} onChange={(e) => setAgentColor(e.target.value)}
+                  className="w-6 h-5 rounded border border-border cursor-pointer" data-testid="agent-color-picker" />
+              </div>
+            </div>
+          )}
+        </div>
         <div className="flex items-center gap-1">
           <div className={`w-1.5 h-1.5 rounded-full ${connected ? "bg-success" : "bg-muted-foreground"}`} />
           <span className={`text-[10px] ${connected ? "text-muted-foreground" : "text-destructive"}`}>
@@ -201,6 +228,10 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   const toggleTheme = useArenaStore((s) => s.toggleTheme);
   const chatSide = useArenaStore((s) => s.chatSide);
   const toggleChatSide = useArenaStore((s) => s.toggleChatSide);
+  const userColor = useArenaStore((s) => s.userColor);
+  const agentColor = useArenaStore((s) => s.agentColor);
+  const setUserColor = useArenaStore((s) => s.setUserColor);
+  const setAgentColor = useArenaStore((s) => s.setAgentColor);
   const agents = useArenaStore((s) => s.agents);
   const setAgents = useArenaStore((s) => s.setAgents);
   const setCurrentAgent = useArenaStore((s) => s.setCurrentAgent);
@@ -855,7 +886,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   const stickyHeader = (
     <div className="sticky top-0 z-10 bg-background">
       {historyHeader}
-      {!readOnly && <LivePaneHeader agents={agents} currentAgent={currentAgent} switching={switching} onAgentSwitch={handleAgentSwitch} paneId={paneId} toggleTheme={toggleTheme} theme={theme} contextPct={contextPct} connected={connected} chatSide={chatSide} toggleChatSide={toggleChatSide} />}
+      {!readOnly && <LivePaneHeader agents={agents} currentAgent={currentAgent} switching={switching} onAgentSwitch={handleAgentSwitch} paneId={paneId} toggleTheme={toggleTheme} theme={theme} contextPct={contextPct} connected={connected} chatSide={chatSide} toggleChatSide={toggleChatSide} userColor={userColor} agentColor={agentColor} setUserColor={setUserColor} setAgentColor={setAgentColor} />}
     </div>
   );
 
