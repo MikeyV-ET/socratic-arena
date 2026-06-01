@@ -70,7 +70,8 @@ export function InputBar() {
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      setFiles((prev) => [...prev, ...Array.from(e.target.files!)]);
+      const newFiles = Array.from(e.target.files);
+      setFiles((prev) => [...prev, ...newFiles]);
     }
     e.target.value = "";
   };

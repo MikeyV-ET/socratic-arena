@@ -560,6 +560,8 @@ test.describe("File attachment", () => {
     const fileInput = page.locator('input[type="file"]');
     if (await fileInput.count() === 0) return;
 
+    const inputForm = page.locator("form");
+
     // First attach
     await fileInput.setInputFiles({
       name: "first.md",
@@ -567,7 +569,7 @@ test.describe("File attachment", () => {
       buffer: Buffer.from("# First"),
     });
     await page.waitForTimeout(300);
-    await expect(page.getByText("first.md")).toBeVisible();
+    await expect(inputForm.getByText("first.md")).toBeVisible();
 
     // Second attach (should accumulate, not replace)
     await fileInput.setInputFiles({
@@ -577,9 +579,9 @@ test.describe("File attachment", () => {
     });
     await page.waitForTimeout(300);
 
-    // Both should be visible
-    await expect(page.getByText("first.md")).toBeVisible();
-    await expect(page.getByText("second.md")).toBeVisible();
+    // Both should be visible (scoped to form to avoid conversation text collision)
+    await expect(inputForm.getByText("first.md")).toBeVisible();
+    await expect(inputForm.getByText("second.md")).toBeVisible();
   });
 });
 
