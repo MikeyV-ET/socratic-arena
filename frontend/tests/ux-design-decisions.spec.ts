@@ -751,6 +751,49 @@ test.describe("Editor table of contents", () => {
     const tocPane = page.locator('[data-testid="toc-pane"], [class*="toc"], [class*="outline"]');
     await expect(tocPane.first()).toBeVisible();
   });
+
+  test("E3: TOC panel is resizable via drag handle", async ({ page }) => {
+    // FEATURE: TOC panel should have a draggable resize boundary
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    const editorOption = page.locator('[data-testid="add-panel-editor"]');
+    if (!(await editorOption.isVisible())) {
+      await page.keyboard.press("Escape");
+      return;
+    }
+    await editorOption.click();
+    await page.waitForTimeout(500);
+
+    // Open TOC
+    const tocBtn = page.locator('button[title*="contents" i], button[title*="TOC" i], button[title*="outline" i], [data-testid="toc-toggle"]');
+    if (await tocBtn.count() === 0) return;
+    await tocBtn.first().click();
+    await page.waitForTimeout(300);
+
+    // Should have a resize handle between TOC and editor content
+    const resizeHandle = page.locator('[data-panel-group-id] [data-resize-handle-id], [data-testid="toc-resize-handle"], [class*="resize"]');
+    // This fails until the resize feature is implemented
+    await expect(resizeHandle.first()).toBeVisible({ timeout: 3000 });
+
+    // Drag the handle and verify TOC width changes
+    if (await resizeHandle.count() > 0) {
+      const box = await resizeHandle.first().boundingBox();
+      if (box) {
+        const tocPane = page.locator('[data-testid="toc-pane"], [class*="toc"], [class*="outline"]').first();
+        const widthBefore = (await tocPane.boundingBox())?.width ?? 0;
+
+        // Drag handle 50px to the right (expand TOC)
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(box.x + box.width / 2 + 50, box.y + box.height / 2, { steps: 5 });
+        await page.mouse.up();
+        await page.waitForTimeout(300);
+
+        const widthAfter = (await tocPane.boundingBox())?.width ?? 0;
+        expect(widthAfter).not.toBe(widthBefore);
+      }
+    }
+  });
 });
 
 // =========================================================================
