@@ -771,7 +771,11 @@ test.describe("Editor table of contents", () => {
     await page.waitForTimeout(300);
 
     // Should have a resize handle between TOC and editor content
-    const resizeHandle = page.locator('[data-panel-group-id] [data-resize-handle-id], [data-testid="toc-resize-handle"], [class*="resize"]');
+    // Scope to editor pane — broad selectors like [class*="resize"] match
+    // conversation textarea (resize-none) and [class*="outline"] matches
+    // focus:outline-none on other elements, causing .first() collisions.
+    const editorPane = page.locator('[data-testid="shared-editor"]');
+    const resizeHandle = editorPane.locator('[data-panel-group-id] [data-resize-handle-id], [data-testid="toc-resize-handle"], [class*="resize"]');
     // This fails until the resize feature is implemented
     await expect(resizeHandle.first()).toBeVisible({ timeout: 3000 });
 
@@ -779,7 +783,7 @@ test.describe("Editor table of contents", () => {
     if (await resizeHandle.count() > 0) {
       const box = await resizeHandle.first().boundingBox();
       if (box) {
-        const tocPane = page.locator('[data-testid="toc-pane"], [class*="toc"], [class*="outline"]').first();
+        const tocPane = editorPane.locator('[data-testid="toc-pane"], [class*="toc"], [class*="outline"]').first();
         const widthBefore = (await tocPane.boundingBox())?.width ?? 0;
 
         // Drag handle 50px to the right (expand TOC)

@@ -247,7 +247,24 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [showOpen, setShowOpen] = useState(false);
   const [showToc, setShowToc] = useState(false);
+  const [tocWidth, setTocWidth] = useState(192);
   const themeCompRef = useRef(new Compartment());
+
+  const startTocResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = tocWidth;
+    const onMove = (me: MouseEvent) => {
+      const newWidth = Math.max(80, Math.min(400, startWidth + me.clientX - startX));
+      setTocWidth(newWidth);
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [tocWidth]);
 
   // Extract markdown headings for TOC
   const headings = useMemo(() => {
@@ -663,32 +680,40 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
         </div>
       )}
 
-      {/* Editor / Preview area with optional TOC sidebar */}
+      {/* Editor / Preview area with optional resizable TOC sidebar */}
       <div className="flex-1 overflow-hidden flex">
-        {activeDocId && showToc && (
-          <div
-            className="w-48 shrink-0 border-r border-border overflow-y-auto bg-card"
-            data-testid="toc-pane"
-          >
-            <div className="px-2 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider border-b border-border">
-              Contents
+        {showToc && (
+          <>
+            <div
+              className="h-full overflow-y-auto bg-card shrink-0"
+              data-testid="toc-pane"
+              style={{ width: tocWidth }}
+            >
+              <div className="px-2 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider border-b border-border">
+                Contents
+              </div>
+              {headings.length === 0 ? (
+                <div className="px-2 py-3 text-[10px] text-muted-foreground">No headings</div>
+              ) : (
+                headings.map((h, i) => (
+                  <button
+                    key={`${h.line}-${i}`}
+                    onClick={() => scrollToHeading(h.line)}
+                    className="block w-full text-left px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors truncate"
+                    style={{ paddingLeft: `${(h.level - 1) * 12 + 8}px` }}
+                    title={h.text}
+                  >
+                    {h.text}
+                  </button>
+                ))
+              )}
             </div>
-            {headings.length === 0 ? (
-              <div className="px-2 py-3 text-[10px] text-muted-foreground">No headings</div>
-            ) : (
-              headings.map((h, i) => (
-                <button
-                  key={`${h.line}-${i}`}
-                  onClick={() => scrollToHeading(h.line)}
-                  className="block w-full text-left px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors truncate"
-                  style={{ paddingLeft: `${(h.level - 1) * 12 + 8}px` }}
-                  title={h.text}
-                >
-                  {h.text}
-                </button>
-              ))
-            )}
-          </div>
+            <div
+              className="w-1 shrink-0 bg-border hover:bg-primary/40 transition-colors cursor-col-resize"
+              data-testid="toc-resize-handle"
+              onMouseDown={startTocResize}
+            />
+          </>
         )}
         {activeDocId ? (
           <>
@@ -700,7 +725,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
             />
             {viewMode === "preview" && (
               <div
-                className={`h-full overflow-auto p-4 prose prose-sm max-w-none prose-p:my-2 prose-li:my-0 prose-table:text-xs prose-th:text-left prose-td:px-2 prose-td:py-1 prose-th:px-2 prose-th:py-1${theme === "dark" ? " prose-invert" : ""}`}
+                className={`h-full flex-1 overflow-auto p-4 prose prose-sm max-w-none prose-p:my-2 prose-li:my-0 prose-table:text-xs prose-th:text-left prose-td:px-2 prose-td:py-1 prose-th:px-2 prose-th:py-1${theme === "dark" ? " prose-invert" : ""}`}
                 data-testid="shared-editor-preview"
               >
                 <Markdown remarkPlugins={[remarkGfm]}>{previewText}</Markdown>
@@ -708,7 +733,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
             )}
           </>
         ) : (
-          <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
+          <div className="flex items-center justify-center h-full flex-1 text-xs text-muted-foreground">
             Open a file or create a new document
           </div>
         )}
