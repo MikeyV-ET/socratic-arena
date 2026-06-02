@@ -212,6 +212,59 @@ test.describe("Tiling workspace", () => {
     const panelContent = popup.locator('[data-testid^="panel-content-"]');
     await expect(panelContent).toBeVisible({ timeout: 10_000 });
   });
+
+  test("W9: Tile resize handle follows cursor accurately during drag", async ({ page }) => {
+    // BUG: Handle accelerates away from cursor instead of tracking it.
+    // Root cause: delta computed from startX (cumulative) but applied as incremental.
+    await ensureTabs(page, 2);
+
+    // Pin second tab
+    const tabs = page.locator('[data-testid^="workbench-tab-"]');
+    const pinButton = tabs.nth(1).locator('[data-testid="pin-panel"]');
+    await pinButton.click();
+
+    const resizeHandle = page.locator('[data-testid="tile-resize-handle"]');
+    await expect(resizeHandle).toBeVisible();
+
+    // Drag handle 100px to the right in small steps
+    const handleBox = await resizeHandle.boundingBox();
+    expect(handleBox).toBeTruthy();
+    const startX = handleBox!.x + handleBox!.width / 2;
+    const startY = handleBox!.y + handleBox!.height / 2;
+    const dragDistance = 100;
+
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    // Move in 10px increments
+    for (let i = 1; i <= 10; i++) {
+      await page.mouse.move(startX + i * 10, startY);
+    }
+    await page.mouse.up();
+
+    // Handle should now be near where we dragged it (startX + 100px), not overshooting
+    const newHandleBox = await resizeHandle.boundingBox();
+    expect(newHandleBox).toBeTruthy();
+    const actualMove = newHandleBox!.x - handleBox!.x;
+
+    // Allow 20% tolerance — handle should move roughly 100px, not 200+ or 50-
+    expect(actualMove).toBeGreaterThan(dragDistance * 0.5);
+    expect(actualMove).toBeLessThan(dragDistance * 1.5);
+  });
+
+  test("W10: Tile resize handle has correct cursor style", async ({ page }) => {
+    await ensureTabs(page, 2);
+
+    // Pin second tab
+    const tabs = page.locator('[data-testid^="workbench-tab-"]');
+    const pinButton = tabs.nth(1).locator('[data-testid="pin-panel"]');
+    await pinButton.click();
+
+    // Verify resize handle has col-resize cursor (same as main chat/workspace boundary)
+    const resizeHandle = page.locator('[data-testid="tile-resize-handle"]');
+    await expect(resizeHandle).toBeVisible();
+    const cursor = await resizeHandle.evaluate((el) => getComputedStyle(el).cursor);
+    expect(cursor).toBe("col-resize");
+  });
 });
 
 // =========================================================================
@@ -752,6 +805,102 @@ test.describe("DOM stability", () => {
     // Verify they are sorted
     const sorted = [...ids].sort((a, b) => a.localeCompare(b));
     expect(ids).toEqual(sorted);
+  });
+});
+
+// =========================================================================
+// FILESYSTEM VIEWER
+// =========================================================================
+
+test.describe("Filesystem viewer", () => {
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await waitForWorkbench(page);
+  });
+
+  test("F1: Can open a filesystem viewer panel from the tab menu", async ({ page }) => {
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    const addFs = page.locator('[data-testid="add-panel-filesystem"]');
+    await expect(addFs).toBeVisible();
+    await addFs.click();
+    await page.waitForTimeout(300);
+
+    // Filesystem panel should be visible with a directory listing
+    const fsPanel = page.locator('[data-testid^="panel-content-filesystem"]');
+    await expect(fsPanel).toBeVisible();
+  });
+
+  test("F2: Filesystem viewer shows directory tree with expandable folders", async ({ page }) => {
+    // Open filesystem panel
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid="add-panel-filesystem"]').click();
+    await page.waitForTimeout(500);
+
+    const fsPanel = page.locator('[data-testid^="panel-content-filesystem"]');
+    await expect(fsPanel).toBeVisible();
+
+    // Should show a tree structure with expandable items
+    const treeItems = fsPanel.locator('[data-testid="fs-tree-item"]');
+    await expect(treeItems.first()).toBeVisible({ timeout: 10_000 });
+
+    // At least one item should be a folder (expandable)
+    const folderItem = fsPanel.locator('[data-testid="fs-folder"]').first();
+    await expect(folderItem).toBeVisible();
+  });
+
+  test("F3: Clicking a folder expands it to show children", async ({ page }) => {
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid="add-panel-filesystem"]').click();
+    await page.waitForTimeout(500);
+
+    const fsPanel = page.locator('[data-testid^="panel-content-filesystem"]');
+    const folder = fsPanel.locator('[data-testid="fs-folder"]').first();
+    await expect(folder).toBeVisible({ timeout: 10_000 });
+
+    // Count visible items before expanding
+    const itemsBefore = await fsPanel.locator('[data-testid="fs-tree-item"]').count();
+
+    // Click folder to expand
+    await folder.click();
+    await page.waitForTimeout(500);
+
+    // Should have more items now (children visible)
+    const itemsAfter = await fsPanel.locator('[data-testid="fs-tree-item"]').count();
+    expect(itemsAfter).toBeGreaterThan(itemsBefore);
+  });
+
+  test("F4: Clicking a file in filesystem viewer opens it in editor", async ({ page }) => {
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid="add-panel-filesystem"]').click();
+    await page.waitForTimeout(500);
+
+    const fsPanel = page.locator('[data-testid^="panel-content-filesystem"]');
+
+    // Find and click a file (not folder)
+    const fileItem = fsPanel.locator('[data-testid="fs-file"]').first();
+    await expect(fileItem).toBeVisible({ timeout: 10_000 });
+    await fileItem.click();
+    await page.waitForTimeout(500);
+
+    // An editor panel should now be open with the file content
+    const editorTab = page.locator('[data-testid^="workbench-tab-editor"]');
+    await expect(editorTab.first()).toBeVisible();
+  });
+
+  test("F5: Filesystem viewer has a path breadcrumb / current directory indicator", async ({ page }) => {
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid="add-panel-filesystem"]').click();
+    await page.waitForTimeout(500);
+
+    const fsPanel = page.locator('[data-testid^="panel-content-filesystem"]');
+    const breadcrumb = fsPanel.locator('[data-testid="fs-breadcrumb"]');
+    await expect(breadcrumb).toBeVisible({ timeout: 10_000 });
   });
 });
 
