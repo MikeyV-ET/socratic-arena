@@ -15,6 +15,7 @@ import { DoppelgangerPane } from "@/components/workbench/DoppelgangerPane";
 import { ChatPanel } from "@/components/workbench/ChatPanel";
 import { SharedEditorPane } from "@/components/editor/SharedEditorPane";
 import { FilesystemPane } from "@/components/workbench/FilesystemPane";
+import { ShellPane } from "@/components/workbench/ShellPane";
 import { FontSizeControl } from "@/components/common/FontSizeControl";
 
 /** Panel types available in the workbench. Singleton types can only have one
@@ -35,6 +36,7 @@ export const PANEL_TYPES = [
   { type: "editor", label: "Editor", multi: true },
   { type: "chat", label: "Chat", multi: true },
   { type: "filesystem", label: "Filesystem", multi: true },
+  { type: "shell", label: "Shell", multi: true },
 ] as const;
 
 export interface WorkbenchPanel {
@@ -96,6 +98,8 @@ function TabContent({ panel }: { panel: WorkbenchPanel }) {
     case "filesystem":
       content = <FilesystemPane />;
       break;
+    case "shell":
+      return <ShellPane instanceId={panel.instanceId} />;
     default:
       content = <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Unknown panel type</div>;
   }
@@ -123,7 +127,7 @@ function TabBar({ activeTab, onSelect }: {
   const openSingletonTypes = new Set(panels.filter((p) => p.instanceId === p.type).map((p) => p.type));
   const closedSingletons = PANEL_TYPES.filter((t) => !t.multi && !openSingletonTypes.has(t.type));
   const multiTypes = PANEL_TYPES.filter((t) => t.multi);
-  const commonTypes = new Set(["history", "notebook", "chat", "editor", "artifact", "app", "filesystem"]);
+  const commonTypes = new Set(["history", "notebook", "chat", "editor", "artifact", "app", "filesystem", "shell"]);
   const primaryMulti = multiTypes.filter((t) => commonTypes.has(t.type));
   const advancedMulti = multiTypes.filter((t) => !commonTypes.has(t.type));
 

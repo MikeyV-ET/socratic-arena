@@ -3389,6 +3389,78 @@ async def load_notebook(body: dict):
     return {"status": "ok", "entries": len(state.notebook.entries)}
 
 
+# --- Shell PTY WebSocket ---
+
+import pty as _pty_mod
+import subprocess
+import struct
+import fcntl
+import termios
+import signal
+
+_pty_sessions: dict[str, dict] = {}
+
+
+@app.websocket("/ws/shell/{session_id}")
+async def shell_websocket(ws: WebSocket, session_id: str):
+    """WebSocket PTY endpoint. Spawns bash and pipes I/O bidirectionally."""
+    await ws.accept()
+
+    master_fd, slave_fd = _pty_mod.openpty()
+    proc = subprocess.Popen(
+        ["bash", "-i"],
+        stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
+        preexec_fn=os.setsid,
+    )
+    os.close(slave_fd)
+
+    _pty_sessions[session_id] = {"fd": master_fd, "pid": proc.pid}
+
+    fcntl.ioctl(master_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+
+    loop = asyncio.get_event_loop()
+
+    async def read_pty():
+        try:
+            while True:
+                data = await loop.run_in_executor(None, lambda: os.read(master_fd, 4096))
+                if not data:
+                    break
+                await ws.send_text(data.decode("utf-8", errors="replace"))
+        except (OSError, WebSocketDisconnect):
+            pass
+
+    read_task = asyncio.create_task(read_pty())
+
+    try:
+        while True:
+            msg = await ws.receive_text()
+            if msg.startswith("\x1b[8;"):
+                parts = msg[4:].rstrip("t").split(";")
+                if len(parts) == 2:
+                    try:
+                        rows, cols = int(parts[0]), int(parts[1])
+                        fcntl.ioctl(master_fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+                    except (ValueError, OSError):
+                        pass
+                continue
+            os.write(master_fd, msg.encode("utf-8"))
+    except WebSocketDisconnect:
+        pass
+    finally:
+        read_task.cancel()
+        try:
+            proc.terminate()
+            proc.wait(timeout=2)
+        except (OSError, subprocess.TimeoutExpired):
+            proc.kill()
+        try:
+            os.close(master_fd)
+        except OSError:
+            pass
+        _pty_sessions.pop(session_id, None)
+
+
 # --- Static file serving (built frontend) ---
 
 DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
