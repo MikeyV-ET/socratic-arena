@@ -905,6 +905,82 @@ test.describe("Filesystem viewer", () => {
 });
 
 // =========================================================================
+// SHARED SHELL
+// =========================================================================
+
+test.describe("Shared shell", () => {
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await waitForWorkbench(page);
+  });
+
+  test("SH1: Can open a shell panel from the tab menu", async ({ page }) => {
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    const addShell = page.locator('[data-testid="add-panel-shell"]');
+    await expect(addShell).toBeVisible();
+    await addShell.click();
+    await page.waitForTimeout(300);
+
+    const shellPanel = page.locator('[data-testid^="panel-content-shell"]');
+    await expect(shellPanel).toBeVisible();
+  });
+
+  test("SH2: Shell panel displays a terminal emulator", async ({ page }) => {
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid="add-panel-shell"]').click();
+    await page.waitForTimeout(500);
+
+    const shellPanel = page.locator('[data-testid^="panel-content-shell"]');
+    await expect(shellPanel).toBeVisible();
+
+    // Should contain a terminal element (xterm.js or similar)
+    const terminal = shellPanel.locator('[data-testid="shell-terminal"]');
+    await expect(terminal).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("SH3: User can type a command and see output", async ({ page }) => {
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid="add-panel-shell"]').click();
+    await page.waitForTimeout(1000);
+
+    const shellPanel = page.locator('[data-testid^="panel-content-shell"]');
+    const terminal = shellPanel.locator('[data-testid="shell-terminal"]');
+    await expect(terminal).toBeVisible({ timeout: 10_000 });
+
+    // Type a simple command
+    await terminal.click();
+    await page.keyboard.type("echo __SH3_TEST_OUTPUT__");
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(1000);
+
+    // Output should appear in the terminal
+    await expect(shellPanel.locator("text=__SH3_TEST_OUTPUT__")).toBeVisible();
+  });
+
+  test("SH4: Can open multiple independent shell sessions", async ({ page }) => {
+    // Open first shell
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid="add-panel-shell"]').click();
+    await page.waitForTimeout(300);
+
+    // Open second shell
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid="add-panel-shell"]').click();
+    await page.waitForTimeout(300);
+
+    // Should have two shell tabs
+    const shellTabs = page.locator('[data-testid^="workbench-tab-shell"]');
+    await expect(shellTabs).toHaveCount(2);
+  });
+});
+
+// =========================================================================
 // LAYOUT DEFAULTS
 // =========================================================================
 
