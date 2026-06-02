@@ -433,6 +433,25 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
     };
   }, [activeDocId]);
 
+  // Auto-create an untitled doc when editor opens with nothing loaded
+  const autoCreated = useRef(false);
+  useEffect(() => {
+    if (activeDocId || autoCreated.current) return;
+    autoCreated.current = true;
+    (async () => {
+      try {
+        const resp = await fetch(`${basePath}/api/docs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: "Untitled", contentType: "markdown" }),
+        });
+        const doc = await resp.json();
+        await refreshDocs();
+        openDoc(doc.id);
+      } catch { /* ignore */ }
+    })();
+  }, [activeDocId, refreshDocs, openDoc]);
+
   // Create a new doc
   const createDoc = async () => {
     const title = newTitle.trim() || "Untitled";

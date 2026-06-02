@@ -47,12 +47,13 @@ interface ArenaState {
   // Workbench panels (right pane) — instance-based
   workbenchPanels: { instanceId: string; type: string; label: string; config: Record<string, any> }[];
   activeTab: string;       // instanceId of active panel
-  splitTab: string | null; // instanceId of split panel
+  pinnedTabs: string[];    // instanceIds of pinned (tiled) panels
   setActiveTab: (instanceId: string) => void;
-  setSplitTab: (instanceId: string | null) => void;
+  pinTab: (instanceId: string) => void;
+  unpinTab: (instanceId: string) => void;
   closeTab: (instanceId: string) => void;
-  openTab: (typeOrInstanceId: string, target?: "main" | "split") => void;
-  addPanel: (type: string, config?: Record<string, any>, target?: "main" | "split") => string;
+  openTab: (typeOrInstanceId: string) => void;
+  addPanel: (type: string, config?: Record<string, any>) => string;
   reorderTabs: (instanceIds: string[]) => void;
   updatePanelConfig: (instanceId: string, config: Record<string, any>) => void;
   updatePanelLabel: (instanceId: string, label: string) => void;
@@ -272,12 +273,17 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
     } catch {}
     return defaultTypes.map((t) => ({ instanceId: t, type: t, label: toLabel(t), config: {} }));
   })(),
-  activeTab: "",
-  splitTab: null,
+  activeTab: localStorage.getItem("sa-active-tab") || "",
+  pinnedTabs: (() => {
+    try {
+      const saved = localStorage.getItem("sa-pinned-tabs");
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [];
+  })(),
 
-  addPanel: (type, config = {}, target) => {
+  addPanel: (type, config = {}) => {
     const state = get();
-    // Always create a new instance — use openTab() to activate an existing singleton
     const instanceId = `${type}-${Math.random().toString(36).slice(2, 8)}`;
     const typeLabel = type.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
     const count = state.workbenchPanels.filter((p) => p.type === type).length;
@@ -285,39 +291,65 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
     const panel = { instanceId, type, label, config };
     const next = [...state.workbenchPanels, panel];
     localStorage.setItem("sa-workbench-panels", JSON.stringify(next));
-    const tabKey = target === "split" ? "splitTab" : "activeTab";
-    set({ workbenchPanels: next, [tabKey]: instanceId });
+    localStorage.setItem("sa-active-tab", instanceId);
+    set({ workbenchPanels: next, activeTab: instanceId });
     return instanceId;
   },
   setActiveTab: (instanceId) => {
+    localStorage.setItem("sa-active-tab", instanceId);
     set({ activeTab: instanceId });
     const panel = get().workbenchPanels.find((p) => p.instanceId === instanceId);
     get().sendWs?.({ type: "viewport.tab_change", payload: { tab: panel?.type ?? instanceId } });
   },
-  setSplitTab: (tab) => set({ splitTab: tab }),
+  pinTab: (instanceId) => {
+    const s = get();
+    if (s.pinnedTabs.includes(instanceId)) return;
+    const next = [...s.pinnedTabs, instanceId];
+    localStorage.setItem("sa-pinned-tabs", JSON.stringify(next));
+    const updates: Partial<ArenaState> = { pinnedTabs: next };
+    // If pinning the active tab, switch active to first non-pinned tab
+    if (s.activeTab === instanceId) {
+      const other = s.workbenchPanels.find((p) => p.instanceId !== instanceId && !next.includes(p.instanceId));
+      if (other) {
+        updates.activeTab = other.instanceId;
+        localStorage.setItem("sa-active-tab", other.instanceId);
+      }
+    }
+    set(updates as any);
+  },
+  unpinTab: (instanceId) => {
+    const s = get();
+    const next = s.pinnedTabs.filter((id) => id !== instanceId);
+    localStorage.setItem("sa-pinned-tabs", JSON.stringify(next));
+    set({ pinnedTabs: next });
+  },
   closeTab: (instanceId) => set((s) => {
     const next = s.workbenchPanels.filter((p) => p.instanceId !== instanceId);
     localStorage.setItem("sa-workbench-panels", JSON.stringify(next));
     const updates: Partial<ArenaState> = { workbenchPanels: next };
-    if (s.activeTab === instanceId) updates.activeTab = next.length > 0 ? next[0].instanceId : "";
-    if (s.splitTab === instanceId) updates.splitTab = null;
+    if (s.activeTab === instanceId) {
+      const newActive = next.length > 0 ? next[0].instanceId : "";
+      updates.activeTab = newActive;
+      localStorage.setItem("sa-active-tab", newActive);
+    }
+    if (s.pinnedTabs.includes(instanceId)) {
+      const nextPinned = s.pinnedTabs.filter((id) => id !== instanceId);
+      localStorage.setItem("sa-pinned-tabs", JSON.stringify(nextPinned));
+      updates.pinnedTabs = nextPinned;
+    }
     return updates as any;
   }),
-  openTab: (typeOrId, target) => {
+  openTab: (typeOrId) => {
     const s = get();
-    const tabKey = target === "split" ? "splitTab" : "activeTab";
-    // If an instance with this ID exists, just activate it
     const byId = s.workbenchPanels.find((p) => p.instanceId === typeOrId);
-    if (byId) { set({ [tabKey]: typeOrId }); return; }
-    // If it's a type name and a singleton exists, activate that
+    if (byId) { set({ activeTab: typeOrId }); return; }
     const byType = s.workbenchPanels.find((p) => p.type === typeOrId);
-    if (byType) { set({ [tabKey]: byType.instanceId }); return; }
-    // Otherwise create it as a singleton-style panel
+    if (byType) { set({ activeTab: byType.instanceId }); return; }
     const label = typeOrId.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
     const panel = { instanceId: typeOrId, type: typeOrId, label, config: {} };
     const next = [...s.workbenchPanels, panel];
     localStorage.setItem("sa-workbench-panels", JSON.stringify(next));
-    set({ workbenchPanels: next, [tabKey]: typeOrId });
+    set({ workbenchPanels: next, activeTab: typeOrId });
   },
   reorderTabs: (instanceIds) => {
     const s = get();

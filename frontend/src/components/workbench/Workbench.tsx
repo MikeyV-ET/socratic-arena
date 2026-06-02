@@ -1,5 +1,4 @@
-import { useState, useRef } from "react";
-import { Panel, Group, Separator } from "react-resizable-panels";
+import { useState, useRef, useCallback } from "react";
 import { useArenaStore } from "@/stores/arenaStore";
 import { NotebookPane } from "@/components/notebook/NotebookPane";
 import { PromptDevPane } from "@/components/prompt/PromptDevPane";
@@ -99,35 +98,26 @@ function TabContent({ panel }: { panel: WorkbenchPanel }) {
   return <div className="h-full overflow-auto" style={{ zoom }}>{content}</div>;
 }
 
-type SplitOrientation = "horizontal" | "vertical";
-
-function TabBar({ activeTab, onSelect, splitControls, paneTarget = "main" }: {
+function TabBar({ activeTab, onSelect }: {
   activeTab: string;
   onSelect: (id: string) => void;
-  paneTarget?: "main" | "split";
-  splitControls: {
-    isSplit: boolean;
-    orientation: SplitOrientation;
-    onSplitH: () => void;
-    onSplitV: () => void;
-    onUnsplit: () => void;
-  };
 }) {
   const panels = useArenaStore((s) => s.workbenchPanels);
+  const pinnedTabs = useArenaStore((s) => s.pinnedTabs);
   const closeTab = useArenaStore((s) => s.closeTab);
   const openTab = useArenaStore((s) => s.openTab);
   const addPanel = useArenaStore((s) => s.addPanel);
+  const pinTab = useArenaStore((s) => s.pinTab);
+  const unpinTab = useArenaStore((s) => s.unpinTab);
   const reorderTabs = useArenaStore((s) => s.reorderTabs);
   const [showMenu, setShowMenu] = useState(false);
   const [dragOver, setDragOver] = useState<string | null>(null);
   const dragSrc = useRef<string | null>(null);
   const didDrag = useRef(false);
 
-  // Closed singleton types (can be re-opened) + multi-instance types (always available)
   const openSingletonTypes = new Set(panels.filter((p) => p.instanceId === p.type).map((p) => p.type));
   const closedSingletons = PANEL_TYPES.filter((t) => !t.multi && !openSingletonTypes.has(t.type));
   const multiTypes = PANEL_TYPES.filter((t) => t.multi);
-  const menuItems = [...closedSingletons, ...multiTypes];
   const commonTypes = new Set(["history", "notebook", "chat", "editor", "artifact", "app"]);
   const primaryMulti = multiTypes.filter((t) => commonTypes.has(t.type));
   const advancedMulti = multiTypes.filter((t) => !commonTypes.has(t.type));
@@ -151,6 +141,16 @@ function TabBar({ activeTab, onSelect, splitControls, paneTarget = "main" }: {
     reorderTabs(ids);
   };
 
+  const handlePopout = (instanceId: string) => {
+    const panel = panels.find((p) => p.instanceId === instanceId);
+    if (!panel) return;
+    const params = new URLSearchParams({ panel: instanceId, type: panel.type });
+    if (panel.config && Object.keys(panel.config).length > 0) {
+      params.set("config", JSON.stringify(panel.config));
+    }
+    window.open(`${window.location.origin}/?${params.toString()}`, `panel-${instanceId}`, "width=800,height=600");
+  };
+
   return (
     <div
       className="flex items-center border-b border-border bg-card px-1"
@@ -158,31 +158,66 @@ function TabBar({ activeTab, onSelect, splitControls, paneTarget = "main" }: {
       onPointerUp={() => { dragSrc.current = null; setDragOver(null); }}
       onPointerLeave={() => { dragSrc.current = null; setDragOver(null); }}
     >
-      {panels.map((panel) => (
-        <div
-          key={panel.instanceId}
-          onPointerDown={(e) => { e.preventDefault(); dragSrc.current = panel.instanceId; didDrag.current = false; }}
-          className={`group flex items-center gap-0.5 px-2 py-1.5 text-xs font-medium transition-colors border-b-2 cursor-pointer select-none ${
-            activeTab === panel.instanceId
-              ? "border-b-primary text-foreground"
-              : "border-b-transparent text-muted-foreground hover:text-foreground"
-          } ${dragOver === panel.instanceId ? "bg-primary/10" : ""}`}
-          onClick={() => { if (!didDrag.current) onSelect(panel.instanceId); }}
-          data-testid={`workbench-tab-${panel.instanceId}`}
-        >
-          <span>{panel.label}</span>
-          <button
-            onClick={(e) => { e.stopPropagation(); closeTab(panel.instanceId); }}
-            className="ml-1 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive text-lg leading-none px-1 py-0.5 transition-opacity"
-            title="Close tab"
-            data-testid={`close-tab-${panel.instanceId}`}
+      {panels.map((panel) => {
+        const isPinned = pinnedTabs.includes(panel.instanceId);
+        return (
+          <div
+            key={panel.instanceId}
+            onPointerDown={(e) => { e.preventDefault(); dragSrc.current = panel.instanceId; didDrag.current = false; }}
+            className={`group flex items-center gap-0.5 px-2 py-1.5 text-xs font-medium transition-colors border-b-2 cursor-pointer select-none ${
+              activeTab === panel.instanceId
+                ? "border-b-primary text-foreground"
+                : isPinned
+                  ? "border-b-primary/50 text-foreground"
+                  : "border-b-transparent text-muted-foreground hover:text-foreground"
+            } ${dragOver === panel.instanceId ? "bg-primary/10" : ""}`}
+            onClick={() => { if (!didDrag.current) onSelect(panel.instanceId); }}
+            data-testid={`workbench-tab-${panel.instanceId}`}
           >
-            &times;
-          </button>
-        </div>
-      ))}
+            <span>{panel.label}</span>
+            {isPinned ? (
+              <button
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); unpinTab(panel.instanceId); }}
+                className="ml-1 text-primary hover:text-foreground text-xs leading-none px-0.5 py-0.5"
+                title="Unpin panel"
+                data-testid="unpin-panel"
+              >
+                &#x1F4CC;
+              </button>
+            ) : (
+              <button
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); pinTab(panel.instanceId); }}
+                className="ml-1 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground text-xs leading-none px-0.5 py-0.5 transition-opacity"
+                title="Pin panel"
+                data-testid="pin-panel"
+              >
+                &#x1F4CC;
+              </button>
+            )}
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); handlePopout(panel.instanceId); }}
+              className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground text-xs leading-none px-0.5 py-0.5 transition-opacity"
+              title="Pop out"
+              data-testid="popout-panel"
+            >
+              &#x2197;
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); closeTab(panel.instanceId); }}
+              className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive text-lg leading-none px-1 py-0.5 transition-opacity"
+              title="Close tab"
+              data-testid={`close-tab-${panel.instanceId}`}
+            >
+              &times;
+            </button>
+          </div>
+        );
+      })}
 
-      {menuItems.length > 0 && (
+      {(
         <div className="relative">
           <button
             onClick={() => setShowMenu(!showMenu)}
@@ -197,7 +232,7 @@ function TabBar({ activeTab, onSelect, splitControls, paneTarget = "main" }: {
               {closedSingletons.map((t) => (
                 <button
                   key={t.type}
-                  onClick={() => { openTab(t.type, paneTarget); setShowMenu(false); }}
+                  onClick={() => { openTab(t.type); setShowMenu(false); }}
                   className="block w-full text-left px-3 py-1 text-xs hover:bg-muted transition-colors"
                   data-testid={`reopen-tab-${t.type}`}
                 >
@@ -210,7 +245,7 @@ function TabBar({ activeTab, onSelect, splitControls, paneTarget = "main" }: {
               {primaryMulti.map((t) => (
                 <button
                   key={t.type}
-                  onClick={() => { addPanel(t.type, {}, paneTarget); setShowMenu(false); }}
+                  onClick={() => { addPanel(t.type); setShowMenu(false); }}
                   className="block w-full text-left px-3 py-1 text-xs hover:bg-muted transition-colors"
                   data-testid={`add-panel-${t.type}`}
                 >
@@ -223,7 +258,7 @@ function TabBar({ activeTab, onSelect, splitControls, paneTarget = "main" }: {
               {advancedMulti.map((t) => (
                 <button
                   key={t.type}
-                  onClick={() => { addPanel(t.type, {}, paneTarget); setShowMenu(false); }}
+                  onClick={() => { addPanel(t.type); setShowMenu(false); }}
                   className="block w-full text-left px-3 py-1 text-xs hover:bg-muted transition-colors text-muted-foreground"
                   data-testid={`add-panel-${t.type}`}
                 >
@@ -237,118 +272,111 @@ function TabBar({ activeTab, onSelect, splitControls, paneTarget = "main" }: {
 
       <div className="flex-1" />
       <FontSizeControl paneId={activeTab} />
-      {splitControls.isSplit ? (
-        <>
-          <button
-            onClick={splitControls.orientation === "vertical" ? splitControls.onSplitH : splitControls.onSplitV}
-            className="px-1.5 py-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-            title={splitControls.orientation === "vertical" ? "Split horizontal" : "Split vertical"}
-          >
-            {splitControls.orientation === "vertical" ? "\u2505" : "\u2507"}
-          </button>
-          <button
-            onClick={splitControls.onUnsplit}
-            className="px-1.5 py-1 text-sm text-muted-foreground hover:text-destructive transition-colors"
-            title="Unsplit"
-          >
-            &times;
-          </button>
-        </>
-      ) : (
-        <>
-          <button
-            onClick={splitControls.onSplitH}
-            className="px-1.5 py-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-            title="Split horizontal (stacked)"
-          >
-            &#x2505;
-          </button>
-          <button
-            onClick={splitControls.onSplitV}
-            className="px-1.5 py-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-            title="Split vertical (side by side)"
-          >
-            &#x2507;
-          </button>
-        </>
-      )}
     </div>
+  );
+}
+
+function TileResizeHandle({ onDrag }: { onDrag: (deltaX: number) => void }) {
+  const startDrag = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const onMove = (ev: MouseEvent) => onDrag(ev.clientX - startX);
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [onDrag]);
+
+  return (
+    <div
+      data-testid="tile-resize-handle"
+      className="w-1.5 cursor-col-resize bg-border/50 hover:bg-accent/60 transition-colors flex-shrink-0"
+      onMouseDown={startDrag}
+    />
   );
 }
 
 export function Workbench() {
   const activeTab = useArenaStore((s) => s.activeTab);
-  const splitTab = useArenaStore((s) => s.splitTab);
+  const pinnedTabs = useArenaStore((s) => s.pinnedTabs);
   const setActiveTab = useArenaStore((s) => s.setActiveTab);
-  const setSplitTab = useArenaStore((s) => s.setSplitTab);
   const panels = useArenaStore((s) => s.workbenchPanels);
-  const [splitOrientation, setSplitOrientation] = useState<SplitOrientation>("vertical");
 
-  const addPanel = useArenaStore((s) => s.addPanel);
-  const startSplit = (orientation: SplitOrientation) => {
-    if (!splitTab) {
-      const other = panels.find((p) => p.instanceId !== activeTab);
-      if (other) {
-        setSplitTab(other.instanceId);
-      } else {
-        const newId = addPanel("notebook", {}, "split");
-        setSplitTab(newId);
-      }
-    }
-    setSplitOrientation(orientation);
-  };
-
-  const splitControls = {
-    isSplit: !!splitTab,
-    orientation: splitOrientation,
-    onSplitH: () => startSplit("vertical"),
-    onSplitV: () => startSplit("horizontal"),
-    onUnsplit: () => setSplitTab(null),
-  };
-
-  const separatorClass = splitOrientation === "vertical"
-    ? "h-1.5 bg-border/50 hover:bg-accent/40 transition-colors cursor-row-resize"
-    : "w-1.5 bg-border/50 hover:bg-accent/40 transition-colors cursor-col-resize";
+  // Visible panels: active + pinned (deduped, preserving order)
+  const visibleIds: string[] = [];
+  if (activeTab) visibleIds.push(activeTab);
+  for (const id of pinnedTabs) {
+    if (!visibleIds.includes(id)) visibleIds.push(id);
+  }
 
   const findPanel = (id: string) => panels.find((p) => p.instanceId === id);
 
-  if (splitTab) {
+  // Track tile widths as percentages (shared equally by default)
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [tileSizes, setTileSizes] = useState<Record<string, number>>({});
+
+  const getSize = (id: string) => tileSizes[id] ?? (100 / visibleIds.length);
+
+  const handleDrag = useCallback((handleIndex: number, deltaX: number) => {
+    if (!containerRef.current) return;
+    const containerWidth = containerRef.current.offsetWidth;
+    const deltaPct = (deltaX / containerWidth) * 100;
+    setTileSizes((prev) => {
+      const leftId = visibleIds[handleIndex];
+      const rightId = visibleIds[handleIndex + 1];
+      const defaultSize = 100 / visibleIds.length;
+      const leftSize = prev[leftId] ?? defaultSize;
+      const rightSize = prev[rightId] ?? defaultSize;
+      const newLeft = Math.max(10, Math.min(leftSize + deltaPct, leftSize + rightSize - 10));
+      const newRight = leftSize + rightSize - newLeft;
+      return { ...prev, [leftId]: newLeft, [rightId]: newRight };
+    });
+  }, [visibleIds]);
+
+  // Single panel — no tiling
+  if (visibleIds.length <= 1) {
     const activePanel = findPanel(activeTab);
-    const splitPanel = findPanel(splitTab);
     return (
       <div className="flex flex-col h-full">
-        <Group orientation={splitOrientation} key={splitOrientation}>
-          <Panel defaultSize={50} minSize={20}>
-            <div className="flex flex-col h-full">
-              <TabBar activeTab={activeTab} onSelect={setActiveTab} splitControls={splitControls} />
-              <div className="flex-1 overflow-hidden">
-                {activePanel && <TabContent panel={activePanel} />}
-              </div>
+        <TabBar activeTab={activeTab} onSelect={setActiveTab} />
+        <div className="flex-1 overflow-hidden relative">
+          {activePanel && (
+            <div data-testid={`panel-content-${activePanel.instanceId}`} className="absolute inset-0">
+              <TabContent panel={activePanel} />
             </div>
-          </Panel>
-          <Separator className={separatorClass} />
-          <Panel defaultSize={50} minSize={20}>
-            <div className="flex flex-col h-full">
-              <TabBar activeTab={splitTab} onSelect={setSplitTab} paneTarget="split" splitControls={splitControls} />
-              <div className="flex-1 overflow-hidden">
-                {splitPanel && <TabContent panel={splitPanel} />}
-              </div>
-            </div>
-          </Panel>
-        </Group>
+          )}
+        </div>
       </div>
     );
   }
 
+  // Tiled layout
   return (
     <div className="flex flex-col h-full">
-      <TabBar activeTab={activeTab} onSelect={setActiveTab} splitControls={splitControls} />
-      <div className="flex-1 overflow-hidden relative">
-        {[...panels].sort((a, b) => a.instanceId.localeCompare(b.instanceId)).map((panel) => (
-          <div key={panel.instanceId} data-instance-id={panel.instanceId} className={`absolute inset-0 ${activeTab === panel.instanceId ? "" : "invisible"}`}>
-            <TabContent panel={panel} />
-          </div>
-        ))}
+      <TabBar activeTab={activeTab} onSelect={setActiveTab} />
+      <div className="flex-1 overflow-hidden flex" ref={containerRef}>
+        {visibleIds.map((id, i) => {
+          const panel = findPanel(id);
+          if (!panel) return null;
+          return (
+            <div key={id} className="contents">
+              {i > 0 && (
+                <TileResizeHandle
+                  onDrag={(dx) => handleDrag(i - 1, dx)}
+                />
+              )}
+              <div
+                data-testid={`panel-content-${panel.instanceId}`}
+                className="overflow-hidden h-full"
+                style={{ width: `${getSize(id)}%`, flexShrink: 0 }}
+              >
+                <TabContent panel={panel} />
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
