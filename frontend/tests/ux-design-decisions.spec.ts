@@ -502,6 +502,26 @@ test.describe("Tiling workspace", () => {
     await expect(firstEditor).toBeVisible();
     await expect(secondEditor).toBeVisible();
   });
+
+  test("W8: Any panel can pop out into its own window", async ({ page, context }) => {
+    await ensureTabs(page, 1);
+
+    // Find popout button on the active tab
+    const activeTab = page.locator('[data-testid^="workbench-tab-"]').first();
+    const popoutButton = activeTab.locator('[data-testid="popout-panel"]');
+    await expect(popoutButton).toBeVisible();
+
+    // Click popout — should open a new window/tab
+    const [popup] = await Promise.all([
+      context.waitForEvent("page"),
+      popoutButton.click(),
+    ]);
+
+    // New window should contain the panel content
+    await popup.waitForLoadState("domcontentloaded");
+    const panelContent = popup.locator('[data-testid^="panel-content-"]');
+    await expect(panelContent).toBeVisible({ timeout: 10_000 });
+  });
 });
 
 // =========================================================================
