@@ -13,6 +13,7 @@ import { EpisodeRunnerPane } from "@/components/workbench/EpisodeRunnerPane";
 import { DoppelgangerPane } from "@/components/workbench/DoppelgangerPane";
 import { ChatPanel } from "@/components/workbench/ChatPanel";
 import { SharedEditorPane } from "@/components/editor/SharedEditorPane";
+import { FilesystemPane } from "@/components/workbench/FilesystemPane";
 
 export function PopoutPanel({ instanceId, type, config }: { instanceId: string; type: string; config: Record<string, any> }) {
   const theme = useArenaStore((s) => s.theme);
@@ -33,6 +34,7 @@ export function PopoutPanel({ instanceId, type, config }: { instanceId: string; 
     case "doppelganger": content = <DoppelgangerPane />; break;
     case "editor": content = <SharedEditorPane instanceId={instanceId} config={config} />; break;
     case "chat": content = <ChatPanel instanceId={instanceId} config={config} />; break;
+    case "filesystem": content = <FilesystemPane />; break;
     default: content = <div className="flex items-center justify-center h-full text-muted-foreground">Unknown panel type</div>;
   }
 

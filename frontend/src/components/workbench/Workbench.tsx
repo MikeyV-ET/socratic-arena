@@ -14,6 +14,7 @@ import { EpisodeRunnerPane } from "@/components/workbench/EpisodeRunnerPane";
 import { DoppelgangerPane } from "@/components/workbench/DoppelgangerPane";
 import { ChatPanel } from "@/components/workbench/ChatPanel";
 import { SharedEditorPane } from "@/components/editor/SharedEditorPane";
+import { FilesystemPane } from "@/components/workbench/FilesystemPane";
 import { FontSizeControl } from "@/components/common/FontSizeControl";
 
 /** Panel types available in the workbench. Singleton types can only have one
@@ -33,6 +34,7 @@ export const PANEL_TYPES = [
   { type: "doppelganger", label: "Doppelganger", multi: true },
   { type: "editor", label: "Editor", multi: true },
   { type: "chat", label: "Chat", multi: true },
+  { type: "filesystem", label: "Filesystem", multi: true },
 ] as const;
 
 export interface WorkbenchPanel {
@@ -91,6 +93,9 @@ function TabContent({ panel }: { panel: WorkbenchPanel }) {
       return <SharedEditorPane instanceId={panel.instanceId} config={panel.config} />;
     case "chat":
       return <ChatPanel instanceId={panel.instanceId} config={panel.config} />;
+    case "filesystem":
+      content = <FilesystemPane />;
+      break;
     default:
       content = <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Unknown panel type</div>;
   }
@@ -118,7 +123,7 @@ function TabBar({ activeTab, onSelect }: {
   const openSingletonTypes = new Set(panels.filter((p) => p.instanceId === p.type).map((p) => p.type));
   const closedSingletons = PANEL_TYPES.filter((t) => !t.multi && !openSingletonTypes.has(t.type));
   const multiTypes = PANEL_TYPES.filter((t) => t.multi);
-  const commonTypes = new Set(["history", "notebook", "chat", "editor", "artifact", "app"]);
+  const commonTypes = new Set(["history", "notebook", "chat", "editor", "artifact", "app", "filesystem"]);
   const primaryMulti = multiTypes.filter((t) => commonTypes.has(t.type));
   const advancedMulti = multiTypes.filter((t) => !commonTypes.has(t.type));
 
@@ -277,10 +282,15 @@ function TabBar({ activeTab, onSelect }: {
 }
 
 function TileResizeHandle({ onDrag }: { onDrag: (deltaX: number) => void }) {
+  const lastX = useRef(0);
   const startDrag = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    const startX = e.clientX;
-    const onMove = (ev: MouseEvent) => onDrag(ev.clientX - startX);
+    lastX.current = e.clientX;
+    const onMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - lastX.current;
+      lastX.current = ev.clientX;
+      onDrag(dx);
+    };
     const onUp = () => {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
@@ -292,7 +302,8 @@ function TileResizeHandle({ onDrag }: { onDrag: (deltaX: number) => void }) {
   return (
     <div
       data-testid="tile-resize-handle"
-      className="w-1.5 cursor-col-resize bg-border/50 hover:bg-accent/60 transition-colors flex-shrink-0"
+      className="w-1.5 bg-border/50 hover:bg-accent/60 transition-colors flex-shrink-0"
+      style={{ cursor: "col-resize" }}
       onMouseDown={startDrag}
     />
   );
