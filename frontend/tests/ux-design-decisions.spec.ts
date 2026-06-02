@@ -344,6 +344,167 @@ test.describe("Split workspace", () => {
 });
 
 // =========================================================================
+// TILING WORKSPACE (replaces split workspace S1-S10)
+// =========================================================================
+
+test.describe("Tiling workspace", () => {
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await waitForWorkbench(page);
+  });
+
+  test("W1: Default workspace shows tabs with one panel visible at a time", async ({ page }) => {
+    // Ensure at least 2 tabs exist
+    await ensureTabs(page, 2);
+    const tabs = page.locator('[data-testid^="workbench-tab-"]');
+    const tabCount = await tabs.count();
+    expect(tabCount).toBeGreaterThanOrEqual(2);
+
+    // Only one panel content area should be visible
+    const visiblePanels = page.locator('[data-testid^="panel-content-"]');
+    await expect(visiblePanels).toHaveCount(1);
+  });
+
+  test("W2: Can pin a panel to make it visible alongside the active tab", async ({ page }) => {
+    await ensureTabs(page, 2);
+
+    // Get the second (non-active) tab
+    const tabs = page.locator('[data-testid^="workbench-tab-"]');
+    const secondTab = tabs.nth(1);
+    const tabId = await secondTab.getAttribute("data-testid");
+
+    // Pin the second tab (right-click or pin button)
+    const pinButton = secondTab.locator('[data-testid="pin-panel"]');
+    await pinButton.click();
+
+    // Now two panel content areas should be visible (tiled)
+    const visiblePanels = page.locator('[data-testid^="panel-content-"]');
+    await expect(visiblePanels).toHaveCount(2);
+  });
+
+  test("W3: Pinned panels tile vertically with a draggable boundary", async ({ page }) => {
+    await ensureTabs(page, 2);
+
+    // Pin second tab to create tiled view
+    const tabs = page.locator('[data-testid^="workbench-tab-"]');
+    const pinButton = tabs.nth(1).locator('[data-testid="pin-panel"]');
+    await pinButton.click();
+
+    // Verify resize handle exists between tiled panels
+    const resizeHandle = page.locator('[data-testid="tile-resize-handle"]');
+    await expect(resizeHandle).toBeVisible();
+
+    // Get initial widths of the two panels
+    const panels = page.locator('[data-testid^="panel-content-"]');
+    const firstBox = await panels.nth(0).boundingBox();
+    expect(firstBox).toBeTruthy();
+    const initialWidth = firstBox!.width;
+
+    // Drag the resize handle to change proportions
+    const handleBox = await resizeHandle.boundingBox();
+    expect(handleBox).toBeTruthy();
+    await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + handleBox!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(handleBox!.x + 80, handleBox!.y + handleBox!.height / 2, { steps: 5 });
+    await page.mouse.up();
+
+    // Verify panel width changed
+    const newBox = await panels.nth(0).boundingBox();
+    expect(newBox).toBeTruthy();
+    expect(newBox!.width).not.toEqual(initialWidth);
+  });
+
+  test("W4: Unpinning a tiled panel returns to single-panel view", async ({ page }) => {
+    await ensureTabs(page, 2);
+
+    // Pin second tab
+    const tabs = page.locator('[data-testid^="workbench-tab-"]');
+    const pinButton = tabs.nth(1).locator('[data-testid="pin-panel"]');
+    await pinButton.click();
+    await expect(page.locator('[data-testid^="panel-content-"]')).toHaveCount(2);
+
+    // Unpin it
+    const unpinButton = tabs.nth(1).locator('[data-testid="unpin-panel"]');
+    await unpinButton.click();
+
+    // Back to single panel
+    await expect(page.locator('[data-testid^="panel-content-"]')).toHaveCount(1);
+  });
+
+  test("W5: Closing a pinned panel causes remaining panels to reflow", async ({ page }) => {
+    await ensureTabs(page, 2);
+
+    // Pin second tab to tile
+    const tabs = page.locator('[data-testid^="workbench-tab-"]');
+    const pinButton = tabs.nth(1).locator('[data-testid="pin-panel"]');
+    await pinButton.click();
+    await expect(page.locator('[data-testid^="panel-content-"]')).toHaveCount(2);
+
+    // Get remaining panel's width before close
+    const panels = page.locator('[data-testid^="panel-content-"]');
+    const firstBefore = await panels.nth(0).boundingBox();
+
+    // Close the second (pinned) tab entirely
+    const closeButton = tabs.nth(1).locator('[data-testid^="close-tab-"]');
+    await closeButton.click();
+    await page.waitForTimeout(300);
+
+    // Should be back to one panel, and it should fill the full width
+    await expect(page.locator('[data-testid^="panel-content-"]')).toHaveCount(1);
+    const firstAfter = await (page.locator('[data-testid^="panel-content-"]').first()).boundingBox();
+    expect(firstAfter).toBeTruthy();
+    expect(firstAfter!.width).toBeGreaterThan(firstBefore!.width);
+  });
+
+  test("W6: Tiled layout persists across page reload", async ({ page }) => {
+    await ensureTabs(page, 2);
+
+    // Pin second tab
+    const tabs = page.locator('[data-testid^="workbench-tab-"]');
+    const pinButton = tabs.nth(1).locator('[data-testid="pin-panel"]');
+    await pinButton.click();
+    await expect(page.locator('[data-testid^="panel-content-"]')).toHaveCount(2);
+
+    // Reload
+    await page.reload();
+    await waitForWorkbench(page);
+
+    // Tiled layout should be restored — two panels visible
+    await expect(page.locator('[data-testid^="panel-content-"]')).toHaveCount(2);
+  });
+
+  test("W7: Two editors can be open side by side", async ({ page }) => {
+    // Open first editor
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid="add-panel-editor"]').click();
+    await page.waitForTimeout(300);
+
+    // Open second editor
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid="add-panel-editor"]').click();
+    await page.waitForTimeout(300);
+
+    // Pin the second editor tab
+    const editorTabs = page.locator('[data-testid^="workbench-tab-editor"]');
+    const pinButton = editorTabs.nth(1).locator('[data-testid="pin-panel"]');
+    await pinButton.click();
+
+    // Two editor panels should be visible simultaneously
+    const editorPanels = page.locator('[data-testid^="panel-content-editor"]');
+    await expect(editorPanels).toHaveCount(2);
+
+    // Each should be independently editable
+    const firstEditor = editorPanels.nth(0).locator('[contenteditable], textarea').first();
+    const secondEditor = editorPanels.nth(1).locator('[contenteditable], textarea').first();
+    await expect(firstEditor).toBeVisible();
+    await expect(secondEditor).toBeVisible();
+  });
+});
+
+// =========================================================================
 // TAB LIFECYCLE
 // =========================================================================
 
