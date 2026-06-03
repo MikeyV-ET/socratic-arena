@@ -1157,7 +1157,6 @@ test.describe("Multi-editor file loading", () => {
       expect(text2).toContain("File Two");
     }
   });
-});
 
   test("B4: Clicking second editor tab switches to its content (not first editor's)", async ({ page }) => {
     // Open two editors

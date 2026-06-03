@@ -173,7 +173,7 @@ function TabBar({ activeTab, onSelect }: {
           <div
             key={panel.instanceId}
             onPointerDown={(e) => { e.preventDefault(); dragSrc.current = panel.instanceId; didDrag.current = false; }}
-            className={`group flex items-center gap-0.5 px-2 py-1.5 text-xs font-medium transition-colors border-b-2 cursor-pointer select-none ${
+            className={`group relative flex items-center gap-0.5 px-2 py-1.5 text-xs font-medium transition-colors border-b-2 cursor-pointer select-none ${
               activeTab === panel.instanceId
                 ? "border-b-primary text-foreground"
                 : isPinned
@@ -183,47 +183,52 @@ function TabBar({ activeTab, onSelect }: {
             onClick={() => { if (!didDrag.current) onSelect(panel.instanceId); }}
             data-testid={`workbench-tab-${panel.instanceId}`}
           >
-            <span>{panel.label}</span>
-            <span data-testid={isPinned ? `unpin-tab-${panel.instanceId}` : `pin-tab-${panel.instanceId}`}>
-            {isPinned ? (
-              <button
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => { e.stopPropagation(); unpinTab(panel.instanceId); }}
-                className="ml-1 text-primary hover:text-foreground text-xs leading-none px-0.5 py-0.5"
-                title="Unpin panel"
-                data-testid="unpin-panel"
-              >
-                &#x1F4CC;
-              </button>
-            ) : (
-              <button
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => { e.stopPropagation(); pinTab(panel.instanceId); }}
-                className="ml-1 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground text-xs leading-none px-0.5 py-0.5 transition-opacity"
-                title="Pin panel"
-                data-testid="pin-panel"
-              >
-                &#x1F4CC;
-              </button>
+            <span className="min-w-16">{panel.label}</span>
+            {isPinned && (
+              <span data-testid={`unpin-tab-${panel.instanceId}`}>
+                <button
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); unpinTab(panel.instanceId); }}
+                  className="ml-1 text-primary hover:text-foreground text-xs leading-none px-0.5 py-0.5"
+                  title="Unpin panel"
+                  data-testid="unpin-panel"
+                >
+                  &#x1F4CC;
+                </button>
+              </span>
             )}
+            <span className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+              {!isPinned && (
+                <span data-testid={`pin-tab-${panel.instanceId}`}>
+                  <button
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => { e.stopPropagation(); pinTab(panel.instanceId); }}
+                    className="text-muted-foreground hover:text-foreground text-xs leading-none px-0.5 py-0.5"
+                    title="Pin panel"
+                    data-testid="pin-panel"
+                  >
+                    &#x1F4CC;
+                  </button>
+                </span>
+              )}
+              <button
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); handlePopout(panel.instanceId); }}
+                className="text-muted-foreground hover:text-foreground text-xs leading-none px-0.5 py-0.5"
+                title="Pop out"
+                data-testid="popout-panel"
+              >
+                &#x2197;
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); closeTab(panel.instanceId); }}
+                className="text-muted-foreground hover:text-destructive text-lg leading-none px-1 py-0.5"
+                title="Close tab"
+                data-testid={`close-tab-${panel.instanceId}`}
+              >
+                &times;
+              </button>
             </span>
-            <button
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => { e.stopPropagation(); handlePopout(panel.instanceId); }}
-              className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground text-xs leading-none px-0.5 py-0.5 transition-opacity"
-              title="Pop out"
-              data-testid="popout-panel"
-            >
-              &#x2197;
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); closeTab(panel.instanceId); }}
-              className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive text-lg leading-none px-1 py-0.5 transition-opacity"
-              title="Close tab"
-              data-testid={`close-tab-${panel.instanceId}`}
-            >
-              &times;
-            </button>
           </div>
         );
       })}
@@ -353,17 +358,27 @@ export function Workbench() {
   }, [visibleIds]);
 
   // Single panel — no tiling
+  // Render ALL panels but hide inactive ones so each has its own component
+  // instance (fixes B4: tab switch shows wrong editor) and state persists
+  // across tab switches (fixes B5: editor content lost after switching away).
   if (visibleIds.length <= 1) {
-    const activePanel = findPanel(activeTab);
     return (
-      <div className="flex flex-col h-full">
+      <div className="flex flex-col h-full" data-layout="single">
         <TabBar activeTab={activeTab} onSelect={setActiveTab} />
         <div className="flex-1 overflow-hidden relative">
-          {activePanel && (
-            <div data-testid={`panel-content-${activePanel.instanceId}`} className="absolute inset-0">
-              <TabContent panel={activePanel} />
-            </div>
-          )}
+          {panels.map((panel) => {
+            const isActive = panel.instanceId === activeTab;
+            return (
+              <div
+                key={panel.instanceId}
+                data-testid={isActive ? `panel-content-${panel.instanceId}` : `panel-hidden-${panel.instanceId}`}
+                className="absolute inset-0"
+                style={{ display: isActive ? undefined : 'none' }}
+              >
+                <TabContent panel={panel} />
+              </div>
+            );
+          })}
         </div>
       </div>
     );
