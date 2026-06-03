@@ -433,24 +433,31 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
     };
   }, [activeDocId]);
 
-  // Auto-create an untitled doc when editor opens with nothing loaded
+  // Open doc from config (e.g. filesystem viewer passing docId) or auto-create untitled
   const autoCreated = useRef(false);
   useEffect(() => {
     if (activeDocId || autoCreated.current) return;
     autoCreated.current = true;
-    (async () => {
-      try {
-        const resp = await fetch(`${basePath}/api/docs`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title: "Untitled", contentType: "markdown" }),
-        });
-        const doc = await resp.json();
+    if (config?.docId) {
+      (async () => {
         await refreshDocs();
-        openDoc(doc.id);
-      } catch { /* ignore */ }
-    })();
-  }, [activeDocId, refreshDocs, openDoc]);
+        openDoc(config.docId);
+      })();
+    } else {
+      (async () => {
+        try {
+          const resp = await fetch(`${basePath}/api/docs`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: "Untitled", contentType: "markdown" }),
+          });
+          const doc = await resp.json();
+          await refreshDocs();
+          openDoc(doc.id);
+        } catch { /* ignore */ }
+      })();
+    }
+  }, [activeDocId, refreshDocs, openDoc, config]);
 
   // Create a new doc
   const createDoc = async () => {

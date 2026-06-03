@@ -957,8 +957,8 @@ test.describe("Shared shell", () => {
     await page.keyboard.press("Enter");
     await page.waitForTimeout(1000);
 
-    // Output should appear in the terminal
-    await expect(shellPanel.locator("text=__SH3_TEST_OUTPUT__")).toBeVisible();
+    // Output should appear in the terminal (check mirror div for plain text)
+    await expect(shellPanel.locator('[data-testid="shell-mirror"]')).toContainText("__SH3_TEST_OUTPUT__", { timeout: 5_000 });
   });
 
   test("SH4: Can open multiple independent shell sessions", async ({ page }) => {
@@ -1227,7 +1227,7 @@ test.describe("Shell panel initialization", () => {
 
     // xterm.js should have rendered something (not blank)
     // The terminal should contain visible DOM elements from xterm rendering
-    const xtermScreen = terminal.locator('.xterm-screen, .xterm-rows');
+    const xtermScreen = terminal.locator('.xterm-screen');
     await expect(xtermScreen).toBeVisible({ timeout: 5_000 });
 
     // Terminal should have at least some content (prompt, etc.)

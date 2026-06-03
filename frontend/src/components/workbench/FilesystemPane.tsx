@@ -61,8 +61,8 @@ export function FilesystemPane() {
         body: JSON.stringify({ path: entry.path }),
       });
       const doc = await resp.json();
-      const instanceId = addPanel("editor");
-      window.dispatchEvent(new CustomEvent("sa-open-doc", { detail: { docId: doc.id || doc.docId } }));
+      const docId = doc.id || doc.docId;
+      addPanel("editor", { docId });
     } catch { /* ignore */ }
   };
 

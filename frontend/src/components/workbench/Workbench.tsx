@@ -184,6 +184,7 @@ function TabBar({ activeTab, onSelect }: {
             data-testid={`workbench-tab-${panel.instanceId}`}
           >
             <span>{panel.label}</span>
+            <span data-testid={isPinned ? `unpin-tab-${panel.instanceId}` : `pin-tab-${panel.instanceId}`}>
             {isPinned ? (
               <button
                 onPointerDown={(e) => e.stopPropagation()}
@@ -205,6 +206,7 @@ function TabBar({ activeTab, onSelect }: {
                 &#x1F4CC;
               </button>
             )}
+            </span>
             <button
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => { e.stopPropagation(); handlePopout(panel.instanceId); }}
@@ -383,11 +385,13 @@ export function Workbench() {
                 />
               )}
               <div
-                data-testid={`panel-content-${panel.instanceId}`}
+                data-testid={`tiled-panel-${panel.instanceId}`}
                 className="overflow-hidden h-full"
                 style={{ width: `${getSize(id)}%`, flexShrink: 0 }}
               >
-                <TabContent panel={panel} />
+                <div data-testid={`panel-content-${panel.instanceId}`} className="h-full">
+                  <TabContent panel={panel} />
+                </div>
               </div>
             </div>
           );

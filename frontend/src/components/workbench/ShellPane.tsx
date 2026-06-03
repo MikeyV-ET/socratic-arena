@@ -37,23 +37,6 @@ export function ShellPane({ instanceId }: { instanceId: string }) {
     fitAddon.fit();
     termRef.current = term;
 
-    // Suppress xterm's DOM text so Playwright text= only matches the mirror div.
-    // xterm v5 base uses DOM rendering — row spans contain textContent that
-    // conflicts with our single-source mirror div.
-    let suppressing = false;
-    const xtermRows = containerRef.current.querySelector('.xterm-rows');
-    const textSuppressor = xtermRows ? new MutationObserver(() => {
-      if (suppressing) return;
-      suppressing = true;
-      xtermRows.querySelectorAll('span').forEach(s => {
-        if (s.textContent) s.textContent = '';
-      });
-      suppressing = false;
-    }) : null;
-    textSuppressor?.observe(xtermRows!, {
-      childList: true, subtree: true, characterData: true,
-    });
-
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = basePath ? new URL(basePath, window.location.href).host : window.location.host;
     const wsUrl = `${proto}//${host}/ws/shell/${instanceId}`;
@@ -105,7 +88,6 @@ export function ShellPane({ instanceId }: { instanceId: string }) {
     ro.observe(containerRef.current);
 
     return () => {
-      textSuppressor?.disconnect();
       ro.disconnect();
       ws.close();
       wsRef.current = null;
@@ -123,20 +105,22 @@ export function ShellPane({ instanceId }: { instanceId: string }) {
         ref={containerRef}
         className="h-full w-full"
         tabIndex={-1}
-      />
-      <div
-        ref={mirrorRef}
-        data-testid="shell-mirror"
-        style={{
-          position: "absolute",
-          bottom: 0,
-          left: 0,
-          width: "1px",
-          height: "1px",
-          overflow: "hidden",
-          opacity: 0.01,
-        }}
-      />
+      >
+        <div
+          ref={mirrorRef}
+          data-testid="shell-mirror"
+          style={{
+            position: "absolute",
+            bottom: 0,
+            left: 0,
+            width: "1px",
+            height: "1px",
+            overflow: "hidden",
+            opacity: 0.01,
+            pointerEvents: "none",
+          }}
+        />
+      </div>
     </div>
   );
 }
