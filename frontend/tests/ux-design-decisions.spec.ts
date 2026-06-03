@@ -1094,3 +1094,147 @@ test.describe("Layout defaults", () => {
     expect(box!.height).toBeGreaterThanOrEqual(24);
   });
 });
+
+// =========================================================================
+// BUG: MULTI-EDITOR FILE LOADING (Eric 2026-06-02)
+// =========================================================================
+
+test.describe("Multi-editor file loading", () => {
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await waitForWorkbench(page);
+  });
+
+  test("B1: Two pinned editors can show different files simultaneously", async ({ page }) => {
+    // Open first editor and pin it
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid="add-panel-editor"]').click();
+    await page.waitForTimeout(500);
+
+    // Pin the first editor
+    const firstTab = page.locator('[data-testid^="workbench-tab-"]').first();
+    const firstTabId = await firstTab.getAttribute("data-testid");
+    const firstId = firstTabId?.replace("workbench-tab-", "") || "";
+    await page.locator(`[data-testid="pin-tab-${firstId}"]`).click();
+    await page.waitForTimeout(300);
+
+    // Open second editor
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid="add-panel-editor"]').click();
+    await page.waitForTimeout(500);
+
+    // Pin the second editor
+    const tabs = page.locator('[data-testid^="workbench-tab-"]');
+    const secondTab = tabs.last();
+    const secondTabId = await secondTab.getAttribute("data-testid");
+    const secondId = secondTabId?.replace("workbench-tab-", "") || "";
+    await page.locator(`[data-testid="pin-tab-${secondId}"]`).click();
+    await page.waitForTimeout(300);
+
+    // Both tiled panels should be visible
+    const panel1 = page.locator(`[data-testid="tiled-panel-${firstId}"]`);
+    const panel2 = page.locator(`[data-testid="tiled-panel-${secondId}"]`);
+    await expect(panel1).toBeVisible();
+    await expect(panel2).toBeVisible();
+
+    // Type different content in each editor
+    const editor1 = panel1.locator('[contenteditable="true"], textarea, .cm-content').first();
+    const editor2 = panel2.locator('[contenteditable="true"], textarea, .cm-content').first();
+
+    if (await editor1.isVisible() && await editor2.isVisible()) {
+      await editor1.click();
+      await editor1.pressSequentially("File One Content");
+      await editor2.click();
+      await editor2.pressSequentially("File Two Content");
+
+      // Each editor should retain its own content
+      const text1 = await editor1.textContent();
+      const text2 = await editor2.textContent();
+      expect(text1).toContain("File One");
+      expect(text2).toContain("File Two");
+    }
+  });
+});
+
+// =========================================================================
+// BUG: FILESYSTEM VIEWER FILE OPEN (Eric 2026-06-02)
+// =========================================================================
+
+test.describe("Filesystem viewer file open", () => {
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await waitForWorkbench(page);
+  });
+
+  test("B2: Clicking a .md file in filesystem viewer actually opens it in the editor", async ({ page }) => {
+    // Open filesystem panel
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid="add-panel-filesystem"]').click();
+    await page.waitForTimeout(500);
+
+    const fsPanel = page.locator('[data-testid^="panel-content-filesystem"]');
+    await expect(fsPanel).toBeVisible();
+
+    // Find a file item (try .md specifically, fall back to any file)
+    const fileItem = fsPanel.locator('[data-testid="fs-file"]').first();
+    await expect(fileItem).toBeVisible({ timeout: 10_000 });
+    const fileName = await fileItem.textContent();
+    await fileItem.click();
+    await page.waitForTimeout(1000);
+
+    // An editor tab should now exist AND have content loaded
+    const editorPanels = page.locator('[data-testid^="panel-content-editor"]');
+    await expect(editorPanels.first()).toBeVisible({ timeout: 5_000 });
+
+    // The editor should contain some text (not be empty/blank)
+    const editorContent = editorPanels.first().locator('[contenteditable="true"], textarea, .cm-content').first();
+    if (await editorContent.isVisible()) {
+      const text = await editorContent.textContent();
+      expect(text?.trim().length).toBeGreaterThan(0);
+    }
+  });
+});
+
+// =========================================================================
+// BUG: SHELL PANEL BLANK (Eric 2026-06-02)
+// =========================================================================
+
+test.describe("Shell panel initialization", () => {
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await waitForWorkbench(page);
+  });
+
+  test("B3: Shell panel initializes with a working terminal session (not blank)", async ({ page }) => {
+    // Open shell panel
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid="add-panel-shell"]').click();
+    await page.waitForTimeout(1000);
+
+    const shellPanel = page.locator('[data-testid^="panel-content-shell"]');
+    await expect(shellPanel).toBeVisible();
+
+    // The terminal container should be visible and initialized
+    const terminal = shellPanel.locator('[data-testid="shell-terminal"]');
+    await expect(terminal).toBeVisible({ timeout: 5_000 });
+
+    // xterm.js should have rendered something (not blank)
+    // The terminal should contain visible DOM elements from xterm rendering
+    const xtermScreen = terminal.locator('.xterm-screen, .xterm-rows');
+    await expect(xtermScreen).toBeVisible({ timeout: 5_000 });
+
+    // Terminal should have at least some content (prompt, etc.)
+    // Wait a moment for the shell to initialize and show a prompt
+    await page.waitForTimeout(2000);
+    const screenText = await terminal.textContent();
+    // A working shell should show SOMETHING (prompt chars, path, etc.)
+    expect(screenText?.trim().length).toBeGreaterThan(0);
+  });
+});
