@@ -3461,6 +3461,65 @@ async def shell_websocket(ws: WebSocket, session_id: str):
         _pty_sessions.pop(session_id, None)
 
 
+# --- Adapter process management ---
+# Tracks arena_adapter.py subprocesses per agent
+
+import subprocess as _sp
+import signal as _signal
+
+_adapter_procs: dict[str, _sp.Popen] = {}  # agent_name -> Popen
+
+def _adapter_script() -> str:
+    return str(Path(__file__).resolve().parent / "arena_adapter.py")
+
+def _arena_url() -> str:
+    port = os.environ.get("SA_BACKEND_PORT", "8000")
+    return f"http://localhost:{port}"
+
+@app.get("/api/adapter/connections")
+async def adapter_connections():
+    """Return which agents have active arena adapters."""
+    # Clean up dead processes
+    for name in list(_adapter_procs):
+        if _adapter_procs[name].poll() is not None:
+            del _adapter_procs[name]
+    return {"connected": list(_adapter_procs.keys())}
+
+@app.post("/api/adapter/connect/{agent_name}")
+async def adapter_connect(agent_name: str):
+    """Spawn an arena_adapter.py for the given agent."""
+    # Clean stale entry
+    if agent_name in _adapter_procs:
+        if _adapter_procs[agent_name].poll() is None:
+            return {"status": "already_connected", "agent": agent_name}
+        del _adapter_procs[agent_name]
+
+    script = _adapter_script()
+    if not Path(script).exists():
+        return {"status": "error", "message": "arena_adapter.py not found"}
+
+    proc = _sp.Popen(
+        ["python3", "-u", script, "--agent", agent_name, "--arena-url", _arena_url()],
+        stdout=open(f"/tmp/sa_adapter_{agent_name}.log", "a"),
+        stderr=_sp.STDOUT,
+        preexec_fn=os.setsid,
+    )
+    _adapter_procs[agent_name] = proc
+    return {"status": "connected", "agent": agent_name, "pid": proc.pid}
+
+@app.post("/api/adapter/disconnect/{agent_name}")
+async def adapter_disconnect(agent_name: str):
+    """Kill the arena adapter for the given agent."""
+    proc = _adapter_procs.pop(agent_name, None)
+    if proc is None or proc.poll() is not None:
+        return {"status": "not_connected", "agent": agent_name}
+    try:
+        os.killpg(os.getpgid(proc.pid), _signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    return {"status": "disconnected", "agent": agent_name}
+
+
 # --- Static file serving (built frontend) ---
 
 DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"

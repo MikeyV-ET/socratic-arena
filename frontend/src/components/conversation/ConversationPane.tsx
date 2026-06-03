@@ -86,11 +86,12 @@ function CompactionIndicator({ compaction }: { compaction: any | null }) {
   );
 }
 
-function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, paneId, toggleTheme, theme, contextPct, connected, chatSide, toggleChatSide, userColor, agentColor, setUserColor, setAgentColor }: {
+function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, paneId, toggleTheme, theme, contextPct, connected, chatSide, toggleChatSide, userColor, agentColor, setUserColor, setAgentColor, connectedAdapters, onRefreshConnections }: {
   agents: any[]; currentAgent: string; switching: boolean; onAgentSwitch: (name: string) => void;
   paneId: string; toggleTheme: () => void; theme: string; contextPct: number | null; connected: boolean;
   chatSide: "left" | "right"; toggleChatSide: () => void;
   userColor: string; agentColor: string; setUserColor: (c: string) => void; setAgentColor: (c: string) => void;
+  connectedAdapters: string[]; onRefreshConnections: () => void;
 }) {
   const [showSettings, setShowSettings] = useState(false);
   const healthDot = (status: string | null) =>
@@ -119,6 +120,23 @@ function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, paneId
           return <div className={`w-1.5 h-1.5 rounded-full ${healthDot(a.healthStatus)}`} title={a.healthStatus || "offline"} />;
         })()}
         {switching && <span className="text-[10px] text-muted-foreground animate-pulse">...</span>}
+        {currentAgent && (() => {
+          const isConnected = connectedAdapters.includes(currentAgent);
+          const toggle = () => {
+            const action = isConnected ? "disconnect" : "connect";
+            fetch(`${basePath}/api/adapter/${action}/${currentAgent}`, { method: "POST" })
+              .then(() => onRefreshConnections());
+          };
+          return (
+            <button
+              onClick={toggle}
+              className={`px-1 py-0.5 text-[10px] rounded border transition-colors ${isConnected ? "text-success border-success/30 hover:bg-success/10" : "text-muted-foreground border-border hover:bg-muted"}`}
+              title={isConnected ? `Disconnect ${currentAgent} from SA` : `Connect ${currentAgent} to SA`}
+            >
+              {isConnected ? "\u26A1 linked" : "\u26D4 link"}
+            </button>
+          );
+        })()}
       </div>
       <div className="flex items-center gap-2">
         <FontSizeControl paneId={paneId} />
@@ -249,6 +267,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   const [showJumpButton, setShowJumpButton] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [contextPct, setContextPct] = useState<number | null>(null);
+  const [connectedAdapters, setConnectedAdapters] = useState<string[]>([]);
   const prevRootId = useRef<string | null>(null);
 
   // === Batch/Windowed Virtualizer Experiment (Eric's proposal) ===
@@ -515,13 +534,21 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
       .catch(() => {});
   }, [basePath, currentAgent, setAgents, setCurrentAgent]);
 
+  const fetchConnections = useCallback(() => {
+    fetch(`${basePath}/api/adapter/connections`)
+      .then((r) => r.json())
+      .then((d) => setConnectedAdapters(d.connected ?? []))
+      .catch(() => {});
+  }, [basePath]);
+
   useEffect(() => {
     if (readOnly) return;
     fetchAgents();
     fetchContext();
-    const iv = setInterval(() => { fetchContext(); fetchAgents(); }, 15_000);
+    fetchConnections();
+    const iv = setInterval(() => { fetchContext(); fetchAgents(); fetchConnections(); }, 15_000);
     return () => clearInterval(iv);
-  }, [readOnly, fetchAgents, fetchContext, currentAgent]);
+  }, [readOnly, fetchAgents, fetchContext, fetchConnections, currentAgent]);
 
   const handleAgentSwitch = useCallback((agentName: string) => {
     if (agentName === currentAgent || switching) return;
@@ -886,7 +913,7 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   const stickyHeader = (
     <div className="sticky top-0 z-10 bg-background">
       {historyHeader}
-      {!readOnly && <LivePaneHeader agents={agents} currentAgent={currentAgent} switching={switching} onAgentSwitch={handleAgentSwitch} paneId={paneId} toggleTheme={toggleTheme} theme={theme} contextPct={contextPct} connected={connected} chatSide={chatSide} toggleChatSide={toggleChatSide} userColor={userColor} agentColor={agentColor} setUserColor={setUserColor} setAgentColor={setAgentColor} />}
+      {!readOnly && <LivePaneHeader agents={agents} currentAgent={currentAgent} switching={switching} onAgentSwitch={handleAgentSwitch} paneId={paneId} toggleTheme={toggleTheme} theme={theme} contextPct={contextPct} connected={connected} chatSide={chatSide} toggleChatSide={toggleChatSide} userColor={userColor} agentColor={agentColor} setUserColor={setUserColor} setAgentColor={setAgentColor} connectedAdapters={connectedAdapters} onRefreshConnections={fetchConnections} />}
     </div>
   );
 
