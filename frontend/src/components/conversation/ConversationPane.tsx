@@ -124,7 +124,8 @@ function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, paneId
           const isConnected = connectedAdapters.includes(currentAgent);
           const toggle = () => {
             const action = isConnected ? "disconnect" : "connect";
-            fetch(`${basePath}/api/adapter/${action}/${currentAgent}`, { method: "POST" })
+            const bp = window.location.pathname.replace(/\/+$/, "");
+            fetch(`${bp}/api/adapter/${action}/${currentAgent}`, { method: "POST" })
               .then(() => onRefreshConnections());
           };
           return (

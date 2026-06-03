@@ -1303,7 +1303,15 @@ test.describe("Adapter connect/disconnect", () => {
 
     await page.reload();
     await waitForWorkbench(page);
-    await page.waitForTimeout(1000);
+
+    // Select Trip as the current agent (mock returns Trip as connected)
+    const agentSelect = page.locator("select").first();
+    await expect(agentSelect).toBeVisible({ timeout: 5_000 });
+    const tripOpt = agentSelect.locator('option[value="Trip"]');
+    if (await tripOpt.count() > 0) {
+      await agentSelect.selectOption("Trip");
+      await page.waitForTimeout(1000);
+    }
 
     // The button should show "linked" state (⚡ linked)
     const linkedBtn = page.locator('button').filter({ hasText: /linked/ });
@@ -1331,7 +1339,15 @@ test.describe("Adapter connect/disconnect", () => {
 
     await page.reload();
     await waitForWorkbench(page);
-    await page.waitForTimeout(1000);
+
+    // Select Trip as the current agent
+    const agentSelect = page.locator("select").first();
+    await expect(agentSelect).toBeVisible({ timeout: 5_000 });
+    const tripOpt = agentSelect.locator('option[value="Trip"]');
+    if (await tripOpt.count() > 0) {
+      await agentSelect.selectOption("Trip");
+      await page.waitForTimeout(1000);
+    }
 
     // Find the linked button and click to disconnect
     const linkedBtn = page.locator('button').filter({ hasText: /linked/ });
