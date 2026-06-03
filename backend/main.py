@@ -3486,7 +3486,7 @@ async def adapter_connections():
     return {"connected": list(_adapter_procs.keys())}
 
 @app.post("/api/adapter/connect/{agent_name}")
-async def adapter_connect(agent_name: str):
+async def adapter_connect(agent_name: str, request: Request):
     """Spawn an arena_adapter.py for the given agent."""
     # Clean stale entry
     if agent_name in _adapter_procs:
@@ -3498,8 +3498,11 @@ async def adapter_connect(agent_name: str):
     if not Path(script).exists():
         return {"status": "error", "message": "arena_adapter.py not found"}
 
+    # Derive arena URL from the request so adapter connects to the right server
+    arena_url = f"http://localhost:{request.url.port or 8000}"
+
     proc = _sp.Popen(
-        ["python3", "-u", script, "--agent", agent_name, "--arena-url", _arena_url()],
+        ["python3", "-u", script, "--agent", agent_name, "--arena-url", arena_url],
         stdout=open(f"/tmp/sa_adapter_{agent_name}.log", "a"),
         stderr=_sp.STDOUT,
         preexec_fn=os.setsid,
