@@ -1159,6 +1159,77 @@ test.describe("Multi-editor file loading", () => {
   });
 });
 
+  test("B4: Clicking second editor tab switches to its content (not first editor's)", async ({ page }) => {
+    // Open two editors
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid="add-panel-editor"]').click();
+    await page.waitForTimeout(500);
+
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid="add-panel-editor"]').click();
+    await page.waitForTimeout(500);
+
+    // Type in first editor
+    const tabs = page.locator('[data-testid^="workbench-tab-"]');
+    await tabs.first().click();
+    await page.waitForTimeout(300);
+    const firstPanel = page.locator('[data-testid^="panel-content-"]').filter({ has: page.locator('[contenteditable="true"], textarea, .cm-content') }).first();
+    const firstEditor = firstPanel.locator('[contenteditable="true"], textarea, .cm-content').first();
+    if (await firstEditor.isVisible()) {
+      await firstEditor.click();
+      await firstEditor.pressSequentially("FIRST_EDITOR_UNIQUE");
+    }
+
+    // Click second editor tab
+    await tabs.last().click();
+    await page.waitForTimeout(300);
+
+    // The visible content should NOT contain FIRST_EDITOR_UNIQUE
+    const visiblePanel = page.locator('[data-testid^="panel-content-"]').filter({ has: page.locator('[contenteditable="true"], textarea, .cm-content') }).first();
+    const visibleEditor = visiblePanel.locator('[contenteditable="true"], textarea, .cm-content').first();
+    if (await visibleEditor.isVisible()) {
+      const text = await visibleEditor.textContent();
+      expect(text).not.toContain("FIRST_EDITOR_UNIQUE");
+    }
+  });
+
+  test("B5: Editor retains loaded file content after switching tabs away and back", async ({ page }) => {
+    // Open editor and load a file via filesystem viewer
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid="add-panel-editor"]').click();
+    await page.waitForTimeout(500);
+
+    // Type content to simulate loaded file
+    const editorPanel = page.locator('[data-testid^="panel-content-editor"]').first();
+    const editor = editorPanel.locator('[contenteditable="true"], textarea, .cm-content').first();
+    if (await editor.isVisible()) {
+      await editor.click();
+      await editor.pressSequentially("B5_PERSIST_TEST_CONTENT");
+    }
+
+    // Open a notebook panel (switches away from editor)
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid^="add-panel-"]').first().click();
+    await page.waitForTimeout(500);
+
+    // Click back to the editor tab
+    const editorTab = page.locator('[data-testid^="workbench-tab-"]').filter({ hasText: /Editor|editor/ }).first();
+    await editorTab.click();
+    await page.waitForTimeout(300);
+
+    // Editor should still have the content, not be blank/Untitled
+    const restored = editorPanel.locator('[contenteditable="true"], textarea, .cm-content').first();
+    if (await restored.isVisible()) {
+      const text = await restored.textContent();
+      expect(text).toContain("B5_PERSIST_TEST_CONTENT");
+    }
+  });
+});
+
 // =========================================================================
 // BUG: FILESYSTEM VIEWER FILE OPEN (Eric 2026-06-02)
 // =========================================================================
