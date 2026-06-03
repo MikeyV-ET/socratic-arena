@@ -1211,7 +1211,7 @@ test.describe("Shell panel initialization", () => {
     await waitForWorkbench(page);
   });
 
-  test("B3: Shell panel initializes with a working terminal session (not blank)", async ({ page }) => {
+  test("B3: Shell panel initializes with a working terminal session (not blank) [needs backend]", async ({ page }) => {
     // Open shell panel
     await page.locator('[data-testid="open-tab-menu"]').click();
     await page.waitForTimeout(300);
@@ -1236,5 +1236,109 @@ test.describe("Shell panel initialization", () => {
     const screenText = await terminal.textContent();
     // A working shell should show SOMETHING (prompt chars, path, etc.)
     expect(screenText?.trim().length).toBeGreaterThan(0);
+  });
+});
+
+// =========================================================================
+// ADAPTER CONNECT/DISCONNECT (Q's 2821b92)
+// =========================================================================
+
+test.describe("Adapter connect/disconnect", () => {
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await waitForWorkbench(page);
+  });
+
+  test("AC1: Link/unlink button is visible in conversation header when agent is selected", async ({ page }) => {
+    // The ConversationPane header should show a link/unlink button
+    // Button has title containing "Connect" or "Disconnect" + agent name
+    const linkBtn = page.locator('button').filter({ hasText: /link/ });
+    await expect(linkBtn).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("AC2: Clicking 'link' button sends connect API call [needs backend]", async ({ page }) => {
+    // Intercept the connect API call
+    let connectCalled = false;
+    let connectedAgent = "";
+    await page.route("**/api/adapter/connect/*", async (route) => {
+      connectCalled = true;
+      connectedAgent = route.request().url().split("/").pop() || "";
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "connected", agent: connectedAgent, pid: 99999 }),
+      });
+    });
+    // Mock connections endpoint to return empty initially
+    await page.route("**/api/adapter/connections", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ connected: connectCalled ? [connectedAgent] : [] }),
+      });
+    });
+
+    await page.reload();
+    await waitForWorkbench(page);
+
+    // Find the unlinked button and click it
+    const linkBtn = page.locator('button').filter({ hasText: /link/ }).first();
+    await expect(linkBtn).toBeVisible({ timeout: 10_000 });
+    await linkBtn.click();
+    await page.waitForTimeout(500);
+
+    expect(connectCalled).toBe(true);
+  });
+
+  test("AC3: Connected agent shows 'linked' state", async ({ page }) => {
+    // Mock connections endpoint to return an agent as connected
+    await page.route("**/api/adapter/connections", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ connected: ["Trip"] }),
+      });
+    });
+
+    await page.reload();
+    await waitForWorkbench(page);
+    await page.waitForTimeout(1000);
+
+    // The button should show "linked" state (⚡ linked)
+    const linkedBtn = page.locator('button').filter({ hasText: /linked/ });
+    await expect(linkedBtn).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("AC4: Clicking 'linked' button sends disconnect API call [needs backend]", async ({ page }) => {
+    let disconnectCalled = false;
+    // Start with agent connected
+    await page.route("**/api/adapter/connections", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ connected: disconnectCalled ? [] : ["Trip"] }),
+      });
+    });
+    await page.route("**/api/adapter/disconnect/*", async (route) => {
+      disconnectCalled = true;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "disconnected", agent: "Trip" }),
+      });
+    });
+
+    await page.reload();
+    await waitForWorkbench(page);
+    await page.waitForTimeout(1000);
+
+    // Find the linked button and click to disconnect
+    const linkedBtn = page.locator('button').filter({ hasText: /linked/ });
+    await expect(linkedBtn).toBeVisible({ timeout: 10_000 });
+    await linkedBtn.click();
+    await page.waitForTimeout(500);
+
+    expect(disconnectCalled).toBe(true);
   });
 });
