@@ -497,10 +497,12 @@ def search_updates(filepath: str, query: str, limit: int = 50, agent_label: str 
 
             if su == "user_message_chunk":
                 # Flush pending agent
-                if current_agent and query_lower in current_agent["content"].lower():
-                    results.append(current_agent)
-                    if len(results) >= limit:
-                        break
+                if current_agent:
+                    combined = current_agent.get("content", "") + current_agent.get("thinking", "") + current_agent.get("tool_text", "")
+                    if query_lower in combined.lower():
+                        results.append(current_agent)
+                        if len(results) >= limit:
+                            break
                 current_agent = None
 
                 text = update.get("content", {}).get("text", "")
@@ -520,40 +522,80 @@ def search_updates(filepath: str, query: str, limit: int = 50, agent_label: str 
                     if len(results) >= limit:
                         break
 
+            elif su == "agent_thought_chunk":
+                text = update.get("content", {}).get("text", "")
+                if not text.strip():
+                    continue
+                if current_agent and current_agent.get("_turn_ts") == ts:
+                    current_agent.setdefault("thinking", "")
+                    current_agent["thinking"] += text
+                else:
+                    if current_agent and query_lower in (current_agent["content"] + current_agent.get("thinking", "")).lower():
+                        results.append(current_agent)
+                        if len(results) >= limit:
+                            break
+                    current_agent = {
+                        "id": event_id or new_id(),
+                        "role": "assistant",
+                        "content": "",
+                        "thinking": text,
+                        "offset": line_offset,
+                        "timestamp": ts * 1000,
+                        "_turn_ts": ts,
+                    }
+
+            elif su == "tool_call":
+                tool_name = update.get("title", "") or update.get("toolName", "")
+                if current_agent:
+                    current_agent.setdefault("tool_text", "")
+                    current_agent["tool_text"] += f" {tool_name}"
+
+            elif su == "tool_call_update":
+                text = update.get("content", {}).get("text", "") if isinstance(update.get("content"), dict) else str(update.get("content", ""))
+                if current_agent and text.strip():
+                    current_agent.setdefault("tool_text", "")
+                    current_agent["tool_text"] += f" {text}"
+
             elif su == "agent_message_chunk":
                 text = update.get("content", {}).get("text", "")
                 if current_agent and current_agent.get("_turn_ts") == ts:
                     current_agent["content"] += text
                 else:
-                    if current_agent and query_lower in current_agent["content"].lower():
+                    if current_agent and query_lower in (current_agent["content"] + current_agent.get("thinking", "") + current_agent.get("tool_text", "")).lower():
                         results.append(current_agent)
                         if len(results) >= limit:
                             break
-                    content = text
-                    idx = content.lower().find(query_lower)
                     current_agent = {
                         "id": event_id or new_id(),
                         "role": "assistant",
-                        "content": content,
+                        "content": text,
                         "offset": line_offset,
                         "timestamp": ts * 1000,
                         "_turn_ts": ts,
                     }
-                    current_agent_offset = line_offset
 
         # Flush final agent
-        if current_agent and query_lower in current_agent["content"].lower() and len(results) < limit:
-            results.append(current_agent)
+        if current_agent and len(results) < limit:
+            combined = current_agent.get("content", "") + current_agent.get("thinking", "") + current_agent.get("tool_text", "")
+            if query_lower in combined.lower():
+                results.append(current_agent)
 
     # Build snippets for agent messages and clean up
     for r in results:
-        if "content" in r and "snippet" not in r:
-            text = r["content"]
-            idx = text.lower().index(query_lower)
-            start = max(0, idx - 40)
-            end = min(len(text), idx + len(query) + 40)
-            r["snippet"] = ("..." if start > 0 else "") + text[start:end] + ("..." if end < len(text) else "")
+        if "snippet" not in r:
+            # Search across content, thinking, and tool_text for the match
+            for field in ("content", "thinking", "tool_text"):
+                text = r.get(field, "")
+                if text and query_lower in text.lower():
+                    idx = text.lower().index(query_lower)
+                    start = max(0, idx - 40)
+                    end = min(len(text), idx + len(query) + 40)
+                    prefix = "[thinking] " if field == "thinking" else "[tool] " if field == "tool_text" else ""
+                    r["snippet"] = prefix + ("..." if start > 0 else "") + text[start:end] + ("..." if end < len(text) else "")
+                    break
         r.pop("content", None)
+        r.pop("thinking", None)
+        r.pop("tool_text", None)
         r.pop("_turn_ts", None)
 
     return results
