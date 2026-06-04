@@ -411,6 +411,16 @@ export function Workbench() {
             </div>
           );
         })}
+        {/* Render non-visible panels hidden to preserve component state (B9 fix) */}
+        {panels.filter((p) => !visibleIds.includes(p.instanceId)).map((panel) => (
+          <div
+            key={panel.instanceId}
+            data-testid={`panel-hidden-${panel.instanceId}`}
+            style={{ display: 'none' }}
+          >
+            <TabContent panel={panel} />
+          </div>
+        ))}
       </div>
     </div>
   );
