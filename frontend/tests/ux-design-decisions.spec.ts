@@ -796,16 +796,16 @@ test.describe("Editor table of contents", () => {
     await editorOption.click();
     await page.waitForTimeout(1000);
 
-    // Insert content via insertText (fast + triggers Yjs)
+    // Insert enough content to overflow the preview pane (markdown collapses lines)
     const cmContent6 = page.locator('[data-testid="shared-editor"] .cm-content');
     await cmContent6.click();
     const content6 = [
       "# Top Section", "",
-      ...Array(30).fill("Filler line to create scrollable content."), "",
+      ...Array(60).fill(null).map((_, i) => `Paragraph ${i+1}: This is a filler paragraph with enough unique text to prevent collapsing. It needs to be long enough that the rendered markdown preview exceeds the viewport height.`), "",
       "# Middle Section", "",
-      ...Array(30).fill("More filler to push content below the fold."), "",
+      ...Array(60).fill(null).map((_, i) => `Middle paragraph ${i+1}: More unique filler text to push content well below the fold in the preview pane.`), "",
       "# Bottom Section", "",
-      ...Array(10).fill("Final filler text."),
+      ...Array(20).fill(null).map((_, i) => `Bottom paragraph ${i+1}: Final section filler text.`),
     ].join("\n");
     await page.keyboard.press("Control+a");
     await page.evaluate((text) => { document.execCommand("insertText", false, text); }, content6);
@@ -847,7 +847,7 @@ test.describe("Editor table of contents", () => {
     await cmContent7.click();
     const content7 = [
       "# Start", "",
-      ...Array(50).fill("Padding to create scroll distance."), "",
+      ...Array(80).fill(null).map((_, i) => `Paragraph ${i+1}: Unique padding text to ensure the preview pane has enough content to overflow and become scrollable.`), "",
       "# End",
     ].join("\n");
     await page.keyboard.press("Control+a");
