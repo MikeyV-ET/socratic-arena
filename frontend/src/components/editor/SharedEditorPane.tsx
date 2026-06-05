@@ -297,6 +297,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
   const theme = useArenaStore((s) => s.theme);
   const updatePanelLabel = useArenaStore((s) => s.updatePanelLabel);
   const editorContainerRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
   const editorViewRef = useRef<EditorView | null>(null);
   const providerRef = useRef<SimpleYjsProvider | null>(null);
   const ydocRef = useRef<Y.Doc | null>(null);
@@ -306,7 +307,36 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
   const [connected, setConnected] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [showCreate, setShowCreate] = useState(false);
-  const [viewMode, setViewMode] = useState<"edit" | "preview" | "table">("edit");
+  const [viewMode, _setViewMode] = useState<"edit" | "preview" | "table">("edit");
+  const setViewMode = useCallback((mode: "edit" | "preview" | "table") => {
+    _setViewMode((prev) => {
+      // Sync scroll position proportionally when switching between edit and preview
+      if (prev === "edit" && mode === "preview") {
+        const scroller = editorContainerRef.current?.querySelector(".cm-scroller") as HTMLElement | null;
+        if (scroller && previewRef.current) {
+          const pct = scroller.scrollHeight > scroller.clientHeight
+            ? scroller.scrollTop / (scroller.scrollHeight - scroller.clientHeight)
+            : 0;
+          requestAnimationFrame(() => {
+            const el = previewRef.current;
+            if (el) el.scrollTop = pct * (el.scrollHeight - el.clientHeight);
+          });
+        }
+      } else if (prev === "preview" && mode === "edit") {
+        const el = previewRef.current;
+        if (el && editorViewRef.current) {
+          const pct = el.scrollHeight > el.clientHeight
+            ? el.scrollTop / (el.scrollHeight - el.clientHeight)
+            : 0;
+          requestAnimationFrame(() => {
+            const scroller = editorContainerRef.current?.querySelector(".cm-scroller") as HTMLElement | null;
+            if (scroller) scroller.scrollTop = pct * (scroller.scrollHeight - scroller.clientHeight);
+          });
+        }
+      }
+      return mode;
+    });
+  }, []);
   const [previewText, setPreviewText] = useState("");
   const [showAuthors, setShowAuthors] = useState(true);
   const [browseResult, setBrowseResult] = useState<BrowseResult | null>(null);
@@ -845,14 +875,14 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
               data-testid="shared-editor-content"
               style={{ display: viewMode === "edit" ? undefined : "none" }}
             />
-            {viewMode === "preview" && (
-              <div
-                className={`h-full flex-1 overflow-auto p-4 prose prose-sm max-w-none prose-p:my-2 prose-li:my-0 prose-table:text-xs prose-th:text-left prose-td:px-2 prose-td:py-1 prose-th:px-2 prose-th:py-1${theme === "dark" ? " prose-invert" : ""}`}
-                data-testid="shared-editor-preview"
-              >
-                <Markdown remarkPlugins={[remarkGfm]}>{previewText}</Markdown>
-              </div>
-            )}
+            <div
+              ref={previewRef}
+              className={`h-full flex-1 overflow-auto p-4 prose prose-sm max-w-none prose-p:my-2 prose-li:my-0 prose-table:text-xs prose-th:text-left prose-td:px-2 prose-td:py-1 prose-th:px-2 prose-th:py-1${theme === "dark" ? " prose-invert" : ""}`}
+              data-testid="shared-editor-preview"
+              style={{ display: viewMode === "preview" ? undefined : "none" }}
+            >
+              <Markdown remarkPlugins={[remarkGfm]}>{previewText}</Markdown>
+            </div>
             {viewMode === "table" && csvData && (
               <div
                 className="h-full flex-1 overflow-auto"
