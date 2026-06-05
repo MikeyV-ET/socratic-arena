@@ -20,7 +20,7 @@ function PanelMessage({ node }: { node: ConversationNode }) {
           <span className={`text-xs font-medium ${isUser ? "text-accent" : "text-success"}`}>
             {isUser ? "You" : node.agentLabel || "Agent"}
           </span>
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-[10px] text-muted-foreground" data-testid="chat-message-timestamp">
             {new Date(node.timestamp).toLocaleTimeString()}
           </span>
         </div>

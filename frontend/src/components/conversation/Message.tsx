@@ -61,7 +61,7 @@ export function Message({ node }: MessageProps) {
               {isUser ? "Eric" : (node.agentLabel || "Agent")}
             </span>
             {node.timestamp > 0 && (
-              <span className="text-[10px] text-muted-foreground tabular-nums" title={new Date(node.timestamp).toLocaleString()}>
+              <span className="text-[10px] text-muted-foreground tabular-nums" data-testid="message-timestamp" title={new Date(node.timestamp).toLocaleString()}>
                 {new Date(node.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
               </span>
             )}
