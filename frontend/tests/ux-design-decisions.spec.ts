@@ -722,6 +722,119 @@ test.describe("Editor table of contents", () => {
       }
     }
   });
+
+  test("E4: Clicking a TOC heading scrolls editor to that section", async ({ page }) => {
+    // FEATURE: Clicking a heading in the TOC sidebar should scroll the editor
+    // so that heading is visible near the top of the viewport.
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    const editorOption = page.locator('[data-testid="add-panel-editor"]');
+    if (!(await editorOption.isVisible())) {
+      await page.keyboard.press("Escape");
+      return;
+    }
+    await editorOption.click();
+    await page.waitForTimeout(1000);
+
+    // Type enough content with multiple headings to make the editor scrollable
+    const cmContent = page.locator('[data-testid="shared-editor"] .cm-content');
+    await cmContent.click();
+    const lines = [
+      "# First Heading",
+      "",
+      ...Array(40).fill("Filler paragraph text to create scroll distance."),
+      "",
+      "# Second Heading",
+      "",
+      ...Array(40).fill("More filler text below the second heading."),
+      "",
+      "# Third Heading",
+      "",
+      "Final content here.",
+    ];
+    // Type via keyboard to go through CodeMirror properly
+    for (const line of lines) {
+      await page.keyboard.type(line, { delay: 0 });
+      await page.keyboard.press("Enter");
+    }
+    await page.waitForTimeout(500);
+
+    // Open TOC
+    const tocBtn = page.locator('[data-testid="toc-toggle"]');
+    await expect(tocBtn).toBeVisible({ timeout: 3000 });
+    await tocBtn.click();
+    await page.waitForTimeout(300);
+
+    // TOC should list our headings
+    const tocPane = page.locator('[data-testid="toc-pane"]');
+    await expect(tocPane).toBeVisible();
+    const tocItems = tocPane.locator("button");
+    await expect(tocItems).toHaveCount(3, { timeout: 3000 });
+
+    // Scroll editor to top first so we know "Third Heading" is off-screen
+    const scroller = page.locator('[data-testid="shared-editor"] .cm-scroller');
+    await scroller.evaluate((el) => el.scrollTop = 0);
+    await page.waitForTimeout(200);
+    const scrollBefore = await scroller.evaluate((el) => el.scrollTop);
+
+    // Click the third heading in the TOC
+    await tocItems.nth(2).click();
+    await page.waitForTimeout(500);
+
+    // Editor should have scrolled down
+    const scrollAfter = await scroller.evaluate((el) => el.scrollTop);
+    expect(scrollAfter).toBeGreaterThan(scrollBefore);
+  });
+
+  test("E5: TOC click moves cursor to the heading line", async ({ page }) => {
+    // FEATURE: After clicking a TOC heading, the cursor should be on that line
+    // so the user can immediately start editing at that location.
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    const editorOption = page.locator('[data-testid="add-panel-editor"]');
+    if (!(await editorOption.isVisible())) {
+      await page.keyboard.press("Escape");
+      return;
+    }
+    await editorOption.click();
+    await page.waitForTimeout(1000);
+
+    // Insert content with headings
+    const cmContent = page.locator('[data-testid="shared-editor"] .cm-content');
+    await cmContent.click();
+    const lines = [
+      "# Alpha",
+      "",
+      ...Array(20).fill("Padding text."),
+      "",
+      "# Beta",
+      "",
+      "End.",
+    ];
+    for (const line of lines) {
+      await page.keyboard.type(line, { delay: 0 });
+      await page.keyboard.press("Enter");
+    }
+    await page.waitForTimeout(500);
+
+    // Open TOC and click "Beta"
+    const tocBtn = page.locator('[data-testid="toc-toggle"]');
+    await expect(tocBtn).toBeVisible({ timeout: 3000 });
+    await tocBtn.click();
+    await page.waitForTimeout(300);
+
+    const tocPane = page.locator('[data-testid="toc-pane"]');
+    const tocItems = tocPane.locator("button");
+    await expect(tocItems).toHaveCount(2, { timeout: 3000 });
+
+    // Click "Beta" heading
+    await tocItems.nth(1).click();
+    await page.waitForTimeout(300);
+
+    // The active line in CodeMirror should contain "# Beta"
+    const activeLine = page.locator('[data-testid="shared-editor"] .cm-activeLine');
+    await expect(activeLine).toContainText("Beta");
+  });
 });
 
 // =========================================================================
