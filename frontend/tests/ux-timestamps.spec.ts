@@ -44,7 +44,7 @@ test.describe("Message Timestamps", () => {
     const res = await page.request.get(`${API}/agent/${AGENT}/history`);
     expect(res.ok()).toBeTruthy();
     const data = await res.json();
-    const nodes = data.nodes || data;
+    const nodes = data.messages || data.nodes || data;
 
     expect(Array.isArray(nodes)).toBeTruthy();
     expect(nodes.length).toBeGreaterThan(0);
@@ -52,7 +52,7 @@ test.describe("Message Timestamps", () => {
     for (const node of nodes.slice(0, 10)) {
       expect(node.timestamp, `Node ${node.id} missing timestamp`).toBeDefined();
       expect(node.timestamp).toBeGreaterThan(0);
-      const date = new Date(node.timestamp * 1000);
+      const date = new Date(node.timestamp < 1e12 ? node.timestamp * 1000 : node.timestamp);
       expect(date.getFullYear()).toBeGreaterThanOrEqual(2024);
     }
   });
@@ -60,7 +60,7 @@ test.describe("Message Timestamps", () => {
   test("MT3: History timestamps are in chronological order", async ({ page }) => {
     const res = await page.request.get(`${API}/agent/${AGENT}/history`);
     const data = await res.json();
-    const nodes = data.nodes || data;
+    const nodes = data.messages || data.nodes || data;
 
     const withTs = nodes.filter((n: any) => n.timestamp && n.timestamp > 0);
     expect(withTs.length).toBeGreaterThan(1);
