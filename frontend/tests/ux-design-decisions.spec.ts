@@ -736,40 +736,37 @@ test.describe("Editor table of contents", () => {
     await editorOption.click();
     await page.waitForTimeout(1000);
 
-    // Type enough content with multiple headings to make the editor scrollable
+    // Insert content via clipboard paste (fast + triggers Yjs observers for TOC)
+    const content = [
+      "# First Heading", "",
+      ...Array(40).fill("Filler paragraph text to create scroll distance."), "",
+      "# Second Heading", "",
+      ...Array(40).fill("More filler text below the second heading."), "",
+      "# Third Heading", "",
+      "Final content here.",
+    ].join("\n");
     const cmContent = page.locator('[data-testid="shared-editor"] .cm-content');
     await cmContent.click();
-    const lines = [
-      "# First Heading",
-      "",
-      ...Array(40).fill("Filler paragraph text to create scroll distance."),
-      "",
-      "# Second Heading",
-      "",
-      ...Array(40).fill("More filler text below the second heading."),
-      "",
-      "# Third Heading",
-      "",
-      "Final content here.",
-    ];
-    // Type via keyboard to go through CodeMirror properly
-    for (const line of lines) {
-      await page.keyboard.type(line, { delay: 0 });
-      await page.keyboard.press("Enter");
-    }
-    await page.waitForTimeout(500);
+    await page.evaluate(async (text) => {
+      await navigator.clipboard.writeText(text);
+    }, content).catch(() => {});
+    await page.keyboard.press("Control+a");
+    await page.evaluate((text) => {
+      document.execCommand("insertText", false, text);
+    }, content);
+    await page.waitForTimeout(2000);
 
     // Open TOC
     const tocBtn = page.locator('[data-testid="toc-toggle"]');
     await expect(tocBtn).toBeVisible({ timeout: 3000 });
     await tocBtn.click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(500);
 
     // TOC should list our headings
     const tocPane = page.locator('[data-testid="toc-pane"]');
     await expect(tocPane).toBeVisible();
     const tocItems = tocPane.locator("button");
-    await expect(tocItems).toHaveCount(3, { timeout: 3000 });
+    await expect(tocItems).toHaveCount(3, { timeout: 5000 });
 
     // Scroll editor to top first so we know "Third Heading" is off-screen
     const scroller = page.locator('[data-testid="shared-editor"] .cm-scroller');
@@ -799,27 +796,20 @@ test.describe("Editor table of contents", () => {
     await editorOption.click();
     await page.waitForTimeout(1000);
 
-    // Type enough content to be scrollable
-    const cmContent = page.locator('[data-testid="shared-editor"] .cm-content');
-    await cmContent.click();
-    const lines = [
-      "# Top Section",
-      "",
-      ...Array(30).fill("Filler line to create scrollable content."),
-      "",
-      "# Middle Section",
-      "",
-      ...Array(30).fill("More filler to push content below the fold."),
-      "",
-      "# Bottom Section",
-      "",
+    // Insert content via insertText (fast + triggers Yjs)
+    const cmContent6 = page.locator('[data-testid="shared-editor"] .cm-content');
+    await cmContent6.click();
+    const content6 = [
+      "# Top Section", "",
+      ...Array(30).fill("Filler line to create scrollable content."), "",
+      "# Middle Section", "",
+      ...Array(30).fill("More filler to push content below the fold."), "",
+      "# Bottom Section", "",
       ...Array(10).fill("Final filler text."),
-    ];
-    for (const line of lines) {
-      await page.keyboard.type(line, { delay: 0 });
-      await page.keyboard.press("Enter");
-    }
-    await page.waitForTimeout(500);
+    ].join("\n");
+    await page.keyboard.press("Control+a");
+    await page.evaluate((text) => { document.execCommand("insertText", false, text); }, content6);
+    await page.waitForTimeout(2000);
 
     // Scroll editor down to middle
     const scroller = page.locator('[data-testid="shared-editor"] .cm-scroller');
@@ -828,16 +818,15 @@ test.describe("Editor table of contents", () => {
     const editScrollPos = await scroller.evaluate((el) => el.scrollTop);
     expect(editScrollPos).toBeGreaterThan(50);
 
-    // Switch to preview
+    // Switch to preview — wait for rAF scroll sync to complete
     const previewBtn = page.locator('[data-testid="view-mode-toggle"] button', { hasText: "Preview" });
     await previewBtn.click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(1000);
 
     // Preview should NOT be at the very top — it should approximate the edit scroll position
     const previewPane = page.locator('[data-testid="shared-editor-preview"]');
     await expect(previewPane).toBeVisible();
     const previewScroll = await previewPane.evaluate((el) => el.scrollTop);
-    // The preview should have scrolled to approximately the same relative position
     expect(previewScroll).toBeGreaterThan(0);
   });
 
@@ -854,20 +843,16 @@ test.describe("Editor table of contents", () => {
     await editorOption.click();
     await page.waitForTimeout(1000);
 
-    const cmContent = page.locator('[data-testid="shared-editor"] .cm-content');
-    await cmContent.click();
-    const lines = [
-      "# Start",
-      "",
-      ...Array(50).fill("Padding to create scroll distance."),
-      "",
+    const cmContent7 = page.locator('[data-testid="shared-editor"] .cm-content');
+    await cmContent7.click();
+    const content7 = [
+      "# Start", "",
+      ...Array(50).fill("Padding to create scroll distance."), "",
       "# End",
-    ];
-    for (const line of lines) {
-      await page.keyboard.type(line, { delay: 0 });
-      await page.keyboard.press("Enter");
-    }
-    await page.waitForTimeout(500);
+    ].join("\n");
+    await page.keyboard.press("Control+a");
+    await page.evaluate((text) => { document.execCommand("insertText", false, text); }, content7);
+    await page.waitForTimeout(2000);
 
     // Scroll down in edit mode
     const scroller = page.locator('[data-testid="shared-editor"] .cm-scroller');
@@ -876,12 +861,12 @@ test.describe("Editor table of contents", () => {
     const scrollBefore = await scroller.evaluate((el) => el.scrollTop);
     expect(scrollBefore).toBeGreaterThan(50);
 
-    // Toggle to preview and back
+    // Toggle to preview and back — wait for rAF scroll sync each way
     const modeToggle = page.locator('[data-testid="view-mode-toggle"]');
     await modeToggle.locator("button", { hasText: "Preview" }).click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(1000);
     await modeToggle.locator("button", { hasText: "Edit" }).click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(1000);
 
     // Edit scroll should be preserved
     const scrollAfter = await scroller.evaluate((el) => el.scrollTop);
@@ -902,23 +887,18 @@ test.describe("Editor table of contents", () => {
     await editorOption.click();
     await page.waitForTimeout(1000);
 
-    // Insert content with headings
-    const cmContent = page.locator('[data-testid="shared-editor"] .cm-content');
-    await cmContent.click();
-    const lines = [
-      "# Alpha",
-      "",
-      ...Array(20).fill("Padding text."),
-      "",
-      "# Beta",
-      "",
+    // Insert content via insertText (fast + triggers Yjs)
+    const cmContent5 = page.locator('[data-testid="shared-editor"] .cm-content');
+    await cmContent5.click();
+    const content5 = [
+      "# Alpha", "",
+      ...Array(20).fill("Padding text."), "",
+      "# Beta", "",
       "End.",
-    ];
-    for (const line of lines) {
-      await page.keyboard.type(line, { delay: 0 });
-      await page.keyboard.press("Enter");
-    }
-    await page.waitForTimeout(500);
+    ].join("\n");
+    await page.keyboard.press("Control+a");
+    await page.evaluate((text) => { document.execCommand("insertText", false, text); }, content5);
+    await page.waitForTimeout(2000);
 
     // Open TOC and click "Beta"
     const tocBtn = page.locator('[data-testid="toc-toggle"]');
