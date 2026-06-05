@@ -317,10 +317,10 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
           const pct = scroller.scrollHeight > scroller.clientHeight
             ? scroller.scrollTop / (scroller.scrollHeight - scroller.clientHeight)
             : 0;
-          requestAnimationFrame(() => {
+          requestAnimationFrame(() => requestAnimationFrame(() => {
             const el = previewRef.current;
             if (el) el.scrollTop = pct * (el.scrollHeight - el.clientHeight);
-          });
+          }));
         }
       } else if (prev === "preview" && mode === "edit") {
         const el = previewRef.current;
@@ -328,10 +328,10 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
           const pct = el.scrollHeight > el.clientHeight
             ? el.scrollTop / (el.scrollHeight - el.clientHeight)
             : 0;
-          requestAnimationFrame(() => {
+          requestAnimationFrame(() => requestAnimationFrame(() => {
             const scroller = editorContainerRef.current?.querySelector(".cm-scroller") as HTMLElement | null;
             if (scroller) scroller.scrollTop = pct * (scroller.scrollHeight - scroller.clientHeight);
-          });
+          }));
         }
       }
       return mode;
