@@ -14,6 +14,73 @@ import { wysiwygPlugin, wysiwygTheme } from "./wysiwygMarkdown";
 import { authorColorPlugin, authorColorTheme, authorColorConfig } from "./authorColors";
 
 // ---------------------------------------------------------------------------
+// CSV parsing
+// ---------------------------------------------------------------------------
+
+function parseCsv(text: string, delimiter = ","): string[][] {
+  const rows: string[][] = [];
+  let i = 0;
+  while (i < text.length) {
+    const row: string[] = [];
+    while (i < text.length) {
+      if (text[i] === '"') {
+        // Quoted field
+        i++;
+        let field = "";
+        while (i < text.length) {
+          if (text[i] === '"') {
+            if (i + 1 < text.length && text[i + 1] === '"') {
+              field += '"';
+              i += 2;
+            } else {
+              i++;
+              break;
+            }
+          } else {
+            field += text[i++];
+          }
+        }
+        row.push(field);
+        if (i < text.length && text[i] === delimiter) i++;
+        else if (i < text.length && (text[i] === "\n" || text[i] === "\r")) {
+          if (text[i] === "\r" && i + 1 < text.length && text[i + 1] === "\n") i += 2;
+          else i++;
+          break;
+        }
+      } else {
+        const nextDelim = text.indexOf(delimiter, i);
+        const nextNewline = text.indexOf("\n", i);
+        const nextCR = text.indexOf("\r", i);
+        const nl = nextCR >= 0 && nextCR < (nextNewline >= 0 ? nextNewline : Infinity) ? nextCR : nextNewline;
+        const end = nextDelim >= 0 && (nl < 0 || nextDelim < nl) ? nextDelim : nl;
+        if (end < 0) {
+          row.push(text.slice(i));
+          i = text.length;
+        } else if (end === nextDelim && (nl < 0 || nextDelim < nl)) {
+          row.push(text.slice(i, end));
+          i = end + 1;
+        } else {
+          row.push(text.slice(i, end));
+          i = end + 1;
+          if (text[end] === "\r" && i < text.length && text[i] === "\n") i++;
+          break;
+        }
+      }
+    }
+    if (row.length > 0 || i < text.length) rows.push(row);
+  }
+  return rows;
+}
+
+function isCsvFile(doc: DocMeta | undefined): "csv" | "tsv" | null {
+  if (!doc) return null;
+  const path = (doc.file_path || doc.title || "").toLowerCase();
+  if (path.endsWith(".csv")) return "csv";
+  if (path.endsWith(".tsv")) return "tsv";
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Highlight decorations (agent-initiated line highlighting)
 // ---------------------------------------------------------------------------
 
@@ -239,7 +306,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
   const [connected, setConnected] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [showCreate, setShowCreate] = useState(false);
-  const [viewMode, setViewMode] = useState<"edit" | "preview">("edit");
+  const [viewMode, setViewMode] = useState<"edit" | "preview" | "table">("edit");
   const [previewText, setPreviewText] = useState("");
   const [showAuthors, setShowAuthors] = useState(true);
   const [browseResult, setBrowseResult] = useState<BrowseResult | null>(null);
@@ -546,6 +613,24 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
   };
 
   const activeDoc = docs.find((d) => d.id === activeDocId);
+  const csvType = isCsvFile(activeDoc);
+
+  // Parse CSV/TSV data for table view
+  const csvData = useMemo(() => {
+    if (!csvType || !previewText) return null;
+    const delimiter = csvType === "tsv" ? "\t" : ",";
+    return parseCsv(previewText, delimiter);
+  }, [csvType, previewText]);
+
+  // Auto-switch to table view when opening a CSV/TSV file
+  const prevDocId = useRef<string | null>(null);
+  useEffect(() => {
+    if (activeDocId && activeDocId !== prevDocId.current) {
+      prevDocId.current = activeDocId;
+      if (csvType) setViewMode("table");
+      else if (viewMode === "table") setViewMode("edit");
+    }
+  }, [activeDocId, csvType]);
 
   return (
     <div className="flex flex-col h-full bg-card" data-testid="shared-editor">
@@ -597,6 +682,17 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
                 >
                   Preview
                 </button>
+                {csvType && (
+                  <button
+                    onClick={() => setViewMode("table")}
+                    className={`px-2 py-0.5 text-[10px] transition-colors ${
+                      viewMode === "table" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"
+                    }`}
+                    data-testid="table-view-btn"
+                  >
+                    Table
+                  </button>
+                )}
               </div>
               <span className={`w-2 h-2 rounded-full ${connected ? "bg-green-500" : "bg-red-500"}`}
                 title={connected ? "Connected" : "Disconnected"} />
@@ -755,6 +851,42 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
                 data-testid="shared-editor-preview"
               >
                 <Markdown remarkPlugins={[remarkGfm]}>{previewText}</Markdown>
+              </div>
+            )}
+            {viewMode === "table" && csvData && (
+              <div
+                className="h-full flex-1 overflow-auto"
+                data-testid="csv-table-view"
+              >
+                <table className="w-full text-xs border-collapse">
+                  {csvData.length > 0 && (
+                    <thead className="sticky top-0 z-10">
+                      <tr>
+                        <th className="px-3 py-1.5 text-left text-[10px] font-medium text-muted-foreground uppercase tracking-wider bg-muted border-b border-border w-10">#</th>
+                        {csvData[0].map((cell, ci) => (
+                          <th
+                            key={ci}
+                            className="px-3 py-1.5 text-left text-[10px] font-medium text-muted-foreground uppercase tracking-wider bg-muted border-b border-border whitespace-nowrap"
+                          >
+                            {cell}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                  )}
+                  <tbody>
+                    {csvData.slice(1).map((row, ri) => (
+                      <tr key={ri} className="hover:bg-muted/30 transition-colors">
+                        <td className="px-3 py-1 text-muted-foreground border-b border-border/50 tabular-nums">{ri + 1}</td>
+                        {row.map((cell, ci) => (
+                          <td key={ci} className="px-3 py-1 text-foreground border-b border-border/50 whitespace-pre-wrap break-words max-w-xs">
+                            {cell}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </>
