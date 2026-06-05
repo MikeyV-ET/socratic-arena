@@ -23,7 +23,7 @@ test.describe("Message Timestamps", () => {
     await page.waitForLoadState("networkidle");
 
     // Open history panel via "+" menu
-    const addBtn = page.locator('[data-testid="add-panel-button"]');
+    const addBtn = page.locator('[data-testid="open-tab-menu"]');
     if (await addBtn.isVisible()) {
       await addBtn.click();
       await page.locator('[data-testid="add-panel-history"]').click();
@@ -77,7 +77,7 @@ test.describe("Message Timestamps", () => {
     await page.goto(BASE);
     await page.waitForLoadState("networkidle");
 
-    const addBtn = page.locator('[data-testid="add-panel-button"]');
+    const addBtn = page.locator('[data-testid="open-tab-menu"]');
     if (await addBtn.isVisible()) {
       await addBtn.click();
       await page.locator('[data-testid="add-panel-chat"]').click();
@@ -97,7 +97,7 @@ test.describe("Message Timestamps", () => {
     await page.goto(BASE);
     await page.waitForLoadState("networkidle");
 
-    const addBtn = page.locator('[data-testid="add-panel-button"]');
+    const addBtn = page.locator('[data-testid="open-tab-menu"]');
     if (await addBtn.isVisible()) {
       await addBtn.click();
       await page.locator('[data-testid="add-panel-chat"]').click();

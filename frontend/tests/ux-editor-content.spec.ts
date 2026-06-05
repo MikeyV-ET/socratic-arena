@@ -17,7 +17,7 @@ test.describe("Editor Content Preservation — Extended (B9d-f)", () => {
     await page.waitForLoadState("networkidle");
 
     // Open an editor panel
-    const addBtn = page.locator('[data-testid="add-panel-button"]');
+    const addBtn = page.locator('[data-testid="open-tab-menu"]');
     await addBtn.click();
     await page.locator('[data-testid="add-panel-editor"]').click();
     await page.waitForTimeout(500);
@@ -61,7 +61,7 @@ test.describe("Editor Content Preservation — Extended (B9d-f)", () => {
     await page.goto(BASE);
     await page.waitForLoadState("networkidle");
 
-    const addBtn = page.locator('[data-testid="add-panel-button"]');
+    const addBtn = page.locator('[data-testid="open-tab-menu"]');
 
     // Open first editor and type
     await addBtn.click();
