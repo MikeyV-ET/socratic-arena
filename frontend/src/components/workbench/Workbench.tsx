@@ -357,72 +357,44 @@ export function Workbench() {
     });
   }, [visibleIds]);
 
-  // Unified layout: ONE panels.map() call renders ALL panels.
-  // Visible panels (active + pinned) get flex sizing; hidden panels get display:none.
-  // This prevents React remounts when panels move between visible/hidden states
-  // or when the layout transitions between single and tiled (B9d/B9e fix).
+  // Unified layout: ONE panels.map() with IDENTICAL wrapper JSX per panel.
+  // Layout mode (single vs tiled) only changes style props, never JSX structure.
+  // This ensures React never unmounts TabContent during layout transitions.
   const isTiled = visibleIds.length > 1;
-
-  // Build a map of visible panel index for resize handle placement
-  const visibleIndexOf = (id: string) => visibleIds.indexOf(id);
 
   return (
     <div className="flex flex-col h-full" data-layout={isTiled ? "tiled" : "single"}>
       <TabBar activeTab={activeTab} onSelect={setActiveTab} />
-      <div
-        className={`flex-1 overflow-hidden ${isTiled ? "flex" : "relative"}`}
-        ref={containerRef}
-      >
+      <div className="flex-1 overflow-hidden flex" ref={containerRef}>
         {panels.map((panel) => {
-          const vIdx = visibleIndexOf(panel.instanceId);
+          const vIdx = visibleIds.indexOf(panel.instanceId);
           const isVisible = vIdx >= 0;
-
-          if (!isVisible) {
-            return (
-              <div
-                key={panel.instanceId}
-                data-testid={`panel-hidden-${panel.instanceId}`}
-                style={{ display: 'none' }}
-              >
-                <TabContent panel={panel} />
-              </div>
-            );
-          }
-
-          if (isTiled) {
-            return (
-              <div key={panel.instanceId} className="contents">
-                {vIdx > 0 && (
-                  <TileResizeHandle
-                    onDrag={(dx) => handleDrag(vIdx - 1, dx)}
-                  />
-                )}
-                <div
-                  data-testid={`tiled-panel-${panel.instanceId}`}
-                  className="overflow-hidden h-full"
-                  style={{ width: `${getSize(panel.instanceId)}%`, flexShrink: 0 }}
-                >
-                  <div data-testid={`panel-content-${panel.instanceId}`} className="h-full">
-                    <TabContent panel={panel} />
-                  </div>
-                </div>
-              </div>
-            );
-          }
-
-          // Single layout: absolute positioning, active shown, others hidden
           const isActive = panel.instanceId === activeTab;
+          const show = isTiled ? isVisible : isActive;
+
           return (
             <div
               key={panel.instanceId}
-              data-testid={isActive ? `panel-content-${panel.instanceId}` : `panel-hidden-${panel.instanceId}`}
-              className="absolute inset-0"
-              style={{ display: isActive ? undefined : 'none' }}
+              data-testid={show ? `panel-content-${panel.instanceId}` : `panel-hidden-${panel.instanceId}`}
+              className="overflow-hidden h-full"
+              style={{
+                display: show ? undefined : 'none',
+                width: isTiled && isVisible ? `${getSize(panel.instanceId)}%` : undefined,
+                flexShrink: isTiled && isVisible ? 0 : undefined,
+                flex: !isTiled && show ? '1 1 100%' : undefined,
+                order: isVisible ? vIdx * 2 + 1 : 9999,
+              }}
             >
               <TabContent panel={panel} />
             </div>
           );
         })}
+        {/* Resize handles positioned between visible panels via order */}
+        {isTiled && visibleIds.slice(1).map((_, i) => (
+          <div key={`handle-${i}`} style={{ order: (i + 1) * 2 }}>
+            <TileResizeHandle onDrag={(dx) => handleDrag(i, dx)} />
+          </div>
+        ))}
       </div>
     </div>
   );
