@@ -357,70 +357,72 @@ export function Workbench() {
     });
   }, [visibleIds]);
 
-  // Single panel — no tiling
-  // Render ALL panels but hide inactive ones so each has its own component
-  // instance (fixes B4: tab switch shows wrong editor) and state persists
-  // across tab switches (fixes B5: editor content lost after switching away).
-  if (visibleIds.length <= 1) {
-    return (
-      <div className="flex flex-col h-full" data-layout="single">
-        <TabBar activeTab={activeTab} onSelect={setActiveTab} />
-        <div className="flex-1 overflow-hidden relative">
-          {panels.map((panel) => {
-            const isActive = panel.instanceId === activeTab;
+  // Unified layout: ONE panels.map() call renders ALL panels.
+  // Visible panels (active + pinned) get flex sizing; hidden panels get display:none.
+  // This prevents React remounts when panels move between visible/hidden states
+  // or when the layout transitions between single and tiled (B9d/B9e fix).
+  const isTiled = visibleIds.length > 1;
+
+  // Build a map of visible panel index for resize handle placement
+  const visibleIndexOf = (id: string) => visibleIds.indexOf(id);
+
+  return (
+    <div className="flex flex-col h-full" data-layout={isTiled ? "tiled" : "single"}>
+      <TabBar activeTab={activeTab} onSelect={setActiveTab} />
+      <div
+        className={`flex-1 overflow-hidden ${isTiled ? "flex" : "relative"}`}
+        ref={containerRef}
+      >
+        {panels.map((panel) => {
+          const vIdx = visibleIndexOf(panel.instanceId);
+          const isVisible = vIdx >= 0;
+
+          if (!isVisible) {
             return (
               <div
                 key={panel.instanceId}
-                data-testid={isActive ? `panel-content-${panel.instanceId}` : `panel-hidden-${panel.instanceId}`}
-                className="absolute inset-0"
-                style={{ display: isActive ? undefined : 'none' }}
+                data-testid={`panel-hidden-${panel.instanceId}`}
+                style={{ display: 'none' }}
               >
                 <TabContent panel={panel} />
               </div>
             );
-          })}
-        </div>
-      </div>
-    );
-  }
+          }
 
-  // Tiled layout
-  return (
-    <div className="flex flex-col h-full">
-      <TabBar activeTab={activeTab} onSelect={setActiveTab} />
-      <div className="flex-1 overflow-hidden flex" ref={containerRef}>
-        {visibleIds.map((id, i) => {
-          const panel = findPanel(id);
-          if (!panel) return null;
-          return (
-            <div key={id} className="contents">
-              {i > 0 && (
-                <TileResizeHandle
-                  onDrag={(dx) => handleDrag(i - 1, dx)}
-                />
-              )}
-              <div
-                data-testid={`tiled-panel-${panel.instanceId}`}
-                className="overflow-hidden h-full"
-                style={{ width: `${getSize(id)}%`, flexShrink: 0 }}
-              >
-                <div data-testid={`panel-content-${panel.instanceId}`} className="h-full">
-                  <TabContent panel={panel} />
+          if (isTiled) {
+            return (
+              <div key={panel.instanceId} className="contents">
+                {vIdx > 0 && (
+                  <TileResizeHandle
+                    onDrag={(dx) => handleDrag(vIdx - 1, dx)}
+                  />
+                )}
+                <div
+                  data-testid={`tiled-panel-${panel.instanceId}`}
+                  className="overflow-hidden h-full"
+                  style={{ width: `${getSize(panel.instanceId)}%`, flexShrink: 0 }}
+                >
+                  <div data-testid={`panel-content-${panel.instanceId}`} className="h-full">
+                    <TabContent panel={panel} />
+                  </div>
                 </div>
               </div>
+            );
+          }
+
+          // Single layout: absolute positioning, active shown, others hidden
+          const isActive = panel.instanceId === activeTab;
+          return (
+            <div
+              key={panel.instanceId}
+              data-testid={isActive ? `panel-content-${panel.instanceId}` : `panel-hidden-${panel.instanceId}`}
+              className="absolute inset-0"
+              style={{ display: isActive ? undefined : 'none' }}
+            >
+              <TabContent panel={panel} />
             </div>
           );
         })}
-        {/* Render non-visible panels hidden to preserve component state (B9 fix) */}
-        {panels.filter((p) => !visibleIds.includes(p.instanceId)).map((panel) => (
-          <div
-            key={panel.instanceId}
-            data-testid={`panel-hidden-${panel.instanceId}`}
-            style={{ display: 'none' }}
-          >
-            <TabContent panel={panel} />
-          </div>
-        ))}
       </div>
     </div>
   );
