@@ -786,6 +786,109 @@ test.describe("Editor table of contents", () => {
     expect(scrollAfter).toBeGreaterThan(scrollBefore);
   });
 
+  test("E6: Edit/Preview toggle preserves scroll position", async ({ page }) => {
+    // FEATURE: When switching between edit and preview modes, the document
+    // should stay at approximately the same position — user shouldn't lose their place.
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    const editorOption = page.locator('[data-testid="add-panel-editor"]');
+    if (!(await editorOption.isVisible())) {
+      await page.keyboard.press("Escape");
+      return;
+    }
+    await editorOption.click();
+    await page.waitForTimeout(1000);
+
+    // Type enough content to be scrollable
+    const cmContent = page.locator('[data-testid="shared-editor"] .cm-content');
+    await cmContent.click();
+    const lines = [
+      "# Top Section",
+      "",
+      ...Array(30).fill("Filler line to create scrollable content."),
+      "",
+      "# Middle Section",
+      "",
+      ...Array(30).fill("More filler to push content below the fold."),
+      "",
+      "# Bottom Section",
+      "",
+      ...Array(10).fill("Final filler text."),
+    ];
+    for (const line of lines) {
+      await page.keyboard.type(line, { delay: 0 });
+      await page.keyboard.press("Enter");
+    }
+    await page.waitForTimeout(500);
+
+    // Scroll editor down to middle
+    const scroller = page.locator('[data-testid="shared-editor"] .cm-scroller');
+    await scroller.evaluate((el) => { el.scrollTop = el.scrollHeight / 2; });
+    await page.waitForTimeout(200);
+    const editScrollPos = await scroller.evaluate((el) => el.scrollTop);
+    expect(editScrollPos).toBeGreaterThan(50);
+
+    // Switch to preview
+    const previewBtn = page.locator('[data-testid="view-mode-toggle"] button', { hasText: "Preview" });
+    await previewBtn.click();
+    await page.waitForTimeout(500);
+
+    // Preview should NOT be at the very top — it should approximate the edit scroll position
+    const previewPane = page.locator('[data-testid="shared-editor-preview"]');
+    await expect(previewPane).toBeVisible();
+    const previewScroll = await previewPane.evaluate((el) => el.scrollTop);
+    // The preview should have scrolled to approximately the same relative position
+    expect(previewScroll).toBeGreaterThan(0);
+  });
+
+  test("E7: Returning from preview to edit preserves edit scroll position", async ({ page }) => {
+    // FEATURE: After going edit→preview→edit, the editor should still be
+    // at the same scroll position — not reset to the top.
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    const editorOption = page.locator('[data-testid="add-panel-editor"]');
+    if (!(await editorOption.isVisible())) {
+      await page.keyboard.press("Escape");
+      return;
+    }
+    await editorOption.click();
+    await page.waitForTimeout(1000);
+
+    const cmContent = page.locator('[data-testid="shared-editor"] .cm-content');
+    await cmContent.click();
+    const lines = [
+      "# Start",
+      "",
+      ...Array(50).fill("Padding to create scroll distance."),
+      "",
+      "# End",
+    ];
+    for (const line of lines) {
+      await page.keyboard.type(line, { delay: 0 });
+      await page.keyboard.press("Enter");
+    }
+    await page.waitForTimeout(500);
+
+    // Scroll down in edit mode
+    const scroller = page.locator('[data-testid="shared-editor"] .cm-scroller');
+    await scroller.evaluate((el) => { el.scrollTop = el.scrollHeight / 2; });
+    await page.waitForTimeout(200);
+    const scrollBefore = await scroller.evaluate((el) => el.scrollTop);
+    expect(scrollBefore).toBeGreaterThan(50);
+
+    // Toggle to preview and back
+    const modeToggle = page.locator('[data-testid="view-mode-toggle"]');
+    await modeToggle.locator("button", { hasText: "Preview" }).click();
+    await page.waitForTimeout(300);
+    await modeToggle.locator("button", { hasText: "Edit" }).click();
+    await page.waitForTimeout(300);
+
+    // Edit scroll should be preserved
+    const scrollAfter = await scroller.evaluate((el) => el.scrollTop);
+    // Allow small tolerance (±10px) for rounding
+    expect(Math.abs(scrollAfter - scrollBefore)).toBeLessThan(10);
+  });
+
   test("E5: TOC click moves cursor to the heading line", async ({ page }) => {
     // FEATURE: After clicking a TOC heading, the cursor should be on that line
     // so the user can immediately start editing at that location.
