@@ -21,7 +21,7 @@ function PanelMessage({ node }: { node: ConversationNode }) {
             {isUser ? "You" : node.agentLabel || "Agent"}
           </span>
           <span className="text-[10px] text-muted-foreground" data-testid="chat-message-timestamp">
-            {new Date(node.timestamp).toLocaleTimeString()}
+            {new Date(node.timestamp < 1e12 ? node.timestamp * 1000 : node.timestamp).toLocaleTimeString()}
           </span>
         </div>
         <div className={`${proseClass}${theme === "dark" ? " prose-invert" : ""}`}>

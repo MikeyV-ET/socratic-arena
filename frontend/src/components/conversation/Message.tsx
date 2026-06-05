@@ -60,11 +60,14 @@ export function Message({ node }: MessageProps) {
             >
               {isUser ? "Eric" : (node.agentLabel || "Agent")}
             </span>
-            {node.timestamp > 0 && (
-              <span className="text-[10px] text-muted-foreground tabular-nums" data-testid="message-timestamp" title={new Date(node.timestamp).toLocaleString()}>
-                {new Date(node.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-              </span>
-            )}
+            {node.timestamp > 0 && (() => {
+              const ms = node.timestamp < 1e12 ? node.timestamp * 1000 : node.timestamp;
+              return (
+                <span className="text-[10px] text-muted-foreground tabular-nums" data-testid="message-timestamp" title={new Date(ms).toLocaleString()}>
+                  {new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              );
+            })()}
             {node.metadata?.modelId && (
               <span className="text-[10px] text-muted-foreground font-mono">
                 {node.metadata.modelId}
