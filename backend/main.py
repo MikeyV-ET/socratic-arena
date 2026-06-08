@@ -119,12 +119,30 @@ async def doppelganger_spawn(body: dict):
     if not agent or not checkpoint_id:
         return {"error": "agent and checkpoint_id required"}, 400
 
+    # If inflection_turn is specified, extract conversation up to that turn
+    context_entries = body.get("context_entries")
+    inflection_turn = body.get("inflection_turn")
+    if inflection_turn is not None and context_entries is None:
+        from compaction_parser import get_boundary_conversation
+        conversation = await asyncio.to_thread(get_boundary_conversation, agent, checkpoint_id)
+        if conversation:
+            # Split at the inflection point: context = everything before, inflection = the user turn
+            user_count = 0
+            split_pos = len(conversation)
+            for i, entry in enumerate(conversation):
+                if entry["type"] == "user":
+                    if user_count == inflection_turn:
+                        split_pos = i
+                        break
+                    user_count += 1
+            context_entries = conversation[:split_pos]
+
     doppel = await _doppel_manager.spawn(
         agent_name=agent,
         checkpoint_id=checkpoint_id,
         label=body.get("label", ""),
         modifications=body.get("modifications"),
-        context_entries=body.get("context_entries"),
+        context_entries=context_entries,
         repo_path=body.get("repo_path"),
         repo_commit=body.get("repo_commit"),
     )
@@ -2761,7 +2779,7 @@ async def panel_proxy_ws(websocket: WebSocket, panel_id: str):
 
 # --- Compaction boundary browser ---
 
-from compaction_parser import parse_boundaries, get_boundary_summary
+from compaction_parser import parse_boundaries, get_boundary_summary, get_boundary_turns
 
 _boundaries_cache: dict[str, list[dict]] = {}
 
@@ -2783,6 +2801,14 @@ async def get_compaction_boundary(checkpoint_id: str, agent: str = ""):
     if summary is None:
         return {"status": "error", "message": "boundary not found"}
     return {"checkpointId": checkpoint_id, "summary": summary}
+
+
+@app.get("/api/compaction-boundaries/{checkpoint_id}/turns")
+async def get_boundary_turns_endpoint(checkpoint_id: str, agent: str = ""):
+    """Get user turns within a compaction boundary."""
+    agent_name = agent or _current_agent
+    turns = await asyncio.to_thread(get_boundary_turns, agent_name, checkpoint_id)
+    return {"checkpointId": checkpoint_id, "agent": agent_name, "turns": turns}
 
 
 # --- Corrections (training annotations) ---

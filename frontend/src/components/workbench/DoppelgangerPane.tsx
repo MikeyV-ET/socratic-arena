@@ -10,6 +10,12 @@ interface Boundary {
   turnCount: number;
 }
 
+interface Turn {
+  index: number;
+  content: string;
+  timestamp: number;
+}
+
 interface FindReplacePair {
   find: string;
   replace: string;
@@ -49,6 +55,9 @@ export function DoppelgangerPane() {
   const [boundaries, setBoundaries] = useState<Boundary[]>([]);
   const [selectedBoundary, setSelectedBoundary] = useState("");
   const [loadingBoundaries, setLoadingBoundaries] = useState(true);
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [loadingTurns, setLoadingTurns] = useState(false);
+  const [selectedTurn, setSelectedTurn] = useState<number | null>(null);
   const [findReplacePairs, setFindReplacePairs] = useState<FindReplacePair[]>([{ find: "", replace: "" }]);
   const [spawning, setSpawning] = useState(false);
   const [spawnError, setSpawnError] = useState("");
@@ -74,6 +83,27 @@ export function DoppelgangerPane() {
       })
       .catch(() => setLoadingBoundaries(false));
   }, [agent, base]);
+
+  // Load turns when boundary changes
+  useEffect(() => {
+    if (!selectedBoundary) {
+      setTurns([]);
+      setSelectedTurn(null);
+      return;
+    }
+    setLoadingTurns(true);
+    setSelectedTurn(null);
+    fetch(`${base}/api/compaction-boundaries/${selectedBoundary}/turns?agent=${agent}`)
+      .then((r) => r.json())
+      .then((data) => {
+        setTurns(data.turns || []);
+        setLoadingTurns(false);
+      })
+      .catch(() => {
+        setTurns([]);
+        setLoadingTurns(false);
+      });
+  }, [selectedBoundary, agent, base]);
 
   // Auto-scroll on new turns
   useEffect(() => {
@@ -106,6 +136,7 @@ export function DoppelgangerPane() {
         body: JSON.stringify({
           agent: agent,
           checkpoint_id: selectedBoundary,
+          inflection_turn: selectedTurn,
           modifications: Object.keys(modifications).length > 0 ? modifications : undefined,
         }),
       });
@@ -319,10 +350,46 @@ export function DoppelgangerPane() {
           )}
         </section>
 
+        {/* Turn selection */}
+        <section className="space-y-1.5">
+          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+            2. Select inflection turn ({agent})
+          </label>
+          {loadingTurns ? (
+            <p className="text-[10px] text-muted-foreground animate-pulse">Loading turns...</p>
+          ) : turns.length === 0 ? (
+            <p className="text-[10px] text-muted-foreground italic">
+              {selectedBoundary ? "No turns found for this boundary (may be the latest)" : "Select a boundary first"}
+            </p>
+          ) : (
+            <div className="max-h-48 overflow-y-auto border border-border rounded-md divide-y divide-border">
+              {turns.map((t) => (
+                <button
+                  key={t.index}
+                  onClick={() => setSelectedTurn(t.index === selectedTurn ? null : t.index)}
+                  className={`w-full text-left px-2 py-1.5 text-xs transition-colors ${
+                    selectedTurn === t.index
+                      ? "bg-primary/15 border-l-2 border-l-primary"
+                      : "hover:bg-muted/50"
+                  }`}
+                >
+                  <span className="text-muted-foreground font-mono mr-1">#{t.index + 1}</span>
+                  <span className="text-foreground line-clamp-2">{t.content}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {selectedTurn !== null && turns[selectedTurn] && (
+            <p className="text-[10px] text-muted-foreground">
+              Inflection: turn #{selectedTurn + 1} — doppelganger will respond to this turn fresh
+            </p>
+          )}
+        </section>
+
         {/* Prompt modifications */}
         <section className="space-y-1.5">
           <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
-            2. Modify system prompt (optional)
+            3. Modify system prompt (optional)
           </label>
           <div className="space-y-2">
             {findReplacePairs.map((pair, i) => (

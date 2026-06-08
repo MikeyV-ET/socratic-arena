@@ -187,6 +187,183 @@ def get_boundary_summary(agent_name: str, checkpoint_id: str) -> str | None:
     return _extract_summary_from_checkpoint(cp_path)
 
 
+def get_boundary_turns(agent_name: str, checkpoint_id: str) -> list[dict]:
+    """Extract user turns between this checkpoint boundary and the next.
+
+    Returns list of dicts: {"index": int, "content": str, "timestamp": float}
+    """
+    reg = _load_session_registry()
+    entry = reg.get(agent_name)
+    if not entry:
+        return []
+
+    sid = entry.get("session_id", "")
+    session_dir = _find_session_dir(sid)
+    if not session_dir:
+        return []
+
+    updates_path = session_dir / "updates.jsonl"
+    if not updates_path.exists():
+        return []
+
+    # Two-pass: find line range for checkpoint, then extract user turns
+    target_line = None
+    next_cp_line = None
+
+    with open(updates_path) as f:
+        for i, line in enumerate(f):
+            if "compaction_checkpoint" not in line:
+                continue
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            update = event.get("params", {}).get("update", {})
+            if update.get("sessionUpdate") != "compaction_checkpoint":
+                continue
+            if update.get("checkpoint_id") == checkpoint_id:
+                target_line = i
+            elif target_line is not None:
+                next_cp_line = i
+                break
+
+    if target_line is None:
+        return []
+
+    # Second pass: extract user_message_chunk entries between boundaries
+    turns = []
+    with open(updates_path) as f:
+        for i, line in enumerate(f):
+            if i <= target_line:
+                continue
+            if next_cp_line is not None and i >= next_cp_line:
+                break
+            line = line.strip()
+            if not line or "user_message_chunk" not in line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            update = event.get("params", {}).get("update", {})
+            if update.get("sessionUpdate") != "user_message_chunk":
+                continue
+            content = update.get("content", {})
+            text = ""
+            if isinstance(content, dict) and content.get("type") == "text":
+                text = content.get("text", "")
+            elif isinstance(content, str):
+                text = content
+            if text.strip():
+                turns.append({
+                    "index": len(turns),
+                    "content": text,
+                    "timestamp": event.get("timestamp", 0),
+                })
+
+    return turns
+
+
+def get_boundary_conversation(agent_name: str, checkpoint_id: str) -> list[dict]:
+    """Extract full user+assistant conversation between this checkpoint and the next.
+
+    Returns list of dicts suitable for chat_history format:
+      [{"type": "user", "content": [{"type":"text","text":"..."}]},
+       {"type": "assistant", "content": "..."},
+       ...]
+    """
+    reg = _load_session_registry()
+    entry = reg.get(agent_name)
+    if not entry:
+        return []
+
+    sid = entry.get("session_id", "")
+    session_dir = _find_session_dir(sid)
+    if not session_dir:
+        return []
+
+    updates_path = session_dir / "updates.jsonl"
+    if not updates_path.exists():
+        return []
+
+    # Find checkpoint boundary lines
+    target_line = None
+    next_cp_line = None
+
+    with open(updates_path) as f:
+        for i, line in enumerate(f):
+            if "compaction_checkpoint" not in line:
+                continue
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            update = event.get("params", {}).get("update", {})
+            if update.get("sessionUpdate") != "compaction_checkpoint":
+                continue
+            if update.get("checkpoint_id") == checkpoint_id:
+                target_line = i
+            elif target_line is not None:
+                next_cp_line = i
+                break
+
+    if target_line is None:
+        return []
+
+    # Assemble user + assistant turns
+    entries: list[dict] = []
+    current_agent_chunks: list[str] = []
+
+    with open(updates_path) as f:
+        for i, line in enumerate(f):
+            if i <= target_line:
+                continue
+            if next_cp_line is not None and i >= next_cp_line:
+                break
+            line = line.strip()
+            if not line:
+                continue
+            if "user_message_chunk" not in line and "agent_message_chunk" not in line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            update = event.get("params", {}).get("update", {})
+            su = update.get("sessionUpdate", "")
+
+            if su == "user_message_chunk":
+                if current_agent_chunks:
+                    entries.append({"type": "assistant", "content": "".join(current_agent_chunks)})
+                    current_agent_chunks = []
+                content = update.get("content", {})
+                text = ""
+                if isinstance(content, dict) and content.get("type") == "text":
+                    text = content.get("text", "")
+                elif isinstance(content, str):
+                    text = content
+                if text.strip():
+                    entries.append({"type": "user", "content": [{"type": "text", "text": text}]})
+
+            elif su == "agent_message_chunk":
+                content = update.get("content", {})
+                if isinstance(content, dict) and content.get("type") == "text":
+                    current_agent_chunks.append(content.get("text", ""))
+                elif isinstance(content, str):
+                    current_agent_chunks.append(content)
+
+    if current_agent_chunks:
+        entries.append({"type": "assistant", "content": "".join(current_agent_chunks)})
+
+    return entries
+
+
 def _load_session_registry() -> dict:
     try:
         return json.loads(SESSION_REGISTRY.read_text())
