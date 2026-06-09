@@ -238,8 +238,8 @@ class LiveTailer:
                 text = update.get("content", {}).get("text", "")
                 model = meta.get("modelId", "")
 
-                if self._current_agent and self._current_agent.get("_turn_ts") == ts:
-                    # Same turn — append content
+                if self._current_agent:
+                    # Same logical turn — append content (even across tool calls)
                     self._current_agent["content"] += text
                     # Emit an update for streaming
                     results.append({
@@ -249,10 +249,7 @@ class LiveTailer:
                         "thinking": self._current_agent.get("thinking"),
                     })
                 else:
-                    # New agent turn — flush previous
-                    if self._current_agent:
-                        results.append(self._flush_agent())
-
+                    # New agent turn
                     node_id = event_id or new_id()
 
                     # Skip if this node was already parsed at startup
@@ -267,7 +264,6 @@ class LiveTailer:
                         "timestamp": ts * 1000,
                         "model": model,
                         "tools": [],
-                        "_turn_ts": ts,
                     }
                     self._current_thinking = None
 

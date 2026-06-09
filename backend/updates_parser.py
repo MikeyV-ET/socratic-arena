@@ -82,14 +82,11 @@ def parse_updates(filepath: str, live_session_id: str | None = None, agent_label
             text = update.get("content", {}).get("text", "")
             model = meta.get("modelId", "")
 
-            if current_agent and current_agent.get("_turn_ts") == ts:
-                # Same turn, append
+            if current_agent:
+                # Same logical turn — append (even across tool calls)
                 current_agent["content"] += text
             else:
                 # New agent turn
-                if current_agent:
-                    entries.append(current_agent)
-
                 current_agent = {
                     "id": event_id or new_id(),
                     "role": "assistant",
@@ -99,7 +96,6 @@ def parse_updates(filepath: str, live_session_id: str | None = None, agent_label
                     "tools": [],
                     "model": model,
                     "agent_label": agent_label if agent_label else ("Knight" if (live_session_id and entry_session_id == live_session_id) else "Sixel"),
-                    "_turn_ts": ts,
                 }
                 current_thinking = None
 
@@ -129,10 +125,6 @@ def parse_updates(filepath: str, live_session_id: str | None = None, agent_label
     # Flush last agent
     if current_agent:
         entries.append(current_agent)
-
-    # Clean up internal fields
-    for e in entries:
-        e.pop("_turn_ts", None)
 
     return entries
 
@@ -289,11 +281,10 @@ def parse_updates_tail(filepath: str, tail_bytes: int = 102400, agent_label: str
             text = update.get("content", {}).get("text", "")
             model = meta.get("modelId", "")
 
-            if current_agent and current_agent.get("_turn_ts") == ts:
+            if current_agent:
+                # Same logical turn — append (even across tool calls)
                 current_agent["content"] += text
             else:
-                if current_agent:
-                    entries.append(current_agent)
                 current_agent = {
                     "id": event_id or new_id(),
                     "role": "assistant",
@@ -303,7 +294,6 @@ def parse_updates_tail(filepath: str, tail_bytes: int = 102400, agent_label: str
                     "tools": [],
                     "model": model,
                     "agent_label": agent_label,
-                    "_turn_ts": ts,
                 }
                 current_thinking = None
 
@@ -320,9 +310,6 @@ def parse_updates_tail(filepath: str, tail_bytes: int = 102400, agent_label: str
 
     if current_agent:
         entries.append(current_agent)
-
-    for e in entries:
-        e.pop("_turn_ts", None)
 
     return entries
 
@@ -422,11 +409,10 @@ def parse_updates_page(filepath: str, before_offset: int, limit: int = 50, agent
         elif su == "agent_message_chunk":
             text = update.get("content", {}).get("text", "")
             model = meta.get("modelId", "")
-            if current_agent and current_agent.get("_turn_ts") == ts:
+            if current_agent:
+                # Same logical turn — append (even across tool calls)
                 current_agent["content"] += text
             else:
-                if current_agent:
-                    entries.append(current_agent)
                 current_agent = {
                     "id": event_id or new_id(),
                     "role": "assistant",
@@ -436,7 +422,6 @@ def parse_updates_page(filepath: str, before_offset: int, limit: int = 50, agent
                     "tools": [],
                     "model": model,
                     "agent_label": agent_label,
-                    "_turn_ts": ts,
                 }
                 current_thinking = None
         elif su == "tool_call":
@@ -451,8 +436,6 @@ def parse_updates_page(filepath: str, before_offset: int, limit: int = 50, agent
 
     if current_agent:
         entries.append(current_agent)
-    for e in entries:
-        e.pop("_turn_ts", None)
 
     # Take only the last `limit` entries
     if len(entries) > limit:
@@ -526,14 +509,10 @@ def search_updates(filepath: str, query: str, limit: int = 50, agent_label: str 
                 text = update.get("content", {}).get("text", "")
                 if not text.strip():
                     continue
-                if current_agent and current_agent.get("_turn_ts") == ts:
+                if current_agent:
                     current_agent.setdefault("thinking", "")
                     current_agent["thinking"] += text
                 else:
-                    if current_agent and query_lower in (current_agent["content"] + current_agent.get("thinking", "")).lower():
-                        results.append(current_agent)
-                        if len(results) >= limit:
-                            break
                     current_agent = {
                         "id": event_id or new_id(),
                         "role": "assistant",
@@ -541,7 +520,6 @@ def search_updates(filepath: str, query: str, limit: int = 50, agent_label: str 
                         "thinking": text,
                         "offset": line_offset,
                         "timestamp": ts * 1000,
-                        "_turn_ts": ts,
                     }
 
             elif su == "tool_call":
@@ -558,20 +536,16 @@ def search_updates(filepath: str, query: str, limit: int = 50, agent_label: str 
 
             elif su == "agent_message_chunk":
                 text = update.get("content", {}).get("text", "")
-                if current_agent and current_agent.get("_turn_ts") == ts:
+                if current_agent:
+                    # Same logical turn — append (even across tool calls)
                     current_agent["content"] += text
                 else:
-                    if current_agent and query_lower in (current_agent["content"] + current_agent.get("thinking", "") + current_agent.get("tool_text", "")).lower():
-                        results.append(current_agent)
-                        if len(results) >= limit:
-                            break
                     current_agent = {
                         "id": event_id or new_id(),
                         "role": "assistant",
                         "content": text,
                         "offset": line_offset,
                         "timestamp": ts * 1000,
-                        "_turn_ts": ts,
                     }
 
         # Flush final agent
@@ -596,7 +570,7 @@ def search_updates(filepath: str, query: str, limit: int = 50, agent_label: str 
         r.pop("content", None)
         r.pop("thinking", None)
         r.pop("tool_text", None)
-        r.pop("_turn_ts", None)
+
 
     return results
 
