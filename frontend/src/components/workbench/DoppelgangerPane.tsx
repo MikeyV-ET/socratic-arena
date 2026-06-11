@@ -47,8 +47,11 @@ function formatDate(datetime: string): string {
   }
 }
 
+const KNOWN_AGENTS = ["Sr", "Jr", "Trip", "Q", "Cinco"];
+
 export function DoppelgangerPane() {
-  const agent = useArenaStore((s) => s.currentAgent) || "Q";
+  const currentAgent = useArenaStore((s) => s.currentAgent) || "Q";
+  const [agent, setAgent] = useState(currentAgent);
   const base = window.location.pathname.replace(/\/+$/, "");
 
   // Setup phase
@@ -328,10 +331,26 @@ export function DoppelgangerPane() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-4">
+        {/* Agent selection */}
+        <section className="space-y-1.5">
+          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+            Agent
+          </label>
+          <select
+            value={agent}
+            onChange={(e) => { setAgent(e.target.value); setSelectedBoundary(""); setTurns([]); setSelectedTurn(null); }}
+            className="w-full bg-muted text-foreground text-xs px-2 py-1.5 rounded-md border border-border focus:outline-none focus:ring-1 focus:ring-ring font-mono"
+          >
+            {KNOWN_AGENTS.map((a) => (
+              <option key={a} value={a}>{a}</option>
+            ))}
+          </select>
+        </section>
+
         {/* Boundary selection */}
         <section className="space-y-1.5">
           <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
-            1. Compaction boundary ({agent})
+            Compaction boundary
           </label>
           <select
             value={selectedBoundary}
@@ -353,7 +372,7 @@ export function DoppelgangerPane() {
         {/* Turn selection */}
         <section className="space-y-1.5">
           <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
-            2. Select inflection turn ({agent})
+            Inflection turn
           </label>
           {loadingTurns ? (
             <p className="text-[10px] text-muted-foreground animate-pulse">Loading turns...</p>
@@ -389,7 +408,7 @@ export function DoppelgangerPane() {
         {/* Prompt modifications */}
         <section className="space-y-1.5">
           <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
-            3. Modify system prompt (optional)
+            Modify system prompt (optional)
           </label>
           <div className="space-y-2">
             {findReplacePairs.map((pair, i) => (
