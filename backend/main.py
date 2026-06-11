@@ -145,6 +145,7 @@ async def doppelganger_spawn(body: dict):
         context_entries=context_entries,
         repo_path=body.get("repo_path"),
         repo_commit=body.get("repo_commit"),
+        model=body.get("model", ""),
     )
     return {"doppelganger": doppel.to_dict()}
 

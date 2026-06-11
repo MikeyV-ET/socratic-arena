@@ -47,11 +47,12 @@ function formatDate(datetime: string): string {
   }
 }
 
-const KNOWN_AGENTS = ["Sr", "Jr", "Trip", "Q", "Cinco"];
+const KNOWN_AGENTS = ["Sr", "Jr", "Trip", "Q", "Cinco", "Squiggy"];
 
 export function DoppelgangerPane() {
   const currentAgent = useArenaStore((s) => s.currentAgent) || "Q";
   const [agent, setAgent] = useState(currentAgent);
+  const [model, setModel] = useState("");
   const base = window.location.pathname.replace(/\/+$/, "");
 
   // Setup phase
@@ -140,6 +141,7 @@ export function DoppelgangerPane() {
           agent: agent,
           checkpoint_id: selectedBoundary,
           inflection_turn: selectedTurn,
+          model: model || undefined,
           modifications: Object.keys(modifications).length > 0 ? modifications : undefined,
         }),
       });
@@ -345,6 +347,20 @@ export function DoppelgangerPane() {
               <option key={a} value={a}>{a}</option>
             ))}
           </select>
+        </section>
+
+        {/* Model override */}
+        <section className="space-y-1.5">
+          <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+            Model (blank = coding-mix-latest)
+          </label>
+          <input
+            type="text"
+            placeholder="coding-mix-latest"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            className="w-full bg-muted text-foreground text-xs px-2 py-1.5 rounded-md border border-border focus:outline-none focus:ring-1 focus:ring-ring font-mono"
+          />
         </section>
 
         {/* Boundary selection */}

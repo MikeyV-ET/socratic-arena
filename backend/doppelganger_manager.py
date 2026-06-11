@@ -108,6 +108,7 @@ class DoppelgangerManager:
         context_entries: list[dict] | None = None,
         repo_path: str | None = None,
         repo_commit: str | None = None,
+        model: str = "",
     ) -> Doppelganger:
         """Spawn a persistent doppelganger from a compaction checkpoint.
 
@@ -201,7 +202,7 @@ class DoppelgangerManager:
             # 4. Start grok process with system prompt override
             #    Prevents grok from discovering ~/agents/AGENTS.md via directory walk
             cwd = worktree_path or work_dir
-            doppel._proc = await self._start_grok(cwd, system_prompt=checkpoint.system_prompt)
+            doppel._proc = await self._start_grok(cwd, system_prompt=checkpoint.system_prompt, model=model)
 
             # 5. JSON-RPC handshake: initialize + session/load
             await self._handshake(doppel)
@@ -457,9 +458,9 @@ class DoppelgangerManager:
 
         return session_id, session_dir
 
-    async def _start_grok(self, cwd: Path, system_prompt: str = "") -> asyncio.subprocess.Process:
+    async def _start_grok(self, cwd: Path, system_prompt: str = "", model: str = "") -> asyncio.subprocess.Process:
         """Start a grok agent stdio subprocess."""
-        env = {**os.environ, "GROK_MODEL": MODEL}
+        env = {**os.environ, "GROK_MODEL": model or MODEL}
         binary = self.grok_binary
         if not Path(binary).exists():
             binary = "grok"
