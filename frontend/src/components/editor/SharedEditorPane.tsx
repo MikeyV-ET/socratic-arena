@@ -9,6 +9,9 @@ import * as Y from "yjs";
 import { yCollab } from "y-codemirror.next";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import { useArenaStore } from "@/stores/arenaStore";
 import { wysiwygPlugin, wysiwygTheme } from "./wysiwygMarkdown";
 import { authorColorPlugin, authorColorTheme, authorColorConfig } from "./authorColors";
@@ -881,7 +884,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
               data-testid="shared-editor-preview"
               style={{ display: viewMode === "preview" ? undefined : "none" }}
             >
-              <Markdown remarkPlugins={[remarkGfm]}>{previewText}</Markdown>
+              <Markdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{previewText}</Markdown>
             </div>
             {viewMode === "table" && csvData && (
               <div

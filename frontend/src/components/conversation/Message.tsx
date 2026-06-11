@@ -1,6 +1,9 @@
 import { useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import type { ConversationNode } from "@/types";
 import { useArenaStore } from "@/stores/arenaStore";
 import { FlagButton } from "./FlagButton";
@@ -118,7 +121,7 @@ export function Message({ node }: MessageProps) {
 
         {/* Content */}
         <div className={`${proseClass}${theme === "dark" ? " prose-invert" : ""}`}>
-          <Markdown remarkPlugins={[remarkGfm]}>{displayContent}</Markdown>
+          <Markdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{displayContent}</Markdown>
           {streamingContent !== null && (
             <span className="inline-block w-0.5 h-4 bg-success animate-pulse ml-0.5 align-text-bottom" />
           )}
