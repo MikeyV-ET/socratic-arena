@@ -198,9 +198,10 @@ class DoppelgangerManager:
             doppel.session_id = session_id
             doppel.session_dir = session_dir
 
-            # 4. Start grok process
+            # 4. Start grok process with system prompt override
+            #    Prevents grok from discovering ~/agents/AGENTS.md via directory walk
             cwd = worktree_path or work_dir
-            doppel._proc = await self._start_grok(cwd)
+            doppel._proc = await self._start_grok(cwd, system_prompt=checkpoint.system_prompt)
 
             # 5. JSON-RPC handshake: initialize + session/load
             await self._handshake(doppel)
@@ -456,15 +457,19 @@ class DoppelgangerManager:
 
         return session_id, session_dir
 
-    async def _start_grok(self, cwd: Path) -> asyncio.subprocess.Process:
+    async def _start_grok(self, cwd: Path, system_prompt: str = "") -> asyncio.subprocess.Process:
         """Start a grok agent stdio subprocess."""
         env = {**os.environ, "GROK_MODEL": MODEL}
         binary = self.grok_binary
         if not Path(binary).exists():
             binary = "grok"
 
+        args = [binary, "agent", "stdio"]
+        if system_prompt:
+            args.extend(["--system-prompt-override", system_prompt])
+
         proc = await asyncio.create_subprocess_exec(
-            binary, "agent", "stdio",
+            *args,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
