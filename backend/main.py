@@ -3416,7 +3416,7 @@ async def load_notebook(body: dict):
     return {"status": "ok", "entries": len(state.notebook.entries)}
 
 
-# --- Shell PTY WebSocket ---
+# --- Shell (tmux) ---
 
 import pty as _pty_mod
 import subprocess
@@ -3425,23 +3425,134 @@ import fcntl
 import termios
 import signal
 
-_pty_sessions: dict[str, dict] = {}
+_shell_sessions: dict[str, dict] = {}  # session_id -> {fd, pid, tmux_name, agent, cwd}
+
+
+def _tmux_session_exists(name: str) -> bool:
+    return subprocess.run(
+        ["tmux", "has-session", "-t", name],
+        capture_output=True,
+    ).returncode == 0
+
+
+def _tmux_create(name: str, cwd: str | None = None) -> None:
+    cmd = ["tmux", "new-session", "-d", "-s", name, "-x", "120", "-y", "36"]
+    if cwd:
+        cmd.extend(["-c", cwd])
+    subprocess.run(cmd, check=True)
+
+
+def _tmux_kill(name: str) -> None:
+    subprocess.run(["tmux", "kill-session", "-t", name], capture_output=True)
+
+
+@app.post("/api/shell/create")
+async def shell_create(body: dict):
+    """Create a named tmux shell session.
+
+    Body: {"name": "optional-name", "agent": "Jr", "cwd": "/some/path"}
+    Returns: {"session_id": "sa-shell-Jr-1718...", "tmux_name": "sa-shell-Jr-1718..."}
+    """
+    agent = body.get("agent", "")
+    cwd = body.get("cwd")
+    name = body.get("name") or f"sa-shell-{agent or 'user'}-{int(time.time())}"
+
+    if _tmux_session_exists(name):
+        return {"session_id": name, "tmux_name": name, "existed": True}
+
+    await asyncio.to_thread(_tmux_create, name, cwd)
+    _shell_sessions[name] = {"tmux_name": name, "agent": agent, "cwd": cwd}
+
+    await broadcast({
+        "type": "shell.created",
+        "payload": {"session_id": name, "agent": agent, "cwd": cwd},
+    })
+
+    return {"session_id": name, "tmux_name": name}
+
+
+@app.get("/api/shell/list")
+async def shell_list():
+    """List active tmux shell sessions managed by SA."""
+    result = await asyncio.to_thread(
+        subprocess.run,
+        ["tmux", "list-sessions", "-F", "#{session_name}"],
+        capture_output=True, text=True,
+    )
+    tmux_sessions = [s for s in result.stdout.strip().split("\n") if s.startswith("sa-shell-")]
+    sessions = []
+    for name in tmux_sessions:
+        info = _shell_sessions.get(name, {})
+        sessions.append({
+            "session_id": name,
+            "agent": info.get("agent", ""),
+            "cwd": info.get("cwd"),
+        })
+    return {"sessions": sessions}
+
+
+@app.post("/api/shell/{session_id}/send-keys")
+async def shell_send_keys(session_id: str, body: dict):
+    """Send keystrokes to a tmux session. Body: {"keys": "ls -la", "enter": true}"""
+    keys = body.get("keys", "")
+    enter = body.get("enter", True)
+    if not keys:
+        return {"error": "empty keys"}
+
+    cmd = ["tmux", "send-keys", "-t", session_id, keys]
+    if enter:
+        cmd.append("Enter")
+
+    result = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        return {"error": result.stderr.strip() or "send-keys failed"}
+    return {"ok": True}
+
+
+@app.get("/api/shell/{session_id}/capture")
+async def shell_capture(session_id: str):
+    """Capture current pane content from a tmux session."""
+    result = await asyncio.to_thread(
+        subprocess.run,
+        ["tmux", "capture-pane", "-t", session_id, "-p", "-S", "-200"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return {"error": result.stderr.strip() or "capture failed"}
+    return {"content": result.stdout}
+
+
+@app.delete("/api/shell/{session_id}")
+async def shell_destroy(session_id: str):
+    """Kill a tmux shell session."""
+    await asyncio.to_thread(_tmux_kill, session_id)
+    _shell_sessions.pop(session_id, None)
+    return {"ok": True}
 
 
 @app.websocket("/ws/shell/{session_id}")
 async def shell_websocket(ws: WebSocket, session_id: str):
-    """WebSocket PTY endpoint. Spawns bash and pipes I/O bidirectionally."""
+    """WebSocket terminal endpoint. Attaches to a tmux session (creating one if needed)."""
     await ws.accept()
 
+    # Ensure tmux session exists
+    tmux_name = session_id
+    if not await asyncio.to_thread(_tmux_session_exists, tmux_name):
+        await asyncio.to_thread(_tmux_create, tmux_name)
+        _shell_sessions[tmux_name] = {"tmux_name": tmux_name, "agent": "", "cwd": None}
+
+    # Attach to tmux via PTY
     master_fd, slave_fd = _pty_mod.openpty()
     proc = subprocess.Popen(
-        ["bash", "-i"],
+        ["tmux", "attach-session", "-t", tmux_name],
         stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
         preexec_fn=os.setsid,
     )
     os.close(slave_fd)
 
-    _pty_sessions[session_id] = {"fd": master_fd, "pid": proc.pid}
+    _shell_sessions.setdefault(tmux_name, {})
+    _shell_sessions[tmux_name]["fd"] = master_fd
+    _shell_sessions[tmux_name]["pid"] = proc.pid
 
     fcntl.ioctl(master_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
 
@@ -3485,7 +3596,6 @@ async def shell_websocket(ws: WebSocket, session_id: str):
             os.close(master_fd)
         except OSError:
             pass
-        _pty_sessions.pop(session_id, None)
 
 
 # --- Adapter process management ---
