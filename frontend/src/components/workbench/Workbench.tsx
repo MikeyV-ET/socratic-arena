@@ -99,7 +99,7 @@ function TabContent({ panel }: { panel: WorkbenchPanel }) {
       content = <FilesystemPane />;
       break;
     case "shell":
-      return <ShellPane instanceId={panel.instanceId} />;
+      return <ShellPane instanceId={panel.instanceId} config={panel.config} />;
     default:
       content = <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Unknown panel type</div>;
   }

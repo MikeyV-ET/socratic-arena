@@ -101,6 +101,15 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       break;
     }
 
+    case "shell.created": {
+      const shell = msg.payload as { session_id: string; agent?: string; cwd?: string };
+      const label = shell.agent ? `Shell (${shell.agent})` : "Shell";
+      store.addPanel("shell", { sessionId: shell.session_id, agent: shell.agent, cwd: shell.cwd });
+      const newest = store.workbenchPanels[store.workbenchPanels.length - 1];
+      if (newest) store.updatePanelLabel(newest.instanceId, label);
+      break;
+    }
+
     case "panel.agent_claimed":
       store.setAgentPanelClaimed(
         msg.payload.panelId as string,

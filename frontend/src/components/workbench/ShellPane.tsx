@@ -12,7 +12,9 @@ function stripAnsi(s: string): string {
     .replace(/\r/g, "");
 }
 
-export function ShellPane({ instanceId }: { instanceId: string }) {
+export function ShellPane({ instanceId, config }: { instanceId: string; config?: Record<string, any> }) {
+  const agent = config?.agent as string | undefined;
+  const sessionId = (config?.sessionId as string) || instanceId;
   const containerRef = useRef<HTMLDivElement>(null);
   const mirrorRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -39,7 +41,7 @@ export function ShellPane({ instanceId }: { instanceId: string }) {
 
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = basePath ? new URL(basePath, window.location.href).host : window.location.host;
-    const wsUrl = `${proto}//${host}/ws/shell/${instanceId}`;
+    const wsUrl = `${proto}//${host}/ws/shell/${sessionId}`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
@@ -94,12 +96,21 @@ export function ShellPane({ instanceId }: { instanceId: string }) {
       term.dispose();
       termRef.current = null;
     };
-  }, [instanceId]);
+  }, [sessionId]);
 
 
 
   return (
     <div className="h-full w-full relative" style={{ backgroundColor: "#1e1e1e" }}>
+      {agent && (
+        <div
+          data-testid="shell-agent-badge"
+          className="absolute top-1 right-2 z-10 px-2 py-0.5 rounded text-xs font-medium"
+          style={{ backgroundColor: "rgba(59,130,246,0.8)", color: "#fff" }}
+        >
+          {agent}
+        </div>
+      )}
       <div
         data-testid="shell-terminal"
         ref={containerRef}
