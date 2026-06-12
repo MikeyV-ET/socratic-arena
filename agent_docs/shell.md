@@ -41,7 +41,52 @@ Eric and an agent can both see the same SA instance in the browser. To collabora
 3. Either party opens a shell panel — it's visible in the shared workbench
 4. The shell runs on the server, so both see the same filesystem
 
-**Note:** Currently each shell panel is its own PTY session. There is no tmux-based session sharing yet (that's a planned feature where an agent could fire up a tmux session and the user watches in real-time). For now, both parties can open separate shells to the same machine, or one can watch while the other types.
+## Tmux Integration (Agent-Driven Shells)
+
+Agents can create, drive, and read shell sessions programmatically. All sessions use tmux under the hood.
+
+### Create a shell (triggers auto-open in frontend)
+
+```bash
+curl -X POST http://localhost:8000/api/shell/create \
+  -H 'Content-Type: application/json' \
+  -d '{"agent": "Jr", "cwd": "/home/eric"}'
+# Returns: {"session_id": "sa-shell-Jr-1718...", "tmux_name": "sa-shell-Jr-1718..."}
+```
+
+When called, the frontend receives a `shell.created` broadcast and auto-opens a "Shell (Jr)" tab with an agent badge.
+
+### Send commands
+
+```bash
+curl -X POST http://localhost:8000/api/shell/sa-shell-Jr-1718.../send-keys \
+  -H 'Content-Type: application/json' \
+  -d '{"keys": "ls -la", "enter": true}'
+```
+
+### Read current screen
+
+```bash
+curl http://localhost:8000/api/shell/sa-shell-Jr-1718.../capture
+# Returns: {"content": "... pane text ..."}
+```
+
+### List active sessions
+
+```bash
+curl http://localhost:8000/api/shell/list
+# Returns: {"sessions": [{"session_id": "...", "agent": "Jr", "cwd": "..."}]}
+```
+
+### Destroy a session
+
+```bash
+curl -X DELETE http://localhost:8000/api/shell/sa-shell-Jr-1718...
+```
+
+### Shared visibility
+
+Because every shell is a tmux session, both the user (via the browser panel) and the agent (via send-keys/capture) see the same terminal. The user can type in the browser; the agent can send-keys via API. Both see each other's output in real-time.
 
 ## Ports
 
