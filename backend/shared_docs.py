@@ -162,6 +162,9 @@ def _ensure_watching(file_path: str, doc_id: str):
     parent_dir = str(Path(file_path).resolve().parent)
     if parent_dir in _watched_dirs:
         return
+    if not Path(parent_dir).is_dir():
+        log.warning("File watcher: skipping missing dir %s", parent_dir)
+        return
 
     if _observer is None:
         _observer = Observer()
