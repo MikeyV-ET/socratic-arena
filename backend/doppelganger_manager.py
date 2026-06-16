@@ -251,6 +251,8 @@ class DoppelgangerManager:
                 # doppelganger actually experiences the conversation that
                 # occurred after its compaction checkpoint.
                 prompt_text = message
+                log.info("send: doppel %s has %d context_entries, injected=%s",
+                         doppel_id, len(doppel._context_entries), doppel._context_injected)
                 if not doppel._context_injected and doppel._context_entries:
                     lines = [
                         "<context>",
@@ -441,14 +443,26 @@ class DoppelgangerManager:
                             content = " ".join(c.get("text", "") for c in content if isinstance(c, dict))
                         history.append({
                             "type": entry.get("type", ""),
-                            "content": content[:500],  # truncate for display
+                            "content": content[:2000],
                         })
                     except json.JSONDecodeError:
                         pass
 
+        # Format injected context entries
+        context = []
+        for entry in doppel._context_entries:
+            content = entry.get("content", "")
+            if isinstance(content, list):
+                content = " ".join(c.get("text", "") for c in content if isinstance(c, dict))
+            context.append({
+                "type": entry.get("type", ""),
+                "content": content[:2000],
+            })
+
         return {
             "system_prompt": agents_md,
             "history": history,
+            "context_entries": context,
             "source_agent": doppel.source_agent,
             "checkpoint_id": doppel.checkpoint_id,
         }

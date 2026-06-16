@@ -31,6 +31,19 @@ interface DoppelgangerInfo {
   error: string;
 }
 
+interface ContextEntry {
+  type: string;
+  content: string;
+}
+
+interface DoppelContext {
+  system_prompt: string;
+  history: ContextEntry[];
+  context_entries: ContextEntry[];
+  source_agent: string;
+  checkpoint_id: string;
+}
+
 interface ChatTurn {
   role: string;
   content: string;
@@ -71,6 +84,7 @@ export function DoppelgangerPane() {
   const [chatTurns, setChatTurns] = useState<ChatTurn[]>([]);
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
+  const [doppelContext, setDoppelContext] = useState<DoppelContext | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -108,6 +122,15 @@ export function DoppelgangerPane() {
         setLoadingTurns(false);
       });
   }, [selectedBoundary, agent, base]);
+
+  // Fetch context when doppelganger becomes active
+  useEffect(() => {
+    if (!doppel) { setDoppelContext(null); return; }
+    fetch(`${base}/api/doppelganger/${doppel.id}/context`)
+      .then((r) => r.json())
+      .then((data) => { if (!data.error) setDoppelContext(data); })
+      .catch(() => {});
+  }, [doppel, base]);
 
   // Auto-scroll on new turns
   useEffect(() => {
@@ -247,7 +270,53 @@ export function DoppelgangerPane() {
         </div>
 
         <div ref={scrollRef} className="flex-1 overflow-y-auto">
-          {chatTurns.length === 0 ? (
+          {/* Context viewer */}
+          {doppelContext && (
+            <div className="p-3 space-y-2 border-b border-border">
+              <details>
+                <summary className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium cursor-pointer hover:text-foreground">
+                  System Prompt ({doppelContext.system_prompt.length.toLocaleString()} chars)
+                </summary>
+                <pre className="mt-1 text-[10px] text-muted-foreground whitespace-pre-wrap font-mono max-h-64 overflow-auto bg-muted/50 rounded p-2 border border-border">
+                  {doppelContext.system_prompt}
+                </pre>
+              </details>
+              {doppelContext.history.length > 0 && (
+                <details>
+                  <summary className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium cursor-pointer hover:text-foreground">
+                    Checkpoint History ({doppelContext.history.length} entries)
+                  </summary>
+                  <div className="mt-1 space-y-1 max-h-64 overflow-auto">
+                    {doppelContext.history.map((e, i) => (
+                      <div key={i} className="bg-muted/50 rounded p-2 border border-border">
+                        <span className="text-[10px] font-mono text-primary/70">[{e.type}]</span>
+                        <pre className="text-[10px] text-muted-foreground whitespace-pre-wrap font-mono mt-0.5">{e.content}</pre>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+              {doppelContext.context_entries.length > 0 && (
+                <details open>
+                  <summary className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium cursor-pointer hover:text-foreground">
+                    Injected Context ({doppelContext.context_entries.length} entries &mdash; post-compaction conversation)
+                  </summary>
+                  <div className="mt-1 space-y-1 max-h-64 overflow-auto">
+                    {doppelContext.context_entries.map((e, i) => (
+                      <div key={i} className={`rounded p-2 border ${
+                        e.type === "assistant" ? "bg-muted border-border" : "bg-primary/5 border-primary/20"
+                      }`}>
+                        <span className="text-[10px] font-mono text-primary/70">[{e.type}]</span>
+                        <pre className="text-[10px] text-foreground/80 whitespace-pre-wrap font-mono mt-0.5">{e.content}</pre>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+          )}
+
+          {chatTurns.length === 0 && !doppelContext ? (
             <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
               Send a message to start talking to the doppelganger
             </div>

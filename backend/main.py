@@ -122,6 +122,8 @@ async def doppelganger_spawn(body: dict):
     # If inflection_turn is specified, extract conversation up to that turn
     context_entries = body.get("context_entries")
     inflection_turn = body.get("inflection_turn")
+    log.info("doppelganger spawn: agent=%s, checkpoint=%s, inflection_turn=%r, has_context=%s",
+             agent, checkpoint_id[:12], inflection_turn, context_entries is not None)
     if inflection_turn is not None and context_entries is None:
         from compaction_parser import get_boundary_conversation
         conversation = await asyncio.to_thread(get_boundary_conversation, agent, checkpoint_id)
@@ -137,7 +139,11 @@ async def doppelganger_spawn(body: dict):
                         break
                     user_count += 1
             context_entries = conversation[:split_pos]
+            log.info("doppelganger context: %d conversation entries, split at %d, %d context entries",
+                     len(conversation), split_pos, len(context_entries))
 
+    log.info("doppelganger spawn: passing %d context_entries to manager",
+             len(context_entries) if context_entries else 0)
     doppel = await _doppel_manager.spawn(
         agent_name=agent,
         checkpoint_id=checkpoint_id,
