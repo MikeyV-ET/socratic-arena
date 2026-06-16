@@ -443,7 +443,7 @@ class DoppelgangerManager:
                             content = " ".join(c.get("text", "") for c in content if isinstance(c, dict))
                         history.append({
                             "type": entry.get("type", ""),
-                            "content": content[:2000],
+                            "content": content,
                         })
                     except json.JSONDecodeError:
                         pass
@@ -456,7 +456,7 @@ class DoppelgangerManager:
                 content = " ".join(c.get("text", "") for c in content if isinstance(c, dict))
             context.append({
                 "type": entry.get("type", ""),
-                "content": content[:2000],
+                "content": content,
             })
 
         return {

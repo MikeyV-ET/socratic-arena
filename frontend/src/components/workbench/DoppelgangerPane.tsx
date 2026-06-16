@@ -180,7 +180,7 @@ export function DoppelgangerPane() {
     } finally {
       setSpawning(false);
     }
-  }, [selectedBoundary, agent, findReplacePairs, base]);
+  }, [selectedBoundary, selectedTurn, agent, model, findReplacePairs, base]);
 
   // Send message
   const handleSend = useCallback(async () => {
