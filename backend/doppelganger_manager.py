@@ -224,6 +224,9 @@ class DoppelgangerManager:
     async def send(self, doppel_id: str, message: str, sender: str = "eric") -> dict:
         """Send a message to a doppelganger and get its response.
 
+        Collects response by tailing updates.jsonl for agent_message_chunk
+        events and events.jsonl for turn_ended.
+
         Returns dict with: response, thinking, tool_calls, total_tokens
         """
         doppel = self._active.get(doppel_id)
@@ -248,68 +251,90 @@ class DoppelgangerManager:
                     "method": "session/prompt",
                     "params": {
                         "sessionId": doppel.session_id,
-                        "messages": [{"role": "user", "content": message}],
+                        "prompt": [{"type": "text", "text": message}],
                     },
                 }
                 await self._send_json(doppel._proc, rpc_msg)
 
-                # Read response (may include streaming chunks)
+                # Find session directory for tailing (after send, so it exists)
+                session_dir = None
+                for _ in range(20):  # wait up to 2s for session dir
+                    session_dir = self._find_active_session_dir(doppel)
+                    if session_dir:
+                        break
+                    await asyncio.sleep(0.1)
+                if not session_dir:
+                    raise RuntimeError("Cannot find doppelganger session directory")
+
+                updates_path = session_dir / "updates.jsonl"
+                events_path = session_dir / "events.jsonl"
+
+
+                # Collect response by tailing updates.jsonl and events.jsonl
                 response_text = ""
                 thinking_text = ""
-                tool_calls = []
                 total_tokens = 0
+                updates_pos = 0  # Read from beginning — we want ALL agent chunks from this turn
+                events_pos = 0
+                deadline = time.time() + 300  # 5 min timeout
 
-                while True:
-                    line = await asyncio.wait_for(
-                        doppel._proc.stdout.readline(), timeout=300
-                    )
-                    if not line:
-                        raise RuntimeError("Doppelganger process exited unexpectedly")
+                while time.time() < deadline:
+                    await asyncio.sleep(0.3)
 
-                    data = json.loads(line.decode().strip())
+                    # Check for turn_ended in events.jsonl
+                    turn_ended = False
+                    if events_path.exists() and events_path.stat().st_size > events_pos:
+                        with open(events_path) as f:
+                            f.seek(events_pos)
+                            for line in f:
+                                line = line.strip()
+                                if not line:
+                                    continue
+                                try:
+                                    ev = json.loads(line)
+                                    if ev.get("type") == "turn_ended":
+                                        turn_ended = True
+                                except json.JSONDecodeError:
+                                    pass
 
-                    # JSON-RPC response (final)
-                    if "result" in data and data.get("id") == doppel._rpc_id:
-                        result = data["result"]
-                        if isinstance(result, dict):
-                            response_text = result.get("content", response_text)
-                            thinking_text = result.get("thinking", thinking_text)
-                            total_tokens = result.get("totalTokens", total_tokens)
+                    # Read new content from updates.jsonl
+                    if updates_path.exists() and updates_path.stat().st_size > updates_pos:
+                        with open(updates_path) as f:
+                            f.seek(updates_pos)
+                            for line in f:
+                                line = line.strip()
+                                if not line:
+                                    continue
+                                try:
+                                    raw = json.loads(line)
+                                    # Updates can be nested: {params: {update: {sessionUpdate: ...}}}
+                                    update = raw.get("params", {}).get("update", raw)
+                                    su = update.get("sessionUpdate", "")
+                                    if su == "agent_message_chunk":
+                                        text = update.get("content", {}).get("text", "")
+                                        response_text += text
+                                    elif su == "agent_thought_chunk":
+                                        text = update.get("content", {}).get("text", "")
+                                        thinking_text += text
+                                    meta = update.get("_meta", {})
+                                    if meta.get("totalTokens"):
+                                        total_tokens = meta["totalTokens"]
+                                except json.JSONDecodeError:
+                                    pass
+                            updates_pos = f.tell()
+
+                    if turn_ended:
                         break
 
-                    # JSON-RPC error
-                    if "error" in data and data.get("id") == doppel._rpc_id:
-                        raise RuntimeError(f"RPC error: {data['error']}")
-
-                    # Streaming notification
-                    if data.get("method") == "session/event":
-                        params = data.get("params", {})
-                        event_type = params.get("type", "")
-                        if event_type == "content_block_delta":
-                            delta = params.get("delta", {})
-                            if delta.get("type") == "text_delta":
-                                response_text += delta.get("text", "")
-                            elif delta.get("type") == "thinking_delta":
-                                thinking_text += delta.get("thinking", "")
-                        elif event_type == "content_block_start":
-                            block = params.get("content_block", {})
-                            if block.get("type") == "tool_use":
-                                tool_calls.append({
-                                    "id": block.get("id"),
-                                    "name": block.get("name"),
-                                    "input": {},
-                                })
-                        elif event_type == "message_stop":
-                            # Final tokens often come here
-                            usage = params.get("usage", {})
-                            total_tokens = usage.get("total_tokens", total_tokens)
+                    # Also check if process died
+                    if doppel._proc.returncode is not None:
+                        raise RuntimeError("Doppelganger process exited unexpectedly")
 
                 # Record assistant turn
                 doppel.turns.append(DoppelgangerTurn(
                     role="assistant",
                     content=response_text,
                     thinking=thinking_text,
-                    tool_calls=tool_calls,
                     timestamp=time.time(),
                 ))
 
@@ -317,7 +342,7 @@ class DoppelgangerManager:
                 return {
                     "response": response_text,
                     "thinking": thinking_text,
-                    "tool_calls": tool_calls,
+                    "tool_calls": [],
                     "total_tokens": total_tokens,
                 }
 
@@ -325,6 +350,31 @@ class DoppelgangerManager:
                 doppel.status = "failed"
                 doppel.error = str(e)
                 raise
+
+    def _find_active_session_dir(self, doppel: Doppelganger) -> Path | None:
+        """Find the active session directory for a doppelganger.
+
+        grok creates its own session via session/new, so the active session
+        is NOT our baked one. Find the most recently modified session with
+        non-empty updates.jsonl.
+        """
+        encoded_cwd = url_quote(str(doppel.work_dir), safe="")
+        cwd_dir = GROK_SESSIONS_BASE / encoded_cwd
+        if not cwd_dir.exists():
+            return None
+        # Find session with the largest/most recent updates.jsonl
+        best = None
+        best_size = -1
+        for d in cwd_dir.iterdir():
+            if not d.is_dir():
+                continue
+            updates = d / "updates.jsonl"
+            if updates.exists():
+                size = updates.stat().st_size
+                if size > best_size:
+                    best = d
+                    best_size = size
+        return best
 
     def list_active(self) -> list[dict]:
         """List all active doppelgangers."""
@@ -459,15 +509,21 @@ class DoppelgangerManager:
         return session_id, session_dir
 
     async def _start_grok(self, cwd: Path, system_prompt: str = "", model: str = "") -> asyncio.subprocess.Process:
-        """Start a grok agent stdio subprocess."""
+        """Start a grok agent stdio subprocess.
+
+        If system_prompt is provided, writes it as AGENTS.md in the cwd so
+        grok discovers it instead of walking up to ~/agents/AGENTS.md.
+        """
         env = {**os.environ, "GROK_MODEL": model or MODEL}
         binary = self.grok_binary
         if not Path(binary).exists():
             binary = "grok"
 
-        args = [binary, "agent", "stdio"]
+        # Write system prompt as AGENTS.md so grok picks it up from cwd
         if system_prompt:
-            args.extend(["--system-prompt-override", system_prompt])
+            (cwd / "AGENTS.md").write_text(system_prompt)
+
+        args = [binary, "agent", "stdio"]
 
         proc = await asyncio.create_subprocess_exec(
             *args,
