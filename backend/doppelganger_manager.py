@@ -247,33 +247,10 @@ class DoppelgangerManager:
                     role="user", content=message, timestamp=time.time(),
                 ))
 
-                # On first send, prepend post-compaction context so the
-                # doppelganger actually experiences the conversation that
-                # occurred after its compaction checkpoint.
+                # Context entries are already baked into chat_history.jsonl
+                # and loaded via session/load. No need to inject them again
+                # in the first prompt (that caused double-injection).
                 prompt_text = message
-                log.info("send: doppel %s has %d context_entries, injected=%s",
-                         doppel_id, len(doppel._context_entries), doppel._context_injected)
-                if not doppel._context_injected and doppel._context_entries:
-                    lines = [
-                        "<context>",
-                        "The following conversation occurred after your last compaction checkpoint.",
-                        "You experienced this conversation. Treat it as your memory.",
-                        "",
-                    ]
-                    for entry in doppel._context_entries:
-                        role = entry.get("type", "unknown")
-                        content = entry.get("content", "")
-                        if isinstance(content, list):
-                            content = " ".join(
-                                c.get("text", "") for c in content if isinstance(c, dict)
-                            )
-                        lines.append(f"[{role}]: {content}")
-                        lines.append("")
-                    lines.append("</context>")
-                    lines.append("")
-                    lines.append(message)
-                    prompt_text = "\n".join(lines)
-                    doppel._context_injected = True
 
                 # Send via JSON-RPC session/prompt
                 doppel._rpc_id += 1

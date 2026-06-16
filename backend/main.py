@@ -157,6 +157,96 @@ async def doppelganger_spawn(body: dict):
     return {"doppelganger": doppel.to_dict()}
 
 
+@app.post("/api/doppelganger/preview-context")
+async def doppelganger_preview_context(body: dict):
+    """Preview all context layers a doppelganger would receive, without spawning.
+
+    Used by the frontend to show an editable context preview before spawn.
+    """
+    agent = body.get("agent", "")
+    checkpoint_id = body.get("checkpoint_id", "")
+    if not agent or not checkpoint_id:
+        return {"error": "agent and checkpoint_id required"}
+
+    inflection_turn = body.get("inflection_turn")
+    modifications = body.get("modifications")
+
+    try:
+        # Load checkpoint
+        cp_path = _doppel_manager._replayer.find_checkpoint(agent, checkpoint_id)
+        if not cp_path:
+            return {"error": f"Checkpoint {checkpoint_id} not found for {agent}"}
+
+        checkpoint = _doppel_manager._replayer.load_checkpoint(cp_path)
+
+        # Apply modifications if any (same logic as spawn)
+        if modifications:
+            if modifications.get("find_replace"):
+                checkpoint = _doppel_manager._replayer.patch_system_prompt(
+                    checkpoint, find_replace=modifications["find_replace"]
+                )
+            if modifications.get("agents_md"):
+                checkpoint = _doppel_manager._replayer.patch_system_prompt(
+                    checkpoint, new_agents_md=modifications["agents_md"]
+                )
+
+        # Extract checkpoint history entries (items 1+ are identity/setup entries)
+        checkpoint_history = []
+        for entry in checkpoint.compacted_history[1:]:
+            content = entry.get("content", "")
+            if isinstance(content, list):
+                content = " ".join(
+                    c.get("text", "") for c in content if isinstance(c, dict)
+                )
+            checkpoint_history.append({
+                "type": entry.get("type", ""),
+                "content": content,
+            })
+
+        # Get post-compaction conversation if inflection_turn specified
+        context_entries = []
+        if inflection_turn is not None:
+            from compaction_parser import get_boundary_conversation
+            conversation = await asyncio.to_thread(get_boundary_conversation, agent, checkpoint_id)
+            if conversation:
+                user_count = 0
+                split_pos = len(conversation)
+                for i, entry in enumerate(conversation):
+                    if entry["type"] == "user":
+                        if user_count == inflection_turn:
+                            split_pos = i + 1
+                            break
+                        user_count += 1
+                for entry in conversation[:split_pos]:
+                    content = entry.get("content", "")
+                    if isinstance(content, list):
+                        content = " ".join(
+                            c.get("text", "") for c in content if isinstance(c, dict)
+                        )
+                    context_entries.append({
+                        "type": entry.get("type", ""),
+                        "content": content,
+                    })
+
+        # Read harness rules
+        harness_rules = ""
+        rules_path = Path(__file__).parent / "harness_builtin_rules.txt"
+        if rules_path.exists():
+            harness_rules = rules_path.read_text()
+
+        return {
+            "system_prompt": checkpoint.system_prompt,
+            "harness_rules": harness_rules,
+            "checkpoint_history": checkpoint_history,
+            "context_entries": context_entries,
+            "source_agent": agent,
+            "checkpoint_id": checkpoint_id,
+        }
+    except Exception as e:
+        log.error("preview-context error: %s", e)
+        return {"error": str(e)}
+
+
 @app.get("/api/doppelganger/list")
 async def doppelganger_list():
     """List all active doppelgangers."""
