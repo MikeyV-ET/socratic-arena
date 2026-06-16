@@ -459,8 +459,15 @@ class DoppelgangerManager:
                 "content": content,
             })
 
+        # Read binary-embedded harness rules (fixed, can't be edited)
+        harness_rules = ""
+        rules_path = Path(__file__).parent / "harness_builtin_rules.txt"
+        if rules_path.exists():
+            harness_rules = rules_path.read_text()
+
         return {
             "system_prompt": agents_md,
+            "harness_rules": harness_rules,
             "history": history,
             "context_entries": context,
             "source_agent": doppel.source_agent,

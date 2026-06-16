@@ -38,6 +38,7 @@ interface ContextEntry {
 
 interface DoppelContext {
   system_prompt: string;
+  harness_rules: string;
   history: ContextEntry[];
   context_entries: ContextEntry[];
   source_agent: string;
@@ -273,6 +274,16 @@ export function DoppelgangerPane() {
           {/* Context viewer */}
           {doppelContext && (
             <div className="p-3 space-y-2 border-b border-border">
+              {doppelContext.harness_rules && (
+                <details>
+                  <summary className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium cursor-pointer hover:text-foreground">
+                    Fixed: Binary Rules ({doppelContext.harness_rules.length.toLocaleString()} chars) — cannot be edited
+                  </summary>
+                  <pre className="mt-1 text-[10px] text-muted-foreground/70 whitespace-pre-wrap font-mono max-h-48 overflow-auto bg-muted/30 rounded p-2 border border-border/50">
+                    {doppelContext.harness_rules}
+                  </pre>
+                </details>
+              )}
               <details>
                 <summary className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium cursor-pointer hover:text-foreground">
                   System Prompt ({doppelContext.system_prompt.length.toLocaleString()} chars)
