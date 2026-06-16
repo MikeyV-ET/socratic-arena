@@ -43,7 +43,7 @@ from urllib.parse import quote as url_quote
 log = logging.getLogger(__name__)
 
 GROK_BINARY = str(Path.home() / ".grok" / "bin" / "grok")
-MODEL = "coding-mix-latest"
+MODEL = "grok-composer-2.5-fast"
 
 
 @dataclass

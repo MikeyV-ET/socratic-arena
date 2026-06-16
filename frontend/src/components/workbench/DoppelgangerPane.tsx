@@ -428,12 +428,8 @@ export function DoppelgangerPane() {
             onChange={(e) => setModel(e.target.value)}
             className="w-full bg-muted text-foreground text-xs px-2 py-1.5 rounded-md border border-border focus:outline-none focus:ring-1 focus:ring-ring font-mono"
           >
-            <option value="">coding-mix-latest (default)</option>
-            <option value="grok-composer-2.5-fast">grok-composer-2.5-fast</option>
+            <option value="grok-composer-2.5-fast">grok-composer-2.5-fast (default)</option>
             <option value="sxs-claude-opus-4-6">sxs-claude-opus-4-6</option>
-            <option value="claude-sonnet-4-20250514">claude-sonnet-4-20250514</option>
-            <option value="gpt-4o">gpt-4o</option>
-            <option value="o3">o3</option>
           </select>
         </section>
 
