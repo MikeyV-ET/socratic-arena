@@ -76,6 +76,8 @@ class Doppelganger:
     _rpc_id: int = field(default=0, repr=False)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     _updates_pos: int = field(default=0, repr=False)  # track file position between sends
+    _context_entries: list[dict] = field(default_factory=list, repr=False)  # post-compaction context
+    _context_injected: bool = field(default=False, repr=False)
 
     def to_dict(self) -> dict:
         return {
@@ -199,6 +201,7 @@ class DoppelgangerManager:
             )
             doppel.session_id = session_id
             doppel.session_dir = session_dir
+            doppel._context_entries = context_entries or []
 
             # 4. Start grok process with system prompt override
             #    Prevents grok from discovering ~/agents/AGENTS.md via directory walk
@@ -244,6 +247,32 @@ class DoppelgangerManager:
                     role="user", content=message, timestamp=time.time(),
                 ))
 
+                # On first send, prepend post-compaction context so the
+                # doppelganger actually experiences the conversation that
+                # occurred after its compaction checkpoint.
+                prompt_text = message
+                if not doppel._context_injected and doppel._context_entries:
+                    lines = [
+                        "<context>",
+                        "The following conversation occurred after your last compaction checkpoint.",
+                        "You experienced this conversation. Treat it as your memory.",
+                        "",
+                    ]
+                    for entry in doppel._context_entries:
+                        role = entry.get("type", "unknown")
+                        content = entry.get("content", "")
+                        if isinstance(content, list):
+                            content = " ".join(
+                                c.get("text", "") for c in content if isinstance(c, dict)
+                            )
+                        lines.append(f"[{role}]: {content}")
+                        lines.append("")
+                    lines.append("</context>")
+                    lines.append("")
+                    lines.append(message)
+                    prompt_text = "\n".join(lines)
+                    doppel._context_injected = True
+
                 # Send via JSON-RPC session/prompt
                 doppel._rpc_id += 1
                 rpc_msg = {
@@ -252,7 +281,7 @@ class DoppelgangerManager:
                     "method": "session/prompt",
                     "params": {
                         "sessionId": doppel.session_id,
-                        "prompt": [{"type": "text", "text": message}],
+                        "prompt": [{"type": "text", "text": prompt_text}],
                     },
                 }
                 await self._send_json(doppel._proc, rpc_msg)
