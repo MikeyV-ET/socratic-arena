@@ -595,19 +595,19 @@ class DoppelgangerManager:
     async def _start_grok(self, cwd: Path, system_prompt: str = "", model: str = "") -> asyncio.subprocess.Process:
         """Start a grok agent stdio subprocess.
 
-        If system_prompt is provided, writes it as AGENTS.md in the cwd so
-        grok discovers it instead of walking up to ~/agents/AGENTS.md.
+        Uses --system-prompt-override (top-level flag, before 'agent stdio')
+        to replace the built-in grok system prompt with the checkpoint's.
         """
         env = {**os.environ, "GROK_MODEL": model or MODEL}
         binary = self.grok_binary
         if not Path(binary).exists():
             binary = "grok"
 
-        # Write system prompt as AGENTS.md so grok picks it up from cwd
+        # --system-prompt-override is a top-level flag, must come before 'agent stdio'
+        args = [binary]
         if system_prompt:
-            (cwd / "AGENTS.md").write_text(system_prompt)
-
-        args = [binary, "agent", "stdio"]
+            args += ["--system-prompt-override", system_prompt]
+        args += ["agent", "stdio"]
 
         proc = await asyncio.create_subprocess_exec(
             *args,
