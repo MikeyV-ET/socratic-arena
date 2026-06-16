@@ -75,6 +75,7 @@ class Doppelganger:
     _proc: asyncio.subprocess.Process | None = field(default=None, repr=False)
     _rpc_id: int = field(default=0, repr=False)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    _updates_pos: int = field(default=0, repr=False)  # track file position between sends
 
     def to_dict(self) -> dict:
         return {
@@ -274,7 +275,7 @@ class DoppelgangerManager:
                 response_text = ""
                 thinking_text = ""
                 total_tokens = 0
-                updates_pos = 0  # Read from beginning — we want ALL agent chunks from this turn
+                updates_pos = doppel._updates_pos
                 events_pos = 0
                 deadline = time.time() + 300  # 5 min timeout
 
@@ -324,6 +325,7 @@ class DoppelgangerManager:
                             updates_pos = f.tell()
 
                     if turn_ended:
+                        doppel._updates_pos = updates_pos
                         break
 
                     # Also check if process died
@@ -382,6 +384,45 @@ class DoppelgangerManager:
 
     def get(self, doppel_id: str) -> Doppelganger | None:
         return self._active.get(doppel_id)
+
+    def get_context(self, doppel_id: str) -> dict:
+        """Get the loaded context for a doppelganger (system prompt + baked history)."""
+        doppel = self._active.get(doppel_id)
+        if not doppel:
+            return {"error": "not found"}
+
+        # Read AGENTS.md (system prompt) from workdir
+        agents_md = ""
+        agents_path = doppel.work_dir / "AGENTS.md"
+        if agents_path.exists():
+            agents_md = agents_path.read_text()
+
+        # Read baked chat_history from the original session dir
+        history = []
+        if doppel.session_dir and (doppel.session_dir / "chat_history.jsonl").exists():
+            with open(doppel.session_dir / "chat_history.jsonl") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                        content = entry.get("content", "")
+                        if isinstance(content, list):
+                            content = " ".join(c.get("text", "") for c in content if isinstance(c, dict))
+                        history.append({
+                            "type": entry.get("type", ""),
+                            "content": content[:500],  # truncate for display
+                        })
+                    except json.JSONDecodeError:
+                        pass
+
+        return {
+            "system_prompt": agents_md,
+            "history": history,
+            "source_agent": doppel.source_agent,
+            "checkpoint_id": doppel.checkpoint_id,
+        }
 
     def get_turns(self, doppel_id: str) -> list[dict]:
         """Get conversation history for a doppelganger."""

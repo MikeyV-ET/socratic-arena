@@ -171,6 +171,12 @@ async def doppelganger_turns(doppel_id: str):
     return {"turns": _doppel_manager.get_turns(doppel_id)}
 
 
+@app.get("/api/doppelganger/{doppel_id}/context")
+async def doppelganger_context(doppel_id: str):
+    """Get the loaded context (system prompt + baked history) for a doppelganger."""
+    return _doppel_manager.get_context(doppel_id)
+
+
 @app.post("/api/doppelganger/{doppel_id}/send")
 async def doppelganger_send(doppel_id: str, body: dict):
     """Send a message to a doppelganger and get its response."""
