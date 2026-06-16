@@ -126,13 +126,14 @@ async def doppelganger_spawn(body: dict):
         from compaction_parser import get_boundary_conversation
         conversation = await asyncio.to_thread(get_boundary_conversation, agent, checkpoint_id)
         if conversation:
-            # Split at the inflection point: context = everything before, inflection = the user turn
+            # Include everything up through the inflection turn (inclusive).
+            # The doppelganger should have the full context that led to this moment.
             user_count = 0
             split_pos = len(conversation)
             for i, entry in enumerate(conversation):
                 if entry["type"] == "user":
                     if user_count == inflection_turn:
-                        split_pos = i
+                        split_pos = i + 1  # include this user turn
                         break
                     user_count += 1
             context_entries = conversation[:split_pos]
