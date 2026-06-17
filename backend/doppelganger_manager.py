@@ -381,22 +381,10 @@ class DoppelgangerManager:
     def _find_active_session_dir(self, doppel: Doppelganger) -> Path | None:
         """Find the active session directory for a doppelganger.
 
-        --resume loads history into context; session/new creates a fresh
-        writable session. Find it by session_id.
+        With --resume + session/load, grok writes into our baked session dir.
         """
-        encoded_cwd = url_quote(str(doppel.work_dir), safe="")
-        session_dir = GROK_SESSIONS_BASE / encoded_cwd / doppel.session_id
-        if session_dir.exists():
-            return session_dir
-        # Fallback: scan for any session dir with content
-        cwd_dir = GROK_SESSIONS_BASE / encoded_cwd
-        if not cwd_dir.exists():
-            return None
-        baked_id = doppel._baked_session_id
-        for d in sorted(cwd_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-            if not d.is_dir() or d.name == baked_id:
-                continue
-            return d
+        if doppel.session_dir and doppel.session_dir.exists():
+            return doppel.session_dir
         return None
 
     def list_active(self) -> list[dict]:
@@ -643,23 +631,22 @@ class DoppelgangerManager:
         init_resp = await self._read_response(proc, doppel._rpc_id)
         log.debug("Doppelganger init: %s", str(init_resp)[:200])
 
-        # 3. session/new — --resume loaded the historical context, but we
-        #    need a fresh session for grok to write updates/events into.
-        #    The resumed history is already in the model's context.
+        # 3. session/load with our baked session — --resume pre-loaded it,
+        #    session/load activates it for prompts. grok writes updates/events
+        #    into our baked session dir. Do NOT use session/new — it wipes context.
         doppel._rpc_id += 1
         await self._send_json(proc, {
             "jsonrpc": "2.0",
             "id": doppel._rpc_id,
-            "method": "session/new",
-            "params": {"cwd": str(doppel.work_dir), "mcpServers": []},
+            "method": "session/load",
+            "params": {
+                "sessionId": doppel.session_id,
+                "cwd": str(doppel.work_dir),
+                "mcpServers": [],
+            },
         })
-        new_resp = await self._read_response(proc, doppel._rpc_id)
-        new_session_id = ""
-        if isinstance(new_resp, dict):
-            new_session_id = new_resp.get("result", {}).get("sessionId", "")
-        if new_session_id:
-            doppel.session_id = new_session_id
-        log.debug("Doppelganger session/new: %s", new_session_id[:12] if new_session_id else "?")
+        load_resp = await self._read_response(proc, doppel._rpc_id)
+        log.debug("Doppelganger session/load: %s", str(load_resp)[:200])
 
     async def _send_json(self, proc: asyncio.subprocess.Process, obj: dict):
         line = json.dumps(obj) + "\n"
