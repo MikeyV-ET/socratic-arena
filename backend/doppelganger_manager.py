@@ -250,10 +250,26 @@ class DoppelgangerManager:
                     role="user", content=message, timestamp=time.time(),
                 ))
 
-                # Context entries are already baked into chat_history.jsonl
-                # and loaded via session/load. No need to inject them again
-                # in the first prompt (that caused double-injection).
+                # Inject context entries on first send. session/load doesn't
+                # reliably load our baked chat_history.jsonl — grok overwrites
+                # it. So we prepend context as a <context> block in the prompt.
                 prompt_text = message
+                if doppel._context_entries and not doppel._context_injected:
+                    lines = ["<context>", "This is the conversation history from your session before this point:", ""]
+                    for entry in doppel._context_entries:
+                        role = entry.get("type", "unknown")
+                        content = entry.get("content", "")
+                        if isinstance(content, list):
+                            content = " ".join(
+                                c.get("text", "") for c in content if isinstance(c, dict)
+                            )
+                        lines.append(f"[{role}]: {content}")
+                        lines.append("")
+                    lines.append("</context>")
+                    lines.append("")
+                    lines.append(message)
+                    prompt_text = "\n".join(lines)
+                    doppel._context_injected = True
 
                 # Send via JSON-RPC session/prompt
                 doppel._rpc_id += 1
