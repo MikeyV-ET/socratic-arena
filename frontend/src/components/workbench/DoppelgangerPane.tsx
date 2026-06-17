@@ -50,6 +50,7 @@ interface PreviewContext {
   harness_rules: string;
   checkpoint_history: ContextEntry[];
   context_entries: ContextEntry[];
+  initial_prompt: string | null;
   source_agent: string;
   checkpoint_id: string;
 }
@@ -94,6 +95,7 @@ export function DoppelgangerPane() {
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [editedSystemPrompt, setEditedSystemPrompt] = useState("");
   const [editedHistory, setEditedHistory] = useState<ContextEntry[]>([]);
+  const [editedInitialPrompt, setEditedInitialPrompt] = useState("");
   const [showPreview, setShowPreview] = useState(false);
 
   // Active doppelganger
@@ -190,6 +192,7 @@ export function DoppelgangerPane() {
         setPreview(data);
         setEditedSystemPrompt(data.system_prompt);
         setEditedHistory(data.checkpoint_history.map((e: ContextEntry) => ({ ...e })));
+        setEditedInitialPrompt(data.initial_prompt || "");
         setShowPreview(true);
       }
     } catch (e) {
@@ -244,9 +247,50 @@ export function DoppelgangerPane() {
       });
       const data = await resp.json();
       if (data.doppelganger?.status === "ready") {
-        setDoppel(data.doppelganger);
-        setChatTurns([]);
+        const doppelInfo = data.doppelganger;
+        setDoppel(doppelInfo);
         setShowPreview(false);
+
+        // If there's an initial prompt (the selected inflection turn),
+        // send it immediately so the doppelganger generates a response.
+        const prompt = showPreview ? editedInitialPrompt : (data.initial_prompt || "");
+        if (prompt.trim()) {
+          setChatTurns([{ role: "user", content: prompt, thinking: "", timestamp: Date.now() / 1000 }]);
+          setSending(true);
+          try {
+            const sendResp = await fetch(`${base}/api/doppelganger/${doppelInfo.id}/send`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ message: prompt }),
+            });
+            const sendData = await sendResp.json();
+            if (sendData.result) {
+              setChatTurns((prev) => [
+                ...prev,
+                {
+                  role: "assistant",
+                  content: sendData.result.response,
+                  thinking: sendData.result.thinking || "",
+                  timestamp: Date.now() / 1000,
+                },
+              ]);
+            } else {
+              setChatTurns((prev) => [
+                ...prev,
+                { role: "assistant", content: `Error: ${sendData.error || "Unknown"}`, thinking: "", timestamp: Date.now() / 1000 },
+              ]);
+            }
+          } catch (sendErr) {
+            setChatTurns((prev) => [
+              ...prev,
+              { role: "assistant", content: `Error: ${String(sendErr)}`, thinking: "", timestamp: Date.now() / 1000 },
+            ]);
+          } finally {
+            setSending(false);
+          }
+        } else {
+          setChatTurns([]);
+        }
       } else {
         setSpawnError(data.doppelganger?.error || data.error || "Spawn failed");
       }
@@ -255,7 +299,7 @@ export function DoppelgangerPane() {
     } finally {
       setSpawning(false);
     }
-  }, [selectedBoundary, selectedTurn, agent, model, findReplacePairs, base, showPreview, preview, editedSystemPrompt, editedHistory]);
+  }, [selectedBoundary, selectedTurn, agent, model, findReplacePairs, base, showPreview, preview, editedSystemPrompt, editedHistory, editedInitialPrompt]);
 
   // Send message
   const handleSend = useCallback(async () => {
@@ -596,7 +640,35 @@ export function DoppelgangerPane() {
           )}
         </div>
 
-        {/* Spawn from preview */}
+        {/* Initial prompt (the selected turn — editable) */}
+        {editedInitialPrompt && (
+          <div className="p-3 border-t border-border space-y-2">
+            <div className="flex justify-between items-center">
+              <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+                Initial Prompt (selected turn — doppelganger will respond to this)
+                {preview?.initial_prompt && editedInitialPrompt !== preview.initial_prompt && (
+                  <span className="ml-1 text-warning">(edited)</span>
+                )}
+              </label>
+              {preview?.initial_prompt && editedInitialPrompt !== preview.initial_prompt && (
+                <button
+                  onClick={() => setEditedInitialPrompt(preview.initial_prompt || "")}
+                  className="text-[10px] text-muted-foreground hover:text-foreground"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+            <textarea
+              value={editedInitialPrompt}
+              onChange={(e) => setEditedInitialPrompt(e.target.value)}
+              className="w-full text-xs text-foreground whitespace-pre-wrap font-mono bg-primary/5 rounded p-2 border border-primary/20 focus:outline-none focus:ring-1 focus:ring-ring resize-y"
+              style={{ minHeight: 80, maxHeight: 300 }}
+            />
+          </div>
+        )}
+
+        {/* Run from preview */}
         <div className="p-3 border-t border-border space-y-2">
           {/* Model override */}
           <div className="flex items-center gap-2">
@@ -616,7 +688,7 @@ export function DoppelgangerPane() {
             disabled={spawning}
             className="w-full text-xs px-3 py-2.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors font-medium"
           >
-            {spawning ? "Spawning..." : "Spawn with this context"}
+            {spawning ? "Running..." : editedInitialPrompt ? "Run" : "Spawn"}
           </button>
           {spawnError && (
             <div className="bg-destructive/10 border border-destructive/30 rounded px-3 py-2 text-xs text-destructive">
@@ -730,7 +802,7 @@ export function DoppelgangerPane() {
           )}
           {selectedTurn !== null && turns[selectedTurn] && (
             <p className="text-[10px] text-muted-foreground">
-              Inflection: turn #{selectedTurn + 1} — doppelganger will respond to this turn fresh
+              Turn #{selectedTurn + 1} selected — doppelganger gets everything before this turn as context, then responds to it fresh
             </p>
           )}
         </section>

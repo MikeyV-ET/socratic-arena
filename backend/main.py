@@ -122,20 +122,29 @@ async def doppelganger_spawn(body: dict):
     # If inflection_turn is specified, extract conversation up to that turn
     context_entries = body.get("context_entries")
     inflection_turn = body.get("inflection_turn")
+    initial_prompt = None
     log.info("doppelganger spawn: agent=%s, checkpoint=%s, inflection_turn=%r, has_context=%s",
              agent, checkpoint_id[:12], inflection_turn, context_entries is not None)
     if inflection_turn is not None and context_entries is None:
         from compaction_parser import get_boundary_conversation
         conversation = await asyncio.to_thread(get_boundary_conversation, agent, checkpoint_id)
         if conversation:
-            # Include everything up through the inflection turn (inclusive).
-            # The doppelganger should have the full context that led to this moment.
+            # Context = everything BEFORE the selected user turn.
+            # The selected turn itself becomes the initial_prompt —
+            # the doppelganger will generate a fresh response to it.
             user_count = 0
             split_pos = len(conversation)
+            initial_prompt = None
             for i, entry in enumerate(conversation):
                 if entry["type"] == "user":
                     if user_count == inflection_turn:
-                        split_pos = i + 1  # include this user turn
+                        split_pos = i  # exclude this turn from context
+                        content = entry.get("content", "")
+                        if isinstance(content, list):
+                            content = " ".join(
+                                c.get("text", "") for c in content if isinstance(c, dict)
+                            )
+                        initial_prompt = content
                         break
                     user_count += 1
             context_entries = conversation[:split_pos]
@@ -154,7 +163,10 @@ async def doppelganger_spawn(body: dict):
         repo_commit=body.get("repo_commit"),
         model=body.get("model", ""),
     )
-    return {"doppelganger": doppel.to_dict()}
+    result = {"doppelganger": doppel.to_dict()}
+    if initial_prompt is not None:
+        result["initial_prompt"] = initial_prompt
+    return result
 
 
 @app.post("/api/doppelganger/preview-context")
@@ -211,10 +223,17 @@ async def doppelganger_preview_context(body: dict):
             if conversation:
                 user_count = 0
                 split_pos = len(conversation)
+                initial_prompt = None
                 for i, entry in enumerate(conversation):
                     if entry["type"] == "user":
                         if user_count == inflection_turn:
-                            split_pos = i + 1
+                            split_pos = i  # exclude the selected turn from context
+                            content = entry.get("content", "")
+                            if isinstance(content, list):
+                                content = " ".join(
+                                    c.get("text", "") for c in content if isinstance(c, dict)
+                                )
+                            initial_prompt = content
                             break
                         user_count += 1
                 for entry in conversation[:split_pos]:
@@ -239,6 +258,7 @@ async def doppelganger_preview_context(body: dict):
             "harness_rules": harness_rules,
             "checkpoint_history": checkpoint_history,
             "context_entries": context_entries,
+            "initial_prompt": initial_prompt,
             "source_agent": agent,
             "checkpoint_id": checkpoint_id,
         }

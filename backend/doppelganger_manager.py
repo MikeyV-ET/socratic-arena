@@ -78,6 +78,7 @@ class Doppelganger:
     _updates_pos: int = field(default=0, repr=False)  # track file position between sends
     _context_entries: list[dict] = field(default_factory=list, repr=False)  # post-compaction context
     _context_injected: bool = field(default=False, repr=False)
+    _baked_session_id: str = field(default="", repr=False)  # our synthetic session to skip in lookups
 
     def to_dict(self) -> dict:
         return {
@@ -200,6 +201,7 @@ class DoppelgangerManager:
                 checkpoint, work_dir, context_entries
             )
             doppel.session_id = session_id
+            doppel._baked_session_id = session_id
             doppel.session_dir = session_dir
             doppel._context_entries = context_entries or []
 
@@ -274,12 +276,15 @@ class DoppelgangerManager:
                     await asyncio.sleep(0.1)
                 if not session_dir:
                     raise RuntimeError("Cannot find doppelganger session directory")
+                log.info("send: using session_dir=%s for doppel %s", session_dir, doppel_id)
 
                 updates_path = session_dir / "updates.jsonl"
                 events_path = session_dir / "events.jsonl"
 
 
                 # Collect response by tailing updates.jsonl and events.jsonl
+                # Uses binary mode + raw read to avoid Python text-mode iterator
+                # bugs with seek/tell (opaque positions, buffered read-ahead).
                 response_text = ""
                 thinking_text = ""
                 total_tokens = 0
@@ -293,44 +298,46 @@ class DoppelgangerManager:
                     # Check for turn_ended in events.jsonl
                     turn_ended = False
                     if events_path.exists() and events_path.stat().st_size > events_pos:
-                        with open(events_path) as f:
+                        with open(events_path, "rb") as f:
                             f.seek(events_pos)
-                            for line in f:
-                                line = line.strip()
-                                if not line:
-                                    continue
-                                try:
-                                    ev = json.loads(line)
-                                    if ev.get("type") == "turn_ended":
-                                        turn_ended = True
-                                except json.JSONDecodeError:
-                                    pass
+                            chunk = f.read()
+                            events_pos += len(chunk)
+                        for raw_line in chunk.decode("utf-8", errors="replace").split("\n"):
+                            raw_line = raw_line.strip()
+                            if not raw_line:
+                                continue
+                            try:
+                                ev = json.loads(raw_line)
+                                if ev.get("type") == "turn_ended":
+                                    turn_ended = True
+                            except json.JSONDecodeError:
+                                pass
 
                     # Read new content from updates.jsonl
                     if updates_path.exists() and updates_path.stat().st_size > updates_pos:
-                        with open(updates_path) as f:
+                        with open(updates_path, "rb") as f:
                             f.seek(updates_pos)
-                            for line in f:
-                                line = line.strip()
-                                if not line:
-                                    continue
-                                try:
-                                    raw = json.loads(line)
-                                    # Updates can be nested: {params: {update: {sessionUpdate: ...}}}
-                                    update = raw.get("params", {}).get("update", raw)
-                                    su = update.get("sessionUpdate", "")
-                                    if su == "agent_message_chunk":
-                                        text = update.get("content", {}).get("text", "")
-                                        response_text += text
-                                    elif su == "agent_thought_chunk":
-                                        text = update.get("content", {}).get("text", "")
-                                        thinking_text += text
-                                    meta = update.get("_meta", {})
-                                    if meta.get("totalTokens"):
-                                        total_tokens = meta["totalTokens"]
-                                except json.JSONDecodeError:
-                                    pass
-                            updates_pos = f.tell()
+                            chunk = f.read()
+                            updates_pos += len(chunk)
+                        for raw_line in chunk.decode("utf-8", errors="replace").split("\n"):
+                            raw_line = raw_line.strip()
+                            if not raw_line:
+                                continue
+                            try:
+                                raw = json.loads(raw_line)
+                                update = raw.get("params", {}).get("update", raw)
+                                su = update.get("sessionUpdate", "")
+                                if su == "agent_message_chunk":
+                                    text = update.get("content", {}).get("text", "")
+                                    response_text += text
+                                elif su == "agent_thought_chunk":
+                                    text = update.get("content", {}).get("text", "")
+                                    thinking_text += text
+                                meta = update.get("_meta", {})
+                                if meta.get("totalTokens"):
+                                    total_tokens = meta["totalTokens"]
+                            except json.JSONDecodeError:
+                                pass
 
                     if turn_ended:
                         doppel._updates_pos = updates_pos
@@ -372,12 +379,16 @@ class DoppelgangerManager:
         cwd_dir = GROK_SESSIONS_BASE / encoded_cwd
         if not cwd_dir.exists():
             return None
-        # Find session with the largest/most recent updates.jsonl
+        # Find session with the largest/most recent updates.jsonl,
+        # skipping our baked session (grok creates its own).
+        baked_id = doppel._baked_session_id
         best = None
         best_size = -1
         for d in cwd_dir.iterdir():
             if not d.is_dir():
                 continue
+            if d.name == baked_id:
+                continue  # skip our synthetic session
             updates = d / "updates.jsonl"
             if updates.exists():
                 size = updates.stat().st_size
