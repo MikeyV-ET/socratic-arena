@@ -206,10 +206,12 @@ class DoppelgangerManager:
             doppel.session_dir = session_dir
             doppel._context_entries = context_entries or []
 
-            # 4. Start grok process with system prompt override
-            #    Prevents grok from discovering ~/agents/AGENTS.md via directory walk
+            # 4. Start grok process with --resume to load baked session natively
             cwd = worktree_path or work_dir
-            doppel._proc = await self._start_grok(cwd, system_prompt=checkpoint.system_prompt, model=model)
+            doppel._proc = await self._start_grok(
+                cwd, system_prompt=checkpoint.system_prompt,
+                model=model, resume_session_id=session_id,
+            )
 
             # 5. JSON-RPC handshake: initialize + session/load
             await self._handshake(doppel)
@@ -250,26 +252,9 @@ class DoppelgangerManager:
                     role="user", content=message, timestamp=time.time(),
                 ))
 
-                # Inject context entries on first send. session/load doesn't
-                # reliably load our baked chat_history.jsonl — grok overwrites
-                # it. So we prepend context as a <context> block in the prompt.
+                # Context entries are baked into chat_history.jsonl and loaded
+                # natively via --resume. No prompt injection needed.
                 prompt_text = message
-                if doppel._context_entries and not doppel._context_injected:
-                    lines = ["<context>", "This is the conversation history from your session before this point:", ""]
-                    for entry in doppel._context_entries:
-                        role = entry.get("type", "unknown")
-                        content = entry.get("content", "")
-                        if isinstance(content, list):
-                            content = " ".join(
-                                c.get("text", "") for c in content if isinstance(c, dict)
-                            )
-                        lines.append(f"[{role}]: {content}")
-                        lines.append("")
-                    lines.append("</context>")
-                    lines.append("")
-                    lines.append(message)
-                    prompt_text = "\n".join(lines)
-                    doppel._context_injected = True
 
                 # Send via JSON-RPC session/prompt
                 doppel._rpc_id += 1
@@ -396,31 +381,11 @@ class DoppelgangerManager:
     def _find_active_session_dir(self, doppel: Doppelganger) -> Path | None:
         """Find the active session directory for a doppelganger.
 
-        grok creates its own session via session/new, so the active session
-        is NOT our baked one. Find the most recently modified session with
-        non-empty updates.jsonl.
+        With --resume, grok uses our baked session dir directly.
         """
-        encoded_cwd = url_quote(str(doppel.work_dir), safe="")
-        cwd_dir = GROK_SESSIONS_BASE / encoded_cwd
-        if not cwd_dir.exists():
-            return None
-        # Find grok's session dir, skipping our baked session.
-        # Prefer the dir with the largest updates.jsonl, but also accept
-        # dirs without updates.jsonl yet (grok creates it lazily).
-        baked_id = doppel._baked_session_id
-        best = None
-        best_size = -1
-        for d in cwd_dir.iterdir():
-            if not d.is_dir():
-                continue
-            if d.name == baked_id:
-                continue  # skip our synthetic session
-            updates = d / "updates.jsonl"
-            size = updates.stat().st_size if updates.exists() else 0
-            if size > best_size or best is None:
-                best = d
-                best_size = size
-        return best
+        if doppel.session_dir and doppel.session_dir.exists():
+            return doppel.session_dir
+        return None
 
     def list_active(self) -> list[dict]:
         """List all active doppelgangers."""
@@ -612,19 +577,22 @@ class DoppelgangerManager:
 
         return session_id, session_dir
 
-    async def _start_grok(self, cwd: Path, system_prompt: str = "", model: str = "") -> asyncio.subprocess.Process:
+    async def _start_grok(self, cwd: Path, system_prompt: str = "", model: str = "",
+                          resume_session_id: str = "") -> asyncio.subprocess.Process:
         """Start a grok agent stdio subprocess.
 
-        Uses --system-prompt-override (top-level flag, before 'agent stdio')
-        to replace the built-in grok system prompt with the checkpoint's.
+        Uses --resume to load a pre-built synthetic session natively.
+        Uses --system-prompt-override to replace the built-in system prompt.
+        Both are top-level flags (before 'agent stdio').
         """
         env = {**os.environ, "GROK_MODEL": model or MODEL}
         binary = self.grok_binary
         if not Path(binary).exists():
             binary = "grok"
 
-        # --system-prompt-override is a top-level flag, must come before 'agent stdio'
         args = [binary]
+        if resume_session_id:
+            args += ["--resume", resume_session_id]
         if system_prompt:
             args += ["--system-prompt-override", system_prompt]
         args += ["agent", "stdio"]
@@ -641,7 +609,11 @@ class DoppelgangerManager:
         return proc
 
     async def _handshake(self, doppel: Doppelganger):
-        """Initialize the grok process and load the baked session."""
+        """Initialize the grok process.
+
+        With --resume, grok loads the baked session on startup.
+        We just need to send initialize and use the baked session_id.
+        """
         proc = doppel._proc
 
         # 1. Read server hello
@@ -659,33 +631,9 @@ class DoppelgangerManager:
         init_resp = await self._read_response(proc, doppel._rpc_id)
         log.debug("Doppelganger init: %s", str(init_resp)[:200])
 
-        # 3. session/new to create a trusted session
-        doppel._rpc_id += 1
-        await self._send_json(proc, {
-            "jsonrpc": "2.0",
-            "id": doppel._rpc_id,
-            "method": "session/new",
-            "params": {"cwd": str(doppel.work_dir), "mcpServers": []},
-        })
-        new_resp = await self._read_response(proc, doppel._rpc_id)
-        new_session_id = ""
-        if isinstance(new_resp, dict):
-            new_session_id = new_resp.get("result", {}).get("sessionId", "")
-        log.debug("Doppelganger session/new: %s", new_session_id[:12] if new_session_id else "?")
-
-        # 4. Overwrite the new session's chat_history with our baked one
-        if new_session_id and doppel.session_dir:
-            new_encoded = url_quote(str(doppel.work_dir), safe="")
-            new_session_dir = GROK_SESSIONS_BASE / new_encoded / new_session_id
-            if new_session_dir.exists():
-                src = doppel.session_dir / "chat_history.jsonl"
-                dst = new_session_dir / "chat_history.jsonl"
-                if src.exists():
-                    shutil.copy2(str(src), str(dst))
-                    log.debug("Copied baked history to %s", dst)
-            doppel.session_id = new_session_id
-
-        # 5. session/load to reload with baked history
+        # 3. session/load — grok already has our session via --resume,
+        #    but we need to send session/load so it activates the session
+        #    for JSON-RPC prompts.
         doppel._rpc_id += 1
         await self._send_json(proc, {
             "jsonrpc": "2.0",
