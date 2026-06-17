@@ -76,6 +76,7 @@ class Doppelganger:
     _rpc_id: int = field(default=0, repr=False)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     _updates_pos: int = field(default=0, repr=False)  # track file position between sends
+    _events_pos: int = field(default=0, repr=False)   # track events.jsonl position between sends
     _context_entries: list[dict] = field(default_factory=list, repr=False)  # post-compaction context
     _context_injected: bool = field(default=False, repr=False)
     _baked_session_id: str = field(default="", repr=False)  # our synthetic session to skip in lookups
@@ -289,7 +290,7 @@ class DoppelgangerManager:
                 thinking_text = ""
                 total_tokens = 0
                 updates_pos = doppel._updates_pos
-                events_pos = 0
+                events_pos = doppel._events_pos
                 deadline = time.time() + 300  # 5 min timeout
 
                 while time.time() < deadline:
@@ -341,11 +342,19 @@ class DoppelgangerManager:
 
                     if turn_ended:
                         doppel._updates_pos = updates_pos
+                        doppel._events_pos = events_pos
                         break
 
-                    # Also check if process died
+                    # If process exited, do one final read pass then stop.
+                    # The process may exit normally after writing turn_ended.
                     if doppel._proc.returncode is not None:
-                        raise RuntimeError("Doppelganger process exited unexpectedly")
+                        # Give files a moment to flush
+                        await asyncio.sleep(0.5)
+                        # One more read pass will happen at top of next iteration
+                        # but if we already checked and no turn_ended, it's dead
+                        if not turn_ended:
+                            log.warning("Doppelganger process exited (rc=%s) without turn_ended", doppel._proc.returncode)
+                            break
 
                 # Record assistant turn
                 doppel.turns.append(DoppelgangerTurn(
