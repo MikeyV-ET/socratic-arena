@@ -379,8 +379,9 @@ class DoppelgangerManager:
         cwd_dir = GROK_SESSIONS_BASE / encoded_cwd
         if not cwd_dir.exists():
             return None
-        # Find session with the largest/most recent updates.jsonl,
-        # skipping our baked session (grok creates its own).
+        # Find grok's session dir, skipping our baked session.
+        # Prefer the dir with the largest updates.jsonl, but also accept
+        # dirs without updates.jsonl yet (grok creates it lazily).
         baked_id = doppel._baked_session_id
         best = None
         best_size = -1
@@ -390,11 +391,10 @@ class DoppelgangerManager:
             if d.name == baked_id:
                 continue  # skip our synthetic session
             updates = d / "updates.jsonl"
-            if updates.exists():
-                size = updates.stat().st_size
-                if size > best_size:
-                    best = d
-                    best_size = size
+            size = updates.stat().st_size if updates.exists() else 0
+            if size > best_size or best is None:
+                best = d
+                best_size = size
         return best
 
     def list_active(self) -> list[dict]:
