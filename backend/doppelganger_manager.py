@@ -557,15 +557,29 @@ class DoppelgangerManager:
                         entry["content"] = [{"type": "text", "text": entry["content"]}]
                     f.write(json.dumps(entry) + "\n")
 
-        # Write minimal metadata files
+        # Write metadata matching real grok session format (all fields required
+        # by the Rust JSON parser — incomplete summary.json causes parse failure)
+        now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        num_entries = len(checkpoint.compacted_history) + len(context_entries or [])
         summary = {
             "info": {"id": session_id, "cwd": str(work_dir)},
             "session_summary": f"doppelganger-{checkpoint.checkpoint_id[:8]}",
-            "created_at": checkpoint.created_at,
-            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "num_messages": len(checkpoint.compacted_history) + len(context_entries or []),
+            "created_at": checkpoint.created_at or now_iso,
+            "updated_at": now_iso,
+            "num_messages": num_entries,
+            "num_chat_messages": num_entries,
             "current_model_id": MODEL,
+            "next_trace_turn": 0,
             "chat_format_version": 1,
+            "git_root_dir": "",
+            "git_remotes": [],
+            "head_commit": "",
+            "head_branch": "",
+            "request_id": str(uuid.uuid4()),
+            "grok_home": str(Path.home() / ".grok"),
+            "last_active_at": now_iso,
+            "generated_title": f"Doppelganger {checkpoint.checkpoint_id[:8]}",
+            "agent_name": "grok-build-plan",
         }
         (session_dir / "summary.json").write_text(json.dumps(summary))
         (session_dir / "signals.json").write_text(json.dumps({
@@ -631,9 +645,8 @@ class DoppelgangerManager:
         init_resp = await self._read_response(proc, doppel._rpc_id)
         log.debug("Doppelganger init: %s", str(init_resp)[:200])
 
-        # 3. session/load with our baked session — --resume pre-loaded it,
-        #    session/load activates it for prompts. grok writes updates/events
-        #    into our baked session dir. Do NOT use session/new — it wipes context.
+        # --resume pre-loads the history. session/load activates it for
+        # stdio prompts so grok writes updates/events to the session dir.
         doppel._rpc_id += 1
         await self._send_json(proc, {
             "jsonrpc": "2.0",
