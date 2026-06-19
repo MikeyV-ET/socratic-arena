@@ -28,34 +28,39 @@ test.describe("Feature 17: Autosave + Per-Edit Tracking", () => {
       await page.goto(BASE);
       await page.waitForLoadState("networkidle");
 
-      // Register file via API, then navigate to it via editor sidebar
-      const openResp = await page.request.post(`${API}/api/files/open`, {
+      // Register file via Vite-proxied API (same backend the frontend WebSocket uses)
+      const openResp = await page.request.post(`${BASE}/api/files/open`, {
         data: { path: filePath },
       });
       expect(openResp.status()).toBe(200);
-      await page.waitForTimeout(500);
+      const doc = await openResp.json();
+      const docId = doc.id;
 
-      // Click the doc in the editor sidebar to select it
-      const docEntry = page.locator(`text=autosave-test`).first();
-      if (await docEntry.isVisible({ timeout: 3000 })) {
-        await docEntry.click();
-        await page.waitForTimeout(1000);
-      }
+      // Open an editor panel and wait for it to be ready
+      await page.locator('[data-testid="open-tab-menu"]').click();
+      await page.locator('[data-testid="add-panel-editor"]').click();
+      await page.locator('[data-testid="shared-editor"]').waitFor({ timeout: 5000 });
+      await page.locator('[data-testid="view-mode-toggle"]').waitFor({ timeout: 5000 });
+
+      // Tell frontend to switch to our doc
+      await page.evaluate((id) => {
+        window.dispatchEvent(new CustomEvent("sa-docs-changed"));
+        window.dispatchEvent(new CustomEvent("sa-open-doc", { detail: { docId: id } }));
+      }, docId);
+      await page.waitForTimeout(2000);
 
       // Find and click into the editor
       const editor = page.locator(".cm-content").first();
-      if (await editor.isVisible({ timeout: 5000 })) {
-        await editor.click();
-        await page.keyboard.press("End");
-        await editor.pressSequentially("\nAutosaved content here", { delay: 20 });
+      await editor.click();
+      await page.keyboard.press("End");
+      await editor.pressSequentially("\nAutosaved content here", { delay: 20 });
 
-        // Wait for autosave (2s debounce + buffer)
-        await page.waitForTimeout(8000);
+      // Wait for autosave (2s debounce + buffer)
+      await page.waitForTimeout(8000);
 
-        // Check disk content
-        const diskContent = fs.readFileSync(filePath, "utf-8");
-        expect(diskContent, "Autosaved content should appear on disk").toContain("Autosaved content here");
-      }
+      // Check disk content
+      const diskContent = fs.readFileSync(filePath, "utf-8");
+      expect(diskContent, "Autosaved content should appear on disk").toContain("Autosaved content here");
     } finally {
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
       fs.rmdirSync(tmpDir);

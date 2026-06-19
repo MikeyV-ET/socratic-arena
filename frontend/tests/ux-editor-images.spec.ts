@@ -92,30 +92,34 @@ test.describe("Feature 18: Inline Image Rendering", () => {
       await page.goto(BASE);
       await page.waitForLoadState("networkidle");
 
-      // Register file, then select it in sidebar
-      const openResp = await page.request.post(`${API}/api/files/open`, {
+      // Register file via Vite-proxied API (same backend the frontend WebSocket uses)
+      const openResp = await page.request.post(`${BASE}/api/files/open`, {
         data: { path: mdPath },
       });
       expect(openResp.status()).toBe(200);
-      await page.waitForTimeout(500);
+      const doc = await openResp.json();
+      const docId = doc.id;
 
-      const docEntry = page.locator(`text=imgtest`).first();
-      if (await docEntry.isVisible({ timeout: 3000 })) {
-        await docEntry.click();
-        await page.waitForTimeout(1000);
-      }
+      // Open an editor panel and wait for it to be ready
+      await page.locator('[data-testid="open-tab-menu"]').click();
+      await page.locator('[data-testid="add-panel-editor"]').click();
+      await page.locator('[data-testid="shared-editor"]').waitFor({ timeout: 5000 });
+      await page.locator('[data-testid="view-mode-toggle"]').waitFor({ timeout: 5000 });
+
+      // Tell frontend to switch to our doc
+      await page.evaluate((id) => {
+        window.dispatchEvent(new CustomEvent("sa-docs-changed"));
+        window.dispatchEvent(new CustomEvent("sa-open-doc", { detail: { docId: id } }));
+      }, docId);
+      await page.waitForTimeout(2000);
 
       // Switch to preview mode
-      const previewBtn = page.locator("button, [role='tab']").filter({ hasText: /preview/i }).first();
-      if (await previewBtn.isVisible()) {
-        await previewBtn.click();
-        await page.waitForTimeout(500);
-      }
+      await page.locator('[data-testid="view-mode-toggle"] button').filter({ hasText: /preview/i }).first().click();
+      await page.waitForTimeout(1000);
 
       // Check that an img tag was rendered
-      const img = page.locator("img[alt='test image']");
-      const imgCount = await img.count();
-      expect(imgCount, "Preview should render an <img> tag for markdown image").toBeGreaterThan(0);
+      const img = page.locator('[data-testid="shared-editor-preview"] img[alt="test image"]');
+      await expect(img, "Preview should render an <img> tag for markdown image").toHaveCount(1);
     } finally {
       fs.unlinkSync(mdPath);
       fs.rmdirSync(tmpDir);
@@ -139,36 +143,37 @@ test.describe("Feature 18: Inline Image Rendering", () => {
       await page.goto(BASE);
       await page.waitForLoadState("networkidle");
 
-      // Register file, then select it in sidebar
-      const openResp = await page.request.post(`${API}/api/files/open`, {
+      // Register file via Vite-proxied API (same backend the frontend WebSocket uses)
+      const openResp = await page.request.post(`${BASE}/api/files/open`, {
         data: { path: mdPath },
       });
       expect(openResp.status()).toBe(200);
-      await page.waitForTimeout(500);
+      const doc = await openResp.json();
+      const docId = doc.id;
 
-      const docEntry = page.locator(`text=test.md`).first();
-      if (await docEntry.isVisible({ timeout: 3000 })) {
-        await docEntry.click();
-        await page.waitForTimeout(1000);
-      }
+      // Open an editor panel and wait for it to be ready
+      await page.locator('[data-testid="open-tab-menu"]').click();
+      await page.locator('[data-testid="add-panel-editor"]').click();
+      await page.locator('[data-testid="shared-editor"]').waitFor({ timeout: 5000 });
+      await page.locator('[data-testid="view-mode-toggle"]').waitFor({ timeout: 5000 });
+
+      // Tell frontend to switch to our doc
+      await page.evaluate((id) => {
+        window.dispatchEvent(new CustomEvent("sa-docs-changed"));
+        window.dispatchEvent(new CustomEvent("sa-open-doc", { detail: { docId: id } }));
+      }, docId);
+      await page.waitForTimeout(2000);
 
       // Switch to preview mode
-      const previewBtn = page.locator("button, [role='tab']").filter({ hasText: /preview/i }).first();
-      if (await previewBtn.isVisible()) {
-        await previewBtn.click();
-        await page.waitForTimeout(500);
-      }
+      await page.locator('[data-testid="view-mode-toggle"] button').filter({ hasText: /preview/i }).first().click();
+      await page.waitForTimeout(1000);
 
       // Check that the image src was rewritten to use /api/files/raw
-      const img = page.locator("img[alt='my image']");
-      const imgCount = await img.count();
-      if (imgCount > 0) {
-        const src = await img.getAttribute("src");
-        expect(src, "Relative image path should be rewritten to /api/files/raw endpoint").toContain("/api/files/raw");
-        expect(src, "Rewritten path should include the absolute image path").toContain("screenshot.png");
-      } else {
-        expect(imgCount, "Preview should render an img tag for the relative image").toBeGreaterThan(0);
-      }
+      const img = page.locator('[data-testid="shared-editor-preview"] img[alt="my image"]');
+      await expect(img, "Preview should render an img tag for the relative image").toHaveCount(1);
+      const src = await img.getAttribute("src");
+      expect(src, "Relative image path should be rewritten to /api/files/raw endpoint").toContain("/api/files/raw");
+      expect(src, "Rewritten path should include the absolute image path").toContain("screenshot.png");
     } finally {
       fs.unlinkSync(pngPath);
       fs.unlinkSync(mdPath);
@@ -186,25 +191,35 @@ test.describe("Feature 18: Inline Image Rendering", () => {
       await page.goto(BASE);
       await page.waitForLoadState("networkidle");
 
-      const openResp = await page.request.post(`${API}/api/files/open`, {
+      // Register file via Vite-proxied API (same backend the frontend WebSocket uses)
+      const openResp = await page.request.post(`${BASE}/api/files/open`, {
         data: { path: mdPath },
       });
       expect(openResp.status()).toBe(200);
-      await page.waitForTimeout(1000);
+      const doc = await openResp.json();
+      const docId = doc.id;
+
+      // Open an editor panel and wait for it to be ready
+      await page.locator('[data-testid="open-tab-menu"]').click();
+      await page.locator('[data-testid="add-panel-editor"]').click();
+      await page.locator('[data-testid="shared-editor"]').waitFor({ timeout: 5000 });
+      await page.locator('[data-testid="view-mode-toggle"]').waitFor({ timeout: 5000 });
+
+      // Tell frontend to switch to our doc
+      await page.evaluate((id) => {
+        window.dispatchEvent(new CustomEvent("sa-docs-changed"));
+        window.dispatchEvent(new CustomEvent("sa-open-doc", { detail: { docId: id } }));
+      }, docId);
+      await page.waitForTimeout(2000);
 
       // Switch to preview
-      const previewBtn = page.locator("button, [role='tab']").filter({ hasText: /preview/i }).first();
-      if (await previewBtn.isVisible()) {
-        await previewBtn.click();
-        await page.waitForTimeout(500);
-      }
+      await page.locator('[data-testid="view-mode-toggle"] button').filter({ hasText: /preview/i }).first().click();
+      await page.waitForTimeout(1000);
 
-      const img = page.locator("img[alt='ext']");
-      const count = await img.count();
-      if (count > 0) {
-        const src = await img.getAttribute("src");
-        expect(src, "External URLs should pass through unchanged").toBe("https://example.com/image.png");
-      }
+      const img = page.locator('[data-testid="shared-editor-preview"] img[alt="ext"]');
+      await expect(img, "Preview should render img for external URL").toHaveCount(1);
+      const src = await img.getAttribute("src");
+      expect(src, "External URLs should pass through unchanged").toBe("https://example.com/image.png");
     } finally {
       fs.unlinkSync(mdPath);
       fs.rmdirSync(tmpDir);

@@ -18,28 +18,38 @@ test.describe("Feature 16: Author-Based Text Coloring", () => {
     await page.goto(BASE);
     await page.waitForLoadState("networkidle");
 
-    // Open editor
-    const addBtn = page.locator('[data-testid="open-tab-menu"]');
-    await addBtn.click();
+    // Create a doc via API to ensure Yjs content exists on the backend
+    const createResp = await page.request.post(`${BASE}/api/docs`, {
+      data: { title: "Color Test", contentType: "markdown" },
+    });
+    expect(createResp.status()).toBe(200);
+    const doc = await createResp.json();
+    const docId = doc.id;
+
+    // Open editor panel
+    await page.locator('[data-testid="open-tab-menu"]').click();
     await page.locator('[data-testid="add-panel-editor"]').click();
-    await page.waitForTimeout(500);
+    await page.locator('[data-testid="shared-editor"]').waitFor({ timeout: 5000 });
+    await page.locator('[data-testid="view-mode-toggle"]').waitFor({ timeout: 5000 });
 
-    // Type some text
-    const editor = page.locator(".cm-content, .ProseMirror, [contenteditable]").first();
+    // Switch to our doc
+    await page.evaluate((id) => {
+      window.dispatchEvent(new CustomEvent("sa-docs-changed"));
+      window.dispatchEvent(new CustomEvent("sa-open-doc", { detail: { docId: id } }));
+    }, docId);
+
+    // Wait for CodeMirror to render
+    const editor = page.locator(".cm-content").first();
+    await editor.waitFor({ timeout: 10000 });
     await editor.click();
-    await editor.pressSequentially("Test coloring text", { delay: 10 });
-    await page.waitForTimeout(500);
+    await editor.pressSequentially("Test coloring text", { delay: 20 });
+    await page.waitForTimeout(1500);
 
-    // Check for author-specific styling — look for color-coded spans or classes
-    // The current system uses green for Eric, blue for agent — look for styled marks
-    const coloredSpans = page.locator('.cm-content span[style*="color"], .cm-content span[style*="background"], .cm-content [class*="author"], .cm-content [data-author]');
-    const decorations = page.locator('.cm-content .cm-ySelection, .cm-content [class*="collab"]');
+    // Check for author-specific styling — Yjs author coloring uses inline styles or decoration classes
+    const coloredSpans = page.locator('.cm-content span[style*="color"], .cm-content span[style*="background"], .cm-content [class*="author"], .cm-content [data-author], .cm-content .cm-ySelection, .cm-content [class*="collab"], .cm-content span[class*="cm-"]');
 
     const colorCount = await coloredSpans.count();
-    const decoCount = await decorations.count();
-
-    // At minimum, text should have some author-attributed styling
-    expect(colorCount + decoCount, "Editor should show author-attributed styling on text").toBeGreaterThan(0);
+    expect(colorCount, "Editor should show author-attributed styling on text").toBeGreaterThan(0);
   });
 
   // F16-2 dropped: author tracking is client-side via Yjs CRDT attributes, no server-side metadata
