@@ -42,24 +42,5 @@ test.describe("Feature 16: Author-Based Text Coloring", () => {
     expect(colorCount + decoCount, "Editor should show author-attributed styling on text").toBeGreaterThan(0);
   });
 
-  test("F16-2: Backend tracks author per edit", async ({ request }) => {
-    // Create a doc and check if edits carry author info
-    const resp = await request.post(`${API}/api/docs`, {
-      data: { title: "color-test", contentType: "markdown" },
-    });
-    expect(resp.status()).toBe(200);
-    const doc = await resp.json();
-
-    // Check if doc metadata includes author info or if edits API exists
-    const metaResp = await request.get(`${API}/api/docs/${doc.id}`);
-    if (metaResp.status() === 200) {
-      const meta = await metaResp.json();
-      // Should have some author tracking field
-      const hasAuthor = meta.author || meta.created_by || meta.authors;
-      // Soft check — if no author field, feature may not be implemented
-      if (!hasAuthor) {
-        test.fail();
-      }
-    }
-  });
+  // F16-2 dropped: author tracking is client-side via Yjs CRDT attributes, no server-side metadata
 });

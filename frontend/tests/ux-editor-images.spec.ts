@@ -92,12 +92,18 @@ test.describe("Feature 18: Inline Image Rendering", () => {
       await page.goto(BASE);
       await page.waitForLoadState("networkidle");
 
-      // Open the file via API
+      // Register file, then select it in sidebar
       const openResp = await page.request.post(`${API}/api/files/open`, {
         data: { path: mdPath },
       });
       expect(openResp.status()).toBe(200);
-      await page.waitForTimeout(1000);
+      await page.waitForTimeout(500);
+
+      const docEntry = page.locator(`text=imgtest`).first();
+      if (await docEntry.isVisible({ timeout: 3000 })) {
+        await docEntry.click();
+        await page.waitForTimeout(1000);
+      }
 
       // Switch to preview mode
       const previewBtn = page.locator("button, [role='tab']").filter({ hasText: /preview/i }).first();
@@ -133,12 +139,18 @@ test.describe("Feature 18: Inline Image Rendering", () => {
       await page.goto(BASE);
       await page.waitForLoadState("networkidle");
 
-      // Open the markdown file via API
+      // Register file, then select it in sidebar
       const openResp = await page.request.post(`${API}/api/files/open`, {
         data: { path: mdPath },
       });
       expect(openResp.status()).toBe(200);
-      await page.waitForTimeout(1000);
+      await page.waitForTimeout(500);
+
+      const docEntry = page.locator(`text=test.md`).first();
+      if (await docEntry.isVisible({ timeout: 3000 })) {
+        await docEntry.click();
+        await page.waitForTimeout(1000);
+      }
 
       // Switch to preview mode
       const previewBtn = page.locator("button, [role='tab']").filter({ hasText: /preview/i }).first();
