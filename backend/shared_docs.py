@@ -509,6 +509,66 @@ async def open_file(body: dict):
     return meta.model_dump()
 
 
+@files_router.post("/create")
+async def create_file(body: dict):
+    """Create a new file on disk and open it in the editor.
+
+    Body: {"name": "filename.md", "directory": "/absolute/path/to/dir"}
+    Creates the file, then opens it as a Yjs doc.
+    """
+    name = body.get("name", "").strip()
+    directory = body.get("directory", "").strip()
+    if not name:
+        return JSONResponse({"error": "name required"}, status_code=400)
+    if not directory:
+        return JSONResponse({"error": "directory required"}, status_code=400)
+
+    dir_path = Path(directory).resolve()
+    if not dir_path.is_dir():
+        return JSONResponse({"error": "directory does not exist"}, status_code=400)
+
+    fp = dir_path / name
+    if fp.exists():
+        return JSONResponse({"error": "file already exists"}, status_code=409)
+
+    # Create the file with minimal content
+    try:
+        fp.write_text(f"# {Path(name).stem}\n")
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+    # Open it in the editor (reuse open_file logic)
+    return await open_file({"path": str(fp)})
+
+
+@files_router.get("/raw")
+async def serve_raw_file(path: str):
+    """Serve a raw file from disk (for inline image rendering).
+
+    GET /api/files/raw?path=/absolute/path/to/image.png
+    Security: only serves from allowed directories.
+    """
+    fp = Path(path).resolve()
+    if not fp.is_file():
+        return JSONResponse({"error": "file not found"}, status_code=404)
+
+    # Security: allow files under agent homes, projects, and /tmp
+    allowed = [
+        Path.home() / "agents",
+        Path.home() / "projects",
+        Path("/tmp"),
+    ]
+    if not any(str(fp).startswith(str(a.resolve())) for a in allowed):
+        return JSONResponse({"error": "path not allowed"}, status_code=403)
+
+    import mimetypes
+    mime, _ = mimetypes.guess_type(str(fp))
+    mime = mime or "application/octet-stream"
+
+    from starlette.responses import FileResponse
+    return FileResponse(str(fp), media_type=mime)
+
+
 # ---------------------------------------------------------------------------
 # WebSocket Yjs sync endpoint
 # ---------------------------------------------------------------------------

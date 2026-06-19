@@ -347,6 +347,9 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [showOpen, setShowOpen] = useState(false);
   const [showToc, setShowToc] = useState(false);
+  const [createDir, setCreateDir] = useState("");
+  const [createBrowse, setCreateBrowse] = useState<BrowseResult | null>(null);
+  const [showCreateBrowse, setShowCreateBrowse] = useState(false);
   const [tocWidth, setTocWidth] = useState(192);
   const themeCompRef = useRef(new Compartment());
 
@@ -559,23 +562,53 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
     }
   }, [activeDocId, refreshDocs, openDoc, config]);
 
-  // Create a new doc
+  // Create a new doc (on disk if directory specified, in-memory otherwise)
   const createDoc = async () => {
     const title = newTitle.trim() || "Untitled";
+    const dir = createDir.trim();
     try {
-      const resp = await fetch(`${basePath}/api/docs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, contentType: "markdown" }),
-      });
-      const doc = await resp.json();
+      let doc;
+      if (dir) {
+        // Create file on disk
+        const name = title.endsWith(".md") ? title : `${title}.md`;
+        const resp = await fetch(`${basePath}/api/files/create`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, directory: dir }),
+        });
+        doc = await resp.json();
+        if (doc.error) { alert(doc.error); return; }
+      } else {
+        const resp = await fetch(`${basePath}/api/docs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, contentType: "markdown" }),
+        });
+        doc = await resp.json();
+      }
       setNewTitle("");
+      setCreateDir("");
       setShowCreate(false);
+      setCreateBrowse(null);
+      setShowCreateBrowse(false);
       await refreshDocs();
       openDoc(doc.id);
-      if (instanceId) updatePanelLabel(instanceId, `Editor: ${title}`);
+      if (instanceId) updatePanelLabel(instanceId, `Editor: ${doc.title || title}`);
     } catch { /* ignore */ }
   };
+
+  // Browse for create-doc directory
+  const browseCreateDir = useCallback(async (dirPath?: string) => {
+    try {
+      const url = dirPath
+        ? `${basePath}/api/files/browse?path=${encodeURIComponent(dirPath)}`
+        : `${basePath}/api/files/browse`;
+      const resp = await fetch(url);
+      const data: BrowseResult = await resp.json();
+      setCreateBrowse(data);
+      setCreateDir(data.path);
+    } catch { /* ignore */ }
+  }, []);
 
   // Browse filesystem
   const browseDir = useCallback(async (dirPath?: string) => {
@@ -809,29 +842,75 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
 
       {/* Create form */}
       {showCreate && (
-        <div className="px-3 py-2 border-b border-border flex items-center gap-2">
-          <input
-            type="text"
-            value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && createDoc()}
-            placeholder="Document title..."
-            className="flex-1 text-xs px-2 py-1 bg-background border border-border rounded focus:outline-none focus:border-primary"
-            data-testid="create-doc-title"
-            autoFocus
-          />
-          <button
-            onClick={createDoc}
-            className="px-2 py-1 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors"
-          >
-            Create
-          </button>
-          <button
-            onClick={() => { setShowCreate(false); setNewTitle(""); }}
-            className="px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            Cancel
-          </button>
+        <div className="px-3 py-2 border-b border-border space-y-2">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && createDoc()}
+              placeholder="Filename (e.g. notes.md)..."
+              className="flex-1 text-xs px-2 py-1 bg-background border border-border rounded focus:outline-none focus:border-primary"
+              data-testid="create-doc-title"
+              autoFocus
+            />
+            <button
+              onClick={createDoc}
+              className="px-2 py-1 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors"
+            >
+              Create
+            </button>
+            <button
+              onClick={() => { setShowCreate(false); setNewTitle(""); setCreateDir(""); setCreateBrowse(null); setShowCreateBrowse(false); }}
+              className="px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={createDir}
+              onChange={(e) => setCreateDir(e.target.value)}
+              placeholder="Directory (leave empty for in-memory doc)..."
+              className="flex-1 text-xs px-2 py-1 bg-background border border-border rounded focus:outline-none focus:border-primary font-mono"
+              data-testid="create-doc-dir"
+            />
+            <button
+              onClick={() => { setShowCreateBrowse(!showCreateBrowse); if (!showCreateBrowse && !createBrowse) browseCreateDir(); }}
+              className="px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Browse
+            </button>
+          </div>
+          {showCreateBrowse && createBrowse && (
+            <div className="max-h-48 overflow-y-auto border border-border rounded bg-background">
+              <div className="px-2 py-1 text-[9px] text-muted-foreground border-b border-border truncate" title={createBrowse.path}>
+                {createBrowse.path}
+              </div>
+              {createBrowse.parent && (
+                <div
+                  className="px-2 py-1 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                  onClick={() => browseCreateDir(createBrowse.parent!)}
+                >..</div>
+              )}
+              {createBrowse.entries.filter(e => e.type === "dir").map((entry) => (
+                <div
+                  key={entry.path}
+                  className="px-2 py-1 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                  onClick={() => browseCreateDir(entry.path)}
+                >
+                  {entry.name}/
+                </div>
+              ))}
+              <div
+                className="px-2 py-1 text-xs cursor-pointer text-primary hover:bg-primary/10 font-medium"
+                onClick={() => { setCreateDir(createBrowse.path); setShowCreateBrowse(false); }}
+              >
+                Select this directory
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -884,7 +963,24 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
               data-testid="shared-editor-preview"
               style={{ display: viewMode === "preview" ? undefined : "none" }}
             >
-              <Markdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{previewText}</Markdown>
+              <Markdown
+                remarkPlugins={[remarkGfm, remarkMath]}
+                rehypePlugins={[rehypeKatex]}
+                urlTransform={(url) => {
+                  if (!url) return url;
+                  // Pass through absolute URLs
+                  if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:")) return url;
+                  // Resolve relative/absolute file paths via raw endpoint
+                  const docDir = activeDoc?.file_path ? activeDoc.file_path.replace(/\/[^/]+$/, "") : "";
+                  let absPath = url;
+                  if (url.startsWith("/")) {
+                    absPath = url;
+                  } else if (docDir) {
+                    absPath = `${docDir}/${url}`.replace(/\/\.\//g, "/");
+                  }
+                  return `${basePath}/api/files/raw?path=${encodeURIComponent(absPath)}`;
+                }}
+              >{previewText}</Markdown>
             </div>
             {viewMode === "table" && csvData && (
               <div
