@@ -659,29 +659,18 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
     } catch { /* ignore */ }
   }, [refreshDocs, openDoc]);
 
-  // Recursive tree entry renderer — supports unlimited directory depth
-  const renderTreeEntry = useCallback((entry: BrowseEntry, depth: number): React.ReactNode => {
+  // Recursive tree entry renderer — clicking a dir navigates into it (updates breadcrumbs)
+  const renderTreeEntry = useCallback((entry: BrowseEntry): React.ReactNode => {
     if (entry.type === "dir") {
-      const isExpanded = treeExpanded.has(entry.path);
-      const children = treeCache[entry.path]?.entries || [];
       return (
-        <div key={entry.path}>
-          <div
-            className="flex items-center gap-1 px-2 py-1 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-            onClick={() => toggleTreeDir(entry.path)}
-            title={entry.path}
-          >
-            <span className="text-[10px] shrink-0 w-3">{isExpanded ? "▼" : "▶"}</span>
-            <span className="truncate flex-1 font-medium">{entry.name}/</span>
-          </div>
-          {isExpanded && children.length > 0 && (
-            <div className="ml-3 border-l border-border/50">
-              {children.map((child) => renderTreeEntry(child, depth + 1))}
-            </div>
-          )}
-          {isExpanded && children.length === 0 && (
-            <div className="ml-3 px-2 py-1 text-[10px] text-muted-foreground/50 italic">empty</div>
-          )}
+        <div
+          key={entry.path}
+          className="flex items-center gap-1 px-2 py-1 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+          onClick={() => browseDir(entry.path)}
+          title={entry.path}
+        >
+          <span className="text-[10px] shrink-0 w-3">▶</span>
+          <span className="truncate flex-1 font-medium">{entry.name}/</span>
         </div>
       );
     }
@@ -697,7 +686,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
         {entry.size !== undefined && <span className="text-[9px] text-muted-foreground shrink-0">{entry.size < 1024 ? `${entry.size}B` : `${(entry.size / 1024).toFixed(0)}K`}</span>}
       </div>
     );
-  }, [treeExpanded, treeCache, toggleTreeDir, openFile]);
+  }, [browseDir, openFile]);
 
   // Save doc back to its source file
   const saveToFile = useCallback(async () => {
@@ -859,7 +848,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
                       {browseLoading ? (
                         <div className="text-xs text-muted-foreground text-center py-4">Loading...</div>
                       ) : (
-                        browseResult.entries.map((entry) => renderTreeEntry(entry, 0))
+                        browseResult.entries.map((entry) => renderTreeEntry(entry))
                       )}
                     </div>
                   </>
