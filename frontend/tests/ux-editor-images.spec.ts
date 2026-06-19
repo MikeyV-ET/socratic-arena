@@ -83,32 +83,37 @@ test.describe("Feature 18: Inline Image Rendering", () => {
   // --- Frontend Tests: Image rendering in preview ---
 
   test("F18-FE1: Editor preview renders img tag for markdown image syntax", async ({ page }) => {
-    await page.goto(BASE);
-    await page.waitForLoadState("networkidle");
+    // Create a temp file with image markdown, open it, check preview
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sa-img-fe1-test-"));
+    const mdPath = path.join(tmpDir, "imgtest.md");
+    fs.writeFileSync(mdPath, "# Image Test\n\n![test image](https://via.placeholder.com/1x1.png)\n");
 
-    // Open editor panel
-    const addBtn = page.locator('[data-testid="open-tab-menu"]');
-    await addBtn.click();
-    await page.locator('[data-testid="add-panel-editor"]').click();
-    await page.waitForTimeout(500);
+    try {
+      await page.goto(BASE);
+      await page.waitForLoadState("networkidle");
 
-    // Type markdown with an image (absolute http URL — always works)
-    const editor = page.locator(".cm-content, .ProseMirror, [contenteditable]").first();
-    await editor.click();
-    await editor.pressSequentially("![test image](https://via.placeholder.com/1x1.png)", { delay: 10 });
-    await page.waitForTimeout(300);
+      // Open the file via API
+      const openResp = await page.request.post(`${API}/api/files/open`, {
+        data: { path: mdPath },
+      });
+      expect(openResp.status()).toBe(200);
+      await page.waitForTimeout(1000);
 
-    // Switch to preview mode
-    const previewBtn = page.locator("button, [role='tab']").filter({ hasText: /preview/i }).first();
-    if (await previewBtn.isVisible()) {
-      await previewBtn.click();
-      await page.waitForTimeout(500);
+      // Switch to preview mode
+      const previewBtn = page.locator("button, [role='tab']").filter({ hasText: /preview/i }).first();
+      if (await previewBtn.isVisible()) {
+        await previewBtn.click();
+        await page.waitForTimeout(500);
+      }
+
+      // Check that an img tag was rendered
+      const img = page.locator("img[alt='test image']");
+      const imgCount = await img.count();
+      expect(imgCount, "Preview should render an <img> tag for markdown image").toBeGreaterThan(0);
+    } finally {
+      fs.unlinkSync(mdPath);
+      fs.rmdirSync(tmpDir);
     }
-
-    // Check that an img tag was rendered
-    const img = page.locator("img[alt='test image']");
-    const imgCount = await img.count();
-    expect(imgCount, "Preview should render an <img> tag for markdown image").toBeGreaterThan(0);
   });
 
   test("F18-FE2: Editor preview rewrites relative image paths to /api/files/raw", async ({ page }) => {
@@ -150,8 +155,7 @@ test.describe("Feature 18: Inline Image Rendering", () => {
         expect(src, "Relative image path should be rewritten to /api/files/raw endpoint").toContain("/api/files/raw");
         expect(src, "Rewritten path should include the absolute image path").toContain("screenshot.png");
       } else {
-        // If no img found, the feature isn't implemented yet — test.fail() marks expected failure
-        test.fail();
+        expect(imgCount, "Preview should render an img tag for the relative image").toBeGreaterThan(0);
       }
     } finally {
       fs.unlinkSync(pngPath);
@@ -161,32 +165,37 @@ test.describe("Feature 18: Inline Image Rendering", () => {
   });
 
   test("F18-FE3: Editor preview passes http(s) image URLs through unchanged", async ({ page }) => {
-    await page.goto(BASE);
-    await page.waitForLoadState("networkidle");
+    // Create a temp file with an external image URL
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sa-img-fe3-test-"));
+    const mdPath = path.join(tmpDir, "extimg.md");
+    fs.writeFileSync(mdPath, "# External\n\n![ext](https://example.com/image.png)\n");
 
-    // Open editor
-    const addBtn = page.locator('[data-testid="open-tab-menu"]');
-    await addBtn.click();
-    await page.locator('[data-testid="add-panel-editor"]').click();
-    await page.waitForTimeout(500);
+    try {
+      await page.goto(BASE);
+      await page.waitForLoadState("networkidle");
 
-    const editor = page.locator(".cm-content, .ProseMirror, [contenteditable]").first();
-    await editor.click();
-    await editor.pressSequentially("![ext](https://example.com/image.png)", { delay: 10 });
-    await page.waitForTimeout(300);
+      const openResp = await page.request.post(`${API}/api/files/open`, {
+        data: { path: mdPath },
+      });
+      expect(openResp.status()).toBe(200);
+      await page.waitForTimeout(1000);
 
-    // Switch to preview
-    const previewBtn = page.locator("button, [role='tab']").filter({ hasText: /preview/i }).first();
-    if (await previewBtn.isVisible()) {
-      await previewBtn.click();
-      await page.waitForTimeout(500);
-    }
+      // Switch to preview
+      const previewBtn = page.locator("button, [role='tab']").filter({ hasText: /preview/i }).first();
+      if (await previewBtn.isVisible()) {
+        await previewBtn.click();
+        await page.waitForTimeout(500);
+      }
 
-    const img = page.locator("img[alt='ext']");
-    const count = await img.count();
-    if (count > 0) {
-      const src = await img.getAttribute("src");
-      expect(src, "External URLs should pass through unchanged").toBe("https://example.com/image.png");
+      const img = page.locator("img[alt='ext']");
+      const count = await img.count();
+      if (count > 0) {
+        const src = await img.getAttribute("src");
+        expect(src, "External URLs should pass through unchanged").toBe("https://example.com/image.png");
+      }
+    } finally {
+      fs.unlinkSync(mdPath);
+      fs.rmdirSync(tmpDir);
     }
   });
 });
