@@ -54,6 +54,7 @@ class _LiveDoc:
         self.ydoc = pycrdt.Doc()
         self.text: pycrdt.Text = self.ydoc.get("content", type=pycrdt.Text)
         self.clients: list[WebSocket] = []
+        self._autosave_task: asyncio.Task | None = None
 
     async def broadcast_to_others(self, sender: WebSocket, msg: bytes):
         """Send a Yjs message to all connected clients except the sender."""
@@ -64,6 +65,27 @@ class _LiveDoc:
                 await ws.send_bytes(msg)
             except Exception:
                 self.clients.remove(ws)
+
+    def schedule_autosave(self):
+        """Debounced autosave — saves to source file 2s after last edit."""
+        if not self.meta.file_path:
+            return
+        if self._autosave_task and not self._autosave_task.done():
+            self._autosave_task.cancel()
+        self._autosave_task = asyncio.ensure_future(self._do_autosave())
+
+    async def _do_autosave(self):
+        await asyncio.sleep(2.0)
+        fp = Path(self.meta.file_path)
+        try:
+            fp.write_text(str(self.text))
+            # Pre-set mtime so file watcher ignores this write
+            _file_handler._last_mtime[str(fp.resolve())] = fp.stat().st_mtime
+            self.meta.updated_at = time.time()
+            _persist_index()
+            log.debug("Autosaved %s to %s", self.meta.id, fp)
+        except Exception as e:
+            log.warning("Autosave failed for %s: %s", self.meta.id, e)
 
 
 # ---------------------------------------------------------------------------
@@ -614,6 +636,7 @@ async def doc_ws(ws: WebSocket, doc_id: str):
                     fwd = pycrdt.create_update_message(update)
                     await live.broadcast_to_others(ws, fwd)
                     live.meta.updated_at = time.time()
+                    live.schedule_autosave()
                 _persist_doc(live)
             elif msg_type == pycrdt.YMessageType.AWARENESS:
                 await live.broadcast_to_others(ws, data)

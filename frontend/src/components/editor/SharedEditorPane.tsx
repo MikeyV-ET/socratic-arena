@@ -735,20 +735,13 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
           {activeDocId && (
             <>
               {activeDoc?.file_path && (
-                <button
-                  onClick={saveToFile}
-                  disabled={saveStatus === "saving"}
-                  className={`px-2 py-0.5 text-[10px] rounded transition-colors ${
-                    saveStatus === "saved" ? "bg-green-500/20 text-green-400" :
-                    saveStatus === "error" ? "bg-red-500/20 text-red-400" :
-                    "bg-primary/10 hover:bg-primary/20 text-primary"
-                  }`}
-                  data-testid="save-file-btn"
+                <span
+                  className="px-2 py-0.5 text-[10px] rounded bg-green-500/10 text-green-400"
+                  data-testid="autosave-indicator"
+                  title="Changes auto-save to disk after 2s of inactivity"
                 >
-                  {saveStatus === "saving" ? "Saving..." :
-                   saveStatus === "saved" ? "Saved" :
-                   saveStatus === "error" ? "Error" : "Save"}
-                </button>
+                  Autosave
+                </span>
               )}
               <div className="flex rounded border border-border overflow-hidden" data-testid="view-mode-toggle">
                 <button
