@@ -659,6 +659,46 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
     } catch { /* ignore */ }
   }, [refreshDocs, openDoc]);
 
+  // Recursive tree entry renderer — supports unlimited directory depth
+  const renderTreeEntry = useCallback((entry: BrowseEntry, depth: number): React.ReactNode => {
+    if (entry.type === "dir") {
+      const isExpanded = treeExpanded.has(entry.path);
+      const children = treeCache[entry.path]?.entries || [];
+      return (
+        <div key={entry.path}>
+          <div
+            className="flex items-center gap-1 px-2 py-1 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+            onClick={() => toggleTreeDir(entry.path)}
+            title={entry.path}
+          >
+            <span className="text-[10px] shrink-0 w-3">{isExpanded ? "▼" : "▶"}</span>
+            <span className="truncate flex-1 font-medium">{entry.name}/</span>
+          </div>
+          {isExpanded && children.length > 0 && (
+            <div className="ml-3 border-l border-border/50">
+              {children.map((child) => renderTreeEntry(child, depth + 1))}
+            </div>
+          )}
+          {isExpanded && children.length === 0 && (
+            <div className="ml-3 px-2 py-1 text-[10px] text-muted-foreground/50 italic">empty</div>
+          )}
+        </div>
+      );
+    }
+    return (
+      <div
+        key={entry.path}
+        className="flex items-center gap-1 px-2 py-1 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+        onClick={() => { openFile(entry.path); setShowOpen(false); }}
+        title={entry.path}
+      >
+        <span className="text-[10px] shrink-0 w-3"></span>
+        <span className="truncate flex-1">{entry.name}</span>
+        {entry.size !== undefined && <span className="text-[9px] text-muted-foreground shrink-0">{entry.size < 1024 ? `${entry.size}B` : `${(entry.size / 1024).toFixed(0)}K`}</span>}
+      </div>
+    );
+  }, [treeExpanded, treeCache, toggleTreeDir, openFile]);
+
   // Save doc back to its source file
   const saveToFile = useCallback(async () => {
     if (!activeDocId) return;
@@ -819,89 +859,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
                       {browseLoading ? (
                         <div className="text-xs text-muted-foreground text-center py-4">Loading...</div>
                       ) : (
-                        browseResult.entries.map((entry) => {
-                          if (entry.type === "dir") {
-                            const isExpanded = treeExpanded.has(entry.path);
-                            const subEntries = treeCache[entry.path]?.entries || [];
-                            return (
-                              <div key={entry.path}>
-                                <div
-                                  className="flex items-center gap-1 px-2 py-1.5 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                                  onClick={() => toggleTreeDir(entry.path)}
-                                  title={entry.path}
-                                >
-                                  <span className="text-[10px] shrink-0 w-3">{isExpanded ? "▼" : "▶"}</span>
-                                  <span className="truncate flex-1 font-medium">{entry.name}/</span>
-                                </div>
-                                {isExpanded && subEntries.length > 0 && (
-                                  <div className="ml-3 border-l border-border/50">
-                                    {subEntries.map((sub) => {
-                                      if (sub.type === "dir") {
-                                        const subExp = treeExpanded.has(sub.path);
-                                        const subSub = treeCache[sub.path]?.entries || [];
-                                        return (
-                                          <div key={sub.path}>
-                                            <div
-                                              className="flex items-center gap-1 px-2 py-1 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                                              onClick={() => toggleTreeDir(sub.path)}
-                                              title={sub.path}
-                                            >
-                                              <span className="text-[10px] shrink-0 w-3">{subExp ? "▼" : "▶"}</span>
-                                              <span className="truncate flex-1 font-medium">{sub.name}/</span>
-                                            </div>
-                                            {subExp && subSub.length > 0 && (
-                                              <div className="ml-3 border-l border-border/50">
-                                                {subSub.map((leaf) => (
-                                                  <div
-                                                    key={leaf.path}
-                                                    className="flex items-center gap-1 px-2 py-1 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                                                    onClick={() => { if (leaf.type === "dir") toggleTreeDir(leaf.path); else { openFile(leaf.path); setShowOpen(false); } }}
-                                                    title={leaf.path}
-                                                  >
-                                                    <span className="text-[10px] shrink-0 w-3">{leaf.type === "dir" ? "▶" : ""}</span>
-                                                    <span className="truncate flex-1">{leaf.name}{leaf.type === "dir" ? "/" : ""}</span>
-                                                    {leaf.size !== undefined && <span className="text-[9px] text-muted-foreground shrink-0">{leaf.size < 1024 ? `${leaf.size}B` : `${(leaf.size / 1024).toFixed(0)}K`}</span>}
-                                                  </div>
-                                                ))}
-                                              </div>
-                                            )}
-                                          </div>
-                                        );
-                                      }
-                                      return (
-                                        <div
-                                          key={sub.path}
-                                          className="flex items-center gap-1 px-2 py-1 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                                          onClick={() => { openFile(sub.path); setShowOpen(false); }}
-                                          title={sub.path}
-                                        >
-                                          <span className="text-[10px] shrink-0 w-3"></span>
-                                          <span className="truncate flex-1">{sub.name}</span>
-                                          {sub.size !== undefined && <span className="text-[9px] text-muted-foreground shrink-0">{sub.size < 1024 ? `${sub.size}B` : `${(sub.size / 1024).toFixed(0)}K`}</span>}
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                                {isExpanded && subEntries.length === 0 && (
-                                  <div className="ml-3 px-2 py-1 text-[10px] text-muted-foreground/50 italic">empty</div>
-                                )}
-                              </div>
-                            );
-                          }
-                          return (
-                            <div
-                              key={entry.path}
-                              className="flex items-center gap-1 px-2 py-1.5 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                              onClick={() => { openFile(entry.path); setShowOpen(false); }}
-                              title={entry.path}
-                            >
-                              <span className="text-[10px] shrink-0 w-3"></span>
-                              <span className="truncate flex-1">{entry.name}</span>
-                              {entry.size !== undefined && <span className="text-[9px] text-muted-foreground shrink-0">{entry.size < 1024 ? `${entry.size}B` : `${(entry.size / 1024).toFixed(0)}K`}</span>}
-                            </div>
-                          );
-                        })
+                        browseResult.entries.map((entry) => renderTreeEntry(entry, 0))
                       )}
                     </div>
                   </>
