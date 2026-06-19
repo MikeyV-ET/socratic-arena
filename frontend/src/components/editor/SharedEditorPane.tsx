@@ -344,6 +344,8 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
   const [showAuthors, setShowAuthors] = useState(true);
   const [browseResult, setBrowseResult] = useState<BrowseResult | null>(null);
   const [browseLoading, setBrowseLoading] = useState(false);
+  const [treeCache, setTreeCache] = useState<Record<string, BrowseResult>>({});
+  const [treeExpanded, setTreeExpanded] = useState<Set<string>>(new Set());
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [showOpen, setShowOpen] = useState(false);
   const [showToc, setShowToc] = useState(false);
@@ -610,7 +612,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
     } catch { /* ignore */ }
   }, []);
 
-  // Browse filesystem
+  // Browse filesystem (for legacy single-level and tree root)
   const browseDir = useCallback(async (dirPath?: string) => {
     setBrowseLoading(true);
     try {
@@ -620,9 +622,26 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
       const resp = await fetch(url);
       const data: BrowseResult = await resp.json();
       setBrowseResult(data);
+      setTreeCache((prev) => ({ ...prev, [data.path]: data }));
     } catch { /* ignore */ }
     setBrowseLoading(false);
   }, []);
+
+  // Toggle expand/collapse a directory in tree view
+  const toggleTreeDir = useCallback(async (dirPath: string) => {
+    setTreeExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(dirPath)) { next.delete(dirPath); } else { next.add(dirPath); }
+      return next;
+    });
+    if (!treeCache[dirPath]) {
+      try {
+        const resp = await fetch(`${basePath}/api/files/browse?path=${encodeURIComponent(dirPath)}`);
+        const data: BrowseResult = await resp.json();
+        setTreeCache((prev) => ({ ...prev, [dirPath]: data }));
+      } catch { /* ignore */ }
+    }
+  }, [treeCache]);
 
   // Open a file from disk into the editor
   const openFile = useCallback(async (filePath: string) => {
@@ -783,43 +802,113 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
               Open
             </button>
             {showOpen && (
-              <div className="absolute top-full right-0 z-50 mt-1 w-64 max-h-80 bg-card border border-border rounded-md shadow-lg flex flex-col overflow-hidden">
+              <div className="absolute top-full right-0 z-50 mt-1 w-96 max-h-[28rem] bg-card border border-border rounded-md shadow-lg flex flex-col overflow-hidden" data-testid="file-tree-panel">
                 {browseResult && (
                   <>
-                    <div className="px-2 py-1 text-[9px] text-muted-foreground border-b border-border truncate shrink-0" title={browseResult.path}>
-                      {browseResult.path.split("/").slice(-2).join("/")}
+                    <div className="px-2 py-1.5 text-[9px] text-muted-foreground border-b border-border shrink-0 flex items-center gap-1">
+                      {browseResult.path.split("/").filter(Boolean).map((seg, i, arr) => {
+                        const fullPath = "/" + arr.slice(0, i + 1).join("/");
+                        return (
+                          <span key={fullPath} className="flex items-center gap-0.5">
+                            {i > 0 && <span className="text-muted-foreground/50">/</span>}
+                            <span className="cursor-pointer hover:text-foreground transition-colors" onClick={() => browseDir(fullPath)}>{seg}</span>
+                          </span>
+                        );
+                      })}
                     </div>
                     <div className="flex-1 overflow-y-auto">
                       {browseResult.parent && (
                         <div
                           className="flex items-center gap-1 px-2 py-1.5 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
                           onClick={() => browseDir(browseResult.parent!)}
-                        >
-                          <span className="text-[10px]">..</span>
-                        </div>
+                        >..</div>
                       )}
                       {browseLoading ? (
                         <div className="text-xs text-muted-foreground text-center py-4">Loading...</div>
                       ) : (
-                        browseResult.entries.map((entry) => (
-                          <div
-                            key={entry.path}
-                            className="flex items-center gap-1 px-2 py-1.5 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                            onClick={() => {
-                              if (entry.type === "dir") { browseDir(entry.path); }
-                              else { openFile(entry.path); setShowOpen(false); }
-                            }}
-                            title={entry.path}
-                          >
-                            <span className="text-[10px] shrink-0 w-3">{entry.type === "dir" ? "D" : ""}</span>
-                            <span className="truncate flex-1">{entry.name}</span>
-                            {entry.size !== undefined && (
-                              <span className="text-[9px] text-muted-foreground shrink-0">
-                                {entry.size < 1024 ? `${entry.size}B` : `${(entry.size / 1024).toFixed(0)}K`}
-                              </span>
-                            )}
-                          </div>
-                        ))
+                        browseResult.entries.map((entry) => {
+                          if (entry.type === "dir") {
+                            const isExpanded = treeExpanded.has(entry.path);
+                            const subEntries = treeCache[entry.path]?.entries || [];
+                            return (
+                              <div key={entry.path}>
+                                <div
+                                  className="flex items-center gap-1 px-2 py-1.5 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                                  onClick={() => toggleTreeDir(entry.path)}
+                                  title={entry.path}
+                                >
+                                  <span className="text-[10px] shrink-0 w-3">{isExpanded ? "▼" : "▶"}</span>
+                                  <span className="truncate flex-1 font-medium">{entry.name}/</span>
+                                </div>
+                                {isExpanded && subEntries.length > 0 && (
+                                  <div className="ml-3 border-l border-border/50">
+                                    {subEntries.map((sub) => {
+                                      if (sub.type === "dir") {
+                                        const subExp = treeExpanded.has(sub.path);
+                                        const subSub = treeCache[sub.path]?.entries || [];
+                                        return (
+                                          <div key={sub.path}>
+                                            <div
+                                              className="flex items-center gap-1 px-2 py-1 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                                              onClick={() => toggleTreeDir(sub.path)}
+                                              title={sub.path}
+                                            >
+                                              <span className="text-[10px] shrink-0 w-3">{subExp ? "▼" : "▶"}</span>
+                                              <span className="truncate flex-1 font-medium">{sub.name}/</span>
+                                            </div>
+                                            {subExp && subSub.length > 0 && (
+                                              <div className="ml-3 border-l border-border/50">
+                                                {subSub.map((leaf) => (
+                                                  <div
+                                                    key={leaf.path}
+                                                    className="flex items-center gap-1 px-2 py-1 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                                                    onClick={() => { if (leaf.type === "dir") toggleTreeDir(leaf.path); else { openFile(leaf.path); setShowOpen(false); } }}
+                                                    title={leaf.path}
+                                                  >
+                                                    <span className="text-[10px] shrink-0 w-3">{leaf.type === "dir" ? "▶" : ""}</span>
+                                                    <span className="truncate flex-1">{leaf.name}{leaf.type === "dir" ? "/" : ""}</span>
+                                                    {leaf.size !== undefined && <span className="text-[9px] text-muted-foreground shrink-0">{leaf.size < 1024 ? `${leaf.size}B` : `${(leaf.size / 1024).toFixed(0)}K`}</span>}
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      }
+                                      return (
+                                        <div
+                                          key={sub.path}
+                                          className="flex items-center gap-1 px-2 py-1 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                                          onClick={() => { openFile(sub.path); setShowOpen(false); }}
+                                          title={sub.path}
+                                        >
+                                          <span className="text-[10px] shrink-0 w-3"></span>
+                                          <span className="truncate flex-1">{sub.name}</span>
+                                          {sub.size !== undefined && <span className="text-[9px] text-muted-foreground shrink-0">{sub.size < 1024 ? `${sub.size}B` : `${(sub.size / 1024).toFixed(0)}K`}</span>}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                                {isExpanded && subEntries.length === 0 && (
+                                  <div className="ml-3 px-2 py-1 text-[10px] text-muted-foreground/50 italic">empty</div>
+                                )}
+                              </div>
+                            );
+                          }
+                          return (
+                            <div
+                              key={entry.path}
+                              className="flex items-center gap-1 px-2 py-1.5 text-xs cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                              onClick={() => { openFile(entry.path); setShowOpen(false); }}
+                              title={entry.path}
+                            >
+                              <span className="text-[10px] shrink-0 w-3"></span>
+                              <span className="truncate flex-1">{entry.name}</span>
+                              {entry.size !== undefined && <span className="text-[9px] text-muted-foreground shrink-0">{entry.size < 1024 ? `${entry.size}B` : `${(entry.size / 1024).toFixed(0)}K`}</span>}
+                            </div>
+                          );
+                        })
                       )}
                     </div>
                   </>
