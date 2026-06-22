@@ -16,6 +16,7 @@ import { ChatPanel } from "@/components/workbench/ChatPanel";
 import { SharedEditorPane } from "@/components/editor/SharedEditorPane";
 import { FilesystemPane } from "@/components/workbench/FilesystemPane";
 import { ShellPane } from "@/components/workbench/ShellPane";
+import { WhiteboardPane } from "@/components/workbench/WhiteboardPane";
 import { FontSizeControl } from "@/components/common/FontSizeControl";
 
 /** Panel types available in the workbench. Singleton types can only have one
@@ -37,6 +38,7 @@ export const PANEL_TYPES = [
   { type: "chat", label: "Chat", multi: true },
   { type: "filesystem", label: "Filesystem", multi: true },
   { type: "shell", label: "Shell", multi: true },
+  { type: "whiteboard", label: "Whiteboard", multi: true },
 ] as const;
 
 export interface WorkbenchPanel {
@@ -100,6 +102,8 @@ function TabContent({ panel }: { panel: WorkbenchPanel }) {
       break;
     case "shell":
       return <ShellPane instanceId={panel.instanceId} config={panel.config} />;
+    case "whiteboard":
+      return <WhiteboardPane instanceId={panel.instanceId} config={panel.config} />;
     default:
       content = <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Unknown panel type</div>;
   }

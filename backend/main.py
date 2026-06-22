@@ -332,6 +332,8 @@ async def doppelganger_teardown(doppel_id: str):
 from shared_docs import router as docs_router, files_router, set_broadcast as docs_set_broadcast, start_file_watcher
 app.include_router(docs_router)
 app.include_router(files_router)
+from whiteboards import router as whiteboard_router
+app.include_router(whiteboard_router)
 
 # In-memory state — flat message list
 # _msg_index provides O(1) lookup by message ID (for flags, streaming, etc.)
