@@ -196,6 +196,7 @@ interface ArenaState {
 
   // Panel chat messages (per-panel message lists for workbench chat panels)
   panelMessages: Record<string, ConversationNode[]>;
+  clearPanelMessages: (panelId: string) => void;
   addPanelMessage: (panelId: string, node: ConversationNode) => void;
   updatePanelMessage: (panelId: string, nodeId: string, content: string, thinking?: string | null) => void;
   setPanelAwaitingResponse: (panelId: string, v: boolean) => void;
@@ -744,6 +745,9 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
     // Panel chat messages
     panelMessages: {},
     panelAwaitingResponse: {},
+    clearPanelMessages: (panelId: string) => set((s) => ({
+      panelMessages: { ...s.panelMessages, [panelId]: [] },
+    })),
     addPanelMessage: (panelId, node) => set((s) => {
       const existing = s.panelMessages[panelId] || [];
       if (existing.some((m) => m.id === node.id)) return s;

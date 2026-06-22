@@ -75,11 +75,14 @@ export function ChatPanel({
     }
   }, [config?.targetAgent]);
 
-  // Load persisted chat history when agent is selected
+  // Load persisted chat history when agent is selected (or panel reopened)
   const addPanelMessage = useArenaStore((s) => s.addPanelMessage);
+  const clearPanelMessages = useArenaStore((s) => s.clearPanelMessages);
   const basePath = window.location.pathname.replace(/\/+$/, "");
   useEffect(() => {
-    if (!targetAgent || messages.length > 0) return;
+    if (!targetAgent) return;
+    // Always re-fetch on agent change — clear stale messages first
+    if (clearPanelMessages) clearPanelMessages(instanceId);
     fetch(`${basePath}/api/panel/agent/${encodeURIComponent(targetAgent)}/messages`)
       .then((r) => r.json())
       .then((data) => {
