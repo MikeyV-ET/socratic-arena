@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Excalidraw, serializeAsJSON } from "@excalidraw/excalidraw";
+import "@excalidraw/excalidraw/index.css";
 import type { ExcalidrawImperativeAPI, ExcalidrawElement, AppState, BinaryFiles } from "@excalidraw/excalidraw/types";
 import { useArenaStore } from "@/stores/arenaStore";
 
