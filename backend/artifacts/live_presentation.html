@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>ACBen_46 Architecture Review</title>
+<title>Presentation</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/black.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
@@ -59,7 +59,7 @@ graph LR
 
 <section>
 <div data-markdown><textarea data-template>
-## Phase 1: SimState Construction
+## Phase 1a: SimState Construction
 </textarea></div>
 <div class="mermaid">
 graph TD
@@ -70,73 +70,108 @@ graph TD
     SS --> Gel[HydrogelSubstrate]
     SS --> Img[ImagingModel]
     SS --> HSens[HumiditySensor]
-    SS --> W[World Registry]
+    SS --> W[World]
+    W -.->|owns| Sched[Scheduler]
     W -.->|register| Stage
     W -.->|register| Gel
     HProf --> Gel
     HProf --> HSens
 </div>
 <div data-markdown><textarea data-template>
-### What VariantConfig determines (seed-dependent)
-| Field | How | Game 2 values |
-|-------|-----|---------------|
-| fault_type | rng.uniform() < 0.6 → "z_drift" | "z_drift" or "nominal" |
-| z_drift_rate | rng.uniform(-0.002, -0.0005) | -0.0005 to -0.002 mm/hr |
-| gel_fault_rate_mult | fixed 1.0 | 1.0 (no gel fault in game 2) |
-| initial_z_mm | fixed 2.3 | 2.3 |
-
-### What is fixed across all seeds
-| Quantity | Value | Source |
-|----------|-------|--------|
-| Humidity profile | 289-row CSV | humidity_profile_game2.csv |
-| Transient spike | t=14h, drop to 45%, 15 min | variant.py (game==2 branch) |
-| Ring/stage features | seed 999999 | imaging.py |
-| Gel rate_multiplier | 1.0 | sim_server.py |
-| Gel nominal thickness | 1.3 mm | sim_server.py |
+World owns a Scheduler (priority queue of timed events). Components register with World. The Scheduler drives time advancement.
 </textarea></div>
 </section>
 
+<section data-markdown><textarea data-template>
+## Phase 1b: What varies vs what's fixed
+
+**Seed-dependent** (from VariantConfig):
+
+| Field | How | Game 2 values |
+|-------|-----|---------------|
+| fault_type | rng.uniform() < 0.6 | "z_drift" or "nominal" |
+| z_drift_rate | rng.uniform(-0.002, -0.0005) | -0.5 to -2.0 um/hr |
+| gel_fault_rate_mult | fixed 1.0 | 1.0 (no gel fault) |
+| initial_z_mm | fixed 2.3 | 2.3 |
+
+**Fixed across all seeds:**
+
+| Quantity | Value | Source |
+|----------|-------|--------|
+| Humidity profile | 289-row CSV | humidity_profile_game2.csv |
+| Transient spike | t=14h, 45%, 15 min | variant.py |
+| Ring/stage features | seed 999999 | imaging.py |
+| Gel rate_multiplier | 1.0 | sim_server.py |
+| Gel thickness | 1.3 mm | sim_server.py |
+</textarea></section>
+
+<section data-markdown><textarea data-template>
+## Phase 2: Dataset Generation (Scheduler-Driven)
+
+`generate_dataset()` declares events on the Scheduler, then `world.sync_to(24)` runs everything.
+
+**Step 1: Schedule events**
+
+```python
+# Humidity breakpoints (no-op events at each CSV time)
+schedule_humidity_sync(scheduler, humidity_profile)
+# → 288 events at 5-min intervals
+
+# Reference acquisitions at t=0
+scheduler.schedule(0.0, acquire_references, tag="reference")
+
+# Timelapse every 1h
+scheduler.schedule_periodic(0.0, 1.0, acquire_timelapse,
+                            tag="timelapse", until=24.0)
+```
+
+**Step 2: Run** — `world.sync_to(24.0)` drains all ~313 events in time order.
+</textarea></section>
+
 <section>
 <div data-markdown><textarea data-template>
-## Phase 2: Dataset Generation
-
-`sim_server.py:generate_dataset()` — single source of truth
+## Phase 2b: How sync_to Works
 </textarea></div>
 <div class="mermaid">
 sequenceDiagram
-    participant SS as SimState
+    participant SS as generate_dataset
+    participant Sched as Scheduler
     participant W as World
     participant St as Stage
     participant G as Gel
     participant Im as Imager
-    participant HS as HumiditySensor
 
-    SS->>W: sync_to(0.0)
-    W->>St: update(0.0)
-    W->>G: update(0.0)
-
-    SS->>Im: acquire(stage surface, BF_REFLECTOR)
-    Note right of Im: stage_surface_t0.tiff
-    SS->>Im: acquire(ring, BF_REFLECTOR)
-    Note right of Im: ring_surface_t0.tiff
-
-    loop t = 0, 1, 2, ... 24 hr
-        SS->>W: sync_to(t)
-        W->>St: update(t) → accumulate drift
-        W->>G: update(t) → trapezoidal RH integration
-        SS->>Im: acquire(sample, GFP)
-        Note right of Im: tp_NNNN_tX.Xh.tiff
-    end
-
-    SS->>HS: generate_log(0, 24, 5min)
-    Note right of HS: humidity.csv (noisy sensor readings)
+    SS->>Sched: schedule 288 humidity_sync events
+    SS->>Sched: schedule reference at t=0
+    SS->>Sched: schedule_periodic timelapse 0,1,...24h
 
     SS->>W: sync_to(24.0)
+
+    Note over W,G: t=0.0: reference event fires
+    W->>St: update(0.0)
+    W->>G: update(0.0)
+    Sched->>Im: acquire(stage, BF_REFLECTOR)
+    Sched->>Im: acquire(ring, BF_REFLECTOR)
+
+    Note over W,G: t=0.0: timelapse event fires
+    Sched->>Im: acquire(sample, GFP) → tp_0000
+
+    Note over W,G: t=0.083: humidity_sync (no-op)
+    W->>St: update(0.083)
+    W->>G: update(0.083) → integrate 5-min segment
+
+    Note over W,G: ...288 humidity syncs + 24 timelapse events...
+
+    Note over W,G: t=24.0: final timelapse
+    W->>St: update(24.0)
+    W->>G: update(24.0)
+    Sched->>Im: acquire(sample, GFP) → tp_0024
+
     SS->>W: write_ground_truth()
-    Note right of W: .ground_truth.json
-    SS->>St: set_position(z=2.3)
-    Note right of St: Reset for agent
 </div>
+<div data-markdown><textarea data-template>
+**Key insight:** The humidity sync events are no-ops. They don't DO anything; they just cause `World.sync_to()` to call `gel.update()` at 5-minute resolution, so each trapezoidal integration segment spans exactly one CSV interval.
+</textarea></div>
 </section>
 
 <section data-markdown><textarea data-template>
@@ -161,7 +196,7 @@ sequenceDiagram
 | true_z | Computed | Stage.update() | Imager.acquire(), ground_truth | mm |
 | reported_z | Declared | Stage.set_position() | acquisitions.csv, agent get_position | mm |
 | z_error (drift) | Computed | Stage (rate * dt) | ground_truth | mm |
-| enclosure_rh(t) | Declared | humidity_profile_game2.csv | Gel._advance_with_profile() | % |
+| enclosure_rh(t) | Declared | humidity_profile_game2.csv | Gel.advance() via profile | % |
 | sensor_rh(t) | Computed | HumiditySensor.read() | humidity.csv, agent get_humidity | % |
 | gel_thickness | Computed | Gel (trapezoidal integral) | surface_z_mm, ground_truth | mm |
 | surface_z_mm | Computed | 1.0 + gel_thickness | Imager (defocus), ground_truth | mm |
@@ -172,7 +207,7 @@ sequenceDiagram
 
 <section>
 <div data-markdown><textarea data-template>
-## Phase 3: Agent Interaction (MCP)
+## Phase 3a: Agent Interaction (MCP)
 </textarea></div>
 <div class="mermaid">
 graph LR
@@ -184,26 +219,30 @@ graph LR
 </div>
 <div data-markdown><textarea data-template>
 ### MCP Tools
-| Tool | What it does | State it touches |
-|------|-------------|-----------------|
-| run_command(cmd) | Shell exec as 'agent', 90s timeout | command counter (max 100) |
-| submit_diagnosis(status, fault_type, notes) | Write .diagnosis.json | _diagnosed flag (one-shot) |
-| start_experiment() | Read scope state via RPC, write .experiment_start.json | _started flag (one-shot) |
 
-### Sim RPC Methods (via unix socket)
+| Tool | What it does | State |
+|------|-------------|-------|
+| run_command | Shell as 'agent', 90s timeout | counter (max 100) |
+| submit_diagnosis | Write .diagnosis.json | one-shot flag |
+| start_experiment | Record scope state | one-shot flag |
+</textarea></div>
+</section>
+
+<section data-markdown><textarea data-template>
+## Phase 3b: Sim RPC Methods
+
 | Method | Returns | Reads from |
 |--------|---------|------------|
 | get_position | [x, y, z] reported | Stage |
-| set_position | "ok" | Stage (with preset lock) |
-| acquire | path to TIFF | Stage.true_z, Gel.surface_z, Imager |
-| get_humidity | float | HumiditySensor + World.current_time_hr |
+| set_position | "ok" | Stage (preset lock) |
+| acquire | path to TIFF | true_z, surface_z, Imager |
+| get_humidity | float | HumiditySensor |
 | get_temperature | float | HumiditySensor |
-| tl/il get/set | bool or "ok" | SimState illumination flags |
-| il_filter get/set | str or "ok" | SimState filter cube |
+| tl/il get/set | bool or "ok" | SimState flags |
+| il_filter get/set | str or "ok" | SimState filter |
 
-**Note:** Agent acquire does NOT call world.sync_to(). Physics froze at t=24h. Agent sees post-dataset state.
-</textarea></div>
-</section>
+**Key:** Agent acquire does NOT call world.sync_to(). Physics froze at t=24h.
+</textarea></section>
 
 <section>
 <div data-markdown><textarea data-template>
@@ -239,7 +278,7 @@ graph LR
 graph TD
     subgraph Container
         subgraph "Physics (sim/)"
-            Core[core.py<br/>World, Component, Scheduler]
+            Core[core.py<br/>World + Scheduler + Component]
             Var[variant.py<br/>seed → VariantConfig]
             Stage[stage.py<br/>XYZ + drift]
             Gel[gel.py<br/>Hydrogel + trapezoidal]
@@ -287,7 +326,7 @@ graph TD
 
 1. **Imager not registered with World** — ImagingModel extends Component but isn't registered. update() is a no-op. Is it really a Component?
 2. **HumiditySensor not registered with World** — same pattern. It has update() as no-op.
-3. **Scheduler exists but unused** — core.py defines Event + Scheduler. Nothing uses them yet.
+3. ~~**Scheduler exists but unused**~~ — **RESOLVED.** Scheduler now drives `generate_dataset()`. Events (references, timelapse, humidity sync) are scheduled on `world.scheduler`, then `world.sync_to(24)` drains them all.
 4. **Agent time is frozen** — agent interactions happen at t=24h. No world.sync_to() during agent phase. Is this intentional or a gap?
 5. **Vestigial variant fields** — target_rh, min_rh, depletion_period_hr, humidity_transients in VariantConfig. Used by game 3 but dead weight for game 2 (profile is CSV).
 6. **Grader Z scoring uses hardcoded 25h** — `total_drift = drift_rate * 25.0` but dataset runs 0-24h. Off by one?
