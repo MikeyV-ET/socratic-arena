@@ -618,6 +618,56 @@ test.describe("Workspace chat panel", () => {
     // This is the test that should FAIL if history isn't persisted
     await expect(historyMsg).toBeVisible({ timeout: 5000 });
   });
+
+  test("C4: Chat panel re-fetches messages on agent switch (regression #17)", async ({ page }) => {
+    // BUG #17: Switch Q→Jr→Q in chat panel, Q's messages are stale/gone.
+    // Root cause: ChatPanel only fetched on mount, not on agent change.
+    // Fix: 4e313f2 — clearPanelMessages + re-fetch on targetAgent change.
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.waitForTimeout(300);
+    const chatOption = page.locator('[data-testid="add-panel-chat"]');
+    if (!(await chatOption.isVisible())) {
+      await page.keyboard.press("Escape");
+      return;
+    }
+    await chatOption.click();
+    await page.waitForTimeout(500);
+
+    // Need at least 2 agents to test switching
+    const agentSelect = page.locator("select").last();
+    const options = agentSelect.locator("option:not([disabled])");
+    const optCount = await options.count();
+    if (optCount < 2) return; // can't test switch with only 1 agent
+
+    const agent1 = await options.nth(0).getAttribute("value");
+    const agent2 = await options.nth(1).getAttribute("value");
+    if (!agent1 || !agent2) return;
+
+    // Select agent 1 — should load messages
+    await agentSelect.selectOption(agent1);
+    await page.waitForTimeout(1000);
+
+    // Count visible messages for agent 1
+    const chatMessages = page.locator('[data-testid="panel-chat-message"]');
+    const agent1MsgCount = await chatMessages.count();
+
+    // Switch to agent 2
+    await agentSelect.selectOption(agent2);
+    await page.waitForTimeout(1000);
+
+    // Switch back to agent 1
+    await agentSelect.selectOption(agent1);
+    await page.waitForTimeout(1000);
+
+    // Messages should be re-fetched — count should match or exceed original
+    // (the fix clears + re-fetches; without the fix, messages would be stale/empty)
+    const agent1MsgCountAfter = await chatMessages.count();
+
+    // The key assertion: switching back shouldn't lose messages.
+    // With the bug, this would be 0 or stale. With the fix, re-fetched.
+    // Use >= because new messages might have arrived.
+    expect(agent1MsgCountAfter).toBeGreaterThanOrEqual(agent1MsgCount);
+  });
 });
 
 // =========================================================================
