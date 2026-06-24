@@ -578,6 +578,7 @@ async def serve_raw_file(path: str):
     allowed = [
         Path.home() / "agents",
         Path.home() / "projects",
+        Path.home() / "xai-projects",
         Path("/tmp"),
     ]
     if not any(str(fp).startswith(str(a.resolve())) for a in allowed):
