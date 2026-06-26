@@ -2052,7 +2052,9 @@ async def switch_agent(body: dict):
     session_id = body.get("sessionId")
     log.info("Switching arena to agent: %s (session: %s)", agent_name, session_id or "current")
     _arena_node_ids.clear()
+    saved_artifacts = state.artifacts  # Artifacts are global, not per-agent
     state, tail_offset = _build_agent_state(agent_name, session_id=session_id)
+    state.artifacts = saved_artifacts
     _rebuild_msg_index()
     _current_agent = agent_name
     _load_flags()
