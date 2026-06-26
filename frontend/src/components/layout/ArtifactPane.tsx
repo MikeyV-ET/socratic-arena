@@ -30,6 +30,14 @@ export function ArtifactPane() {
     return () => window.removeEventListener("message", handler);
   }, []);
 
+  // Send zoom level to iframe when it changes
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (iframe?.contentWindow) {
+      iframe.contentWindow.postMessage({ type: "zoom", scale: zoom }, "*");
+    }
+  }, [zoom]);
+
   if (artifacts.length === 0) {
     return (
       <div className="flex flex-col h-full bg-card border-l border-border">
@@ -66,20 +74,20 @@ export function ArtifactPane() {
             title="Zoom in">+</button>
         </div>
       </div>
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-hidden">
         <iframe
           ref={iframeRef}
           key={reloadKey}
           src={presentationUrl}
-          className="border-0"
-          style={{
-            width: `${100 / zoom}%`,
-            height: `${100 / zoom}%`,
-            transform: `scale(${zoom})`,
-            transformOrigin: "top left",
-          }}
+          className="w-full h-full border-0"
           title="Artifact preview"
           sandbox="allow-scripts allow-same-origin"
+          onLoad={() => {
+            const iframe = iframeRef.current;
+            if (iframe?.contentWindow) {
+              iframe.contentWindow.postMessage({ type: "zoom", scale: zoom }, "*");
+            }
+          }}
         />
       </div>
     </div>

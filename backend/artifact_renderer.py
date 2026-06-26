@@ -65,9 +65,13 @@ Reveal.initialize({{
   }});
 }});
 
-// Auto-reload when content changes (polled by parent frame)
+// Handle messages from parent frame (reload, zoom)
 window.addEventListener('message', (e) => {{
   if (e.data === 'reload') location.reload();
+  if (e.data && e.data.type === 'zoom') {{
+    const scale = e.data.scale || 1;
+    document.querySelector('.reveal').style.fontSize = (28 * scale) + 'px';
+  }}
 }});
 </script>
 </body>
