@@ -78,18 +78,22 @@ export function ChatPanel({
   // Load persisted chat history when agent is selected (or panel reopened)
   const addPanelMessage = useArenaStore((s) => s.addPanelMessage);
   const clearPanelMessages = useArenaStore((s) => s.clearPanelMessages);
+  const connected = useArenaStore((s) => s.connected);
   const basePath = window.location.pathname.replace(/\/+$/, "");
+  const fetchRef = useRef(0);
   useEffect(() => {
     if (!targetAgent) return;
-    // Always re-fetch on agent change — clear stale messages first
+    const seq = ++fetchRef.current;
+    // Always re-fetch on agent change or reconnect — clear stale messages first
     if (clearPanelMessages) clearPanelMessages(instanceId);
     fetch(`${basePath}/api/panel/agent/${encodeURIComponent(targetAgent)}/messages`)
       .then((r) => r.json())
       .then((data) => {
+        if (seq !== fetchRef.current) return; // stale response
         (data.messages || []).forEach((m: ConversationNode) => addPanelMessage(instanceId, m));
       })
       .catch(() => {});
-  }, [targetAgent]);
+  }, [targetAgent, connected]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
