@@ -28,9 +28,8 @@ REVEAL_TEMPLATE = r"""<!DOCTYPE html>
   .reveal img {{ max-height: 60vh; }}
   .reveal .mermaid {{ background: transparent; }}
   .reveal .mermaid svg {{ max-height: 55vh; }}
-  .reveal .slides section {{ overflow-y: auto !important; max-height: 100vh; }}
-  .reveal .slides section::-webkit-scrollbar {{ width: 4px; }}
-  .reveal .slides section::-webkit-scrollbar-thumb {{ background: rgba(255,255,255,0.2); border-radius: 2px; }}
+  .reveal[data-scroll="true"] .slides {{ overflow-y: auto !important; height: auto !important; }}
+  .reveal[data-scroll="true"] .slides section {{ height: auto !important; min-height: 100vh; padding: 40px 20px !important; }}
 </style>
 </head>
 <body>
@@ -54,7 +53,8 @@ Reveal.initialize({{
   controlsTutorial: false,
   progress: true,
   center: true,
-  scrollActivationWidth: null,
+  view: 'scroll',
+  scrollProgress: true,
   plugins: [ RevealMarkdown, RevealHighlight, RevealMath.KaTeX ],
 }}).then(() => {{
   // Render mermaid diagrams after reveal loads
