@@ -222,7 +222,7 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       const populate = msg.payload.populate as Record<string, string> | undefined;
       const moments = msg.payload.moments as { filter?: string; highlight?: number } | undefined;
       const docId = msg.payload.docId as string | undefined;
-      if (tab) store.setActiveTab(tab);
+      if (tab) store.openTab(tab);
       if (scrollTo) {
         if (tab === "notebook") {
           store.scrollToNotebookEntry(scrollTo);
@@ -236,7 +236,10 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
         if (moments.highlight != null) store.setHighlightedMoment(moments.highlight);
       }
       if (docId) {
-        window.dispatchEvent(new CustomEvent("sa-open-doc", { detail: { docId } }));
+        // Delay dispatch so the editor pane has time to mount its listener after openTab
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent("sa-open-doc", { detail: { docId } }));
+        }, 100);
       }
       break;
     }

@@ -63,6 +63,9 @@ test.describe("Agent opens document for user", () => {
     // Step 2: Load the page and wait for WebSocket connection
     await page.goto(BASE);
     await page.waitForLoadState("networkidle");
+    // Wait for the WS "Live" indicator to confirm connection
+    await page.waitForSelector('text=Live', { timeout: 5000 }).catch(() => {});
+    await page.waitForTimeout(500);
 
     // Step 3: Agent sends workspace.navigate via REST
     const navResp = await request.post(`${API}/api/agent/action`, {
@@ -73,9 +76,8 @@ test.describe("Agent opens document for user", () => {
     });
     expect(navResp.status()).toBe(200);
 
-    // Step 4: Wait for editor tab to become active
-    // The editor tab should appear and be selected
-    await page.waitForTimeout(1000);
+    // Step 4: Wait for editor tab to become active and doc to load
+    await page.waitForTimeout(2000);
 
     // Check that editor content is visible — look for editor-related elements
     const editorPane = page.locator(
