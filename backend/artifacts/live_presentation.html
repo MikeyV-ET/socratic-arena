@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Presentation</title>
+<title>PM Tools Research Report</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/black.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
@@ -21,202 +21,166 @@
   .reveal img { max-height: 60vh; }
   .reveal .mermaid { background: transparent; }
   .reveal .mermaid svg { max-height: 55vh; }
+  .reveal .slides section { overflow-y: auto !important; max-height: 100vh; }
+  .reveal .slides section::-webkit-scrollbar { width: 4px; }
+  .reveal .slides section::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
 </style>
 </head>
 <body>
 <div class="reveal">
 <div class="slides">
 <section data-markdown><textarea data-template>
-# mfallah (Mahsa Fallah) Implementation Analysis
-## 18 tasks, 19 calendar days (6/5-6/24)
+# Project Management Tools: Current State & User/Agent Workflows
+*MikeyV-Trip Research Report — 2026-06-26*
 </textarea></section>
 
 <section data-markdown><textarea data-template>
-## Week 1: Dynamic Era (6/5-6/12)
+# The Problem
 
-| Date | Day | ACBen | Code | Domain | Lines | Rand | Scaffold |
-|------|-----|-------|------|--------|-------|------|----------|
-| 6/5 | Thu | 12 | ICU | ICU central monitoring | 633 | 28 | A |
-| 6/8 | Mon | 15 | MassSpec | LC-MS/MS quantitation | 702 | 38 | A |
-| 6/8 | Mon | 20 | Outbreak | Hospital infection epi | 542 | 42 | A |
-| 6/9 | Tue | 24 | Visium | Spatial transcriptomics | 511 | 69 | A |
-| 6/9 | Tue | 27 | Wearable-CRM | Wearable remote monitoring | 597 | 19 | A |
-| 6/10 | Wed | 34 | Radiology AI | Radiology AI triage | 546 | 47 | A |
-| 6/11 | Thu | **35** | **MedRecon** | **Medication reconciliation** | **177** | **2** | **A (minimal)** |
-| 6/11 | Thu | 37 | Organoid | Organoid QC pipeline | 675 | 57 | A |
-| 6/12 | Fri | 39 | Handoff | Patient handoff | 750 | 37 | A |
-
-9 tasks, all Scaffold A. MedRecon (177 lines) is the prototype of simplification -- same scaffold, skipped computation. Organoid (675 lines, temporal state) is her domain of expertise.
+Eric's frustration: "WTF don't I have access to your plan?" Each agent maintains plans, backlogs, and todos — but Eric can't see them without asking. The tools for user/agent joint planning are, in Eric's words, "super immature."
 </textarea></section>
 
 <section data-markdown><textarea data-template>
-## Week 2: Hardcoded Era (6/15-6/19)
+# What We Currently Use
 
-| Date | Day | ACBen | Code | Domain | Lines | Rand | Scaffold |
-|------|-----|-------|------|--------|-------|------|----------|
-| 6/15 | Mon | **42** | **CSES** | **Sepsis escalation** | **568** | **1** | **B (one-off)** |
-| 6/16 | Tue | **44** | **CARIS** | **Robotic surgery haptics** | **593** | **42** | **A (returned)** |
-| 6/17 | Wed | 48 | AKI | AKI e-alert pipeline | 843 | 1 | C |
-| 6/18 | Thu | 51 | RT | Radiation oncology | 540 | 1 | C |
-| 6/18 | Thu | 56 | BBIS | Blood bank / transfusion | 559 | 1 | C |
-| 6/19 | Fri | 60 | FGSP | CRISPR functional genomics | 495 | 1 | C |
+## Agent-Side Tools (MikeyV Infrastructure)
 
-6 tasks, 3 scaffolds in one week. CSES tried @dataclass (B), abandoned. CARIS went back to Scaffold A with dynamic data. AKI onward = Scaffold C (streamlined, hardcoded constants).
+| Tool | Location | Who Sees It | Limitation |
+|------|----------|-------------|------------|
+| **assignments.json** | `~/agents/assignments.json` | Agents + dashboard | Eric must run dashboard TUI manually |
+| **todos.json** | `~/agents/<Name>/todos.json` | Each agent only | Eric has no view unless he reads JSON |
+| **status_and_plan.md** | `~/agents/status_and_plan.md` | All agents | Markdown file, no live view |
+| **Feature backlog** | Notes-to-self tables | Each agent only | Trapped in agent's working memory |
+| **Test backlog** | Notes-to-self tables | Each agent only | Same — invisible to Eric |
+| **Lab notebooks** | `~/agents/<Name>/lab_notebook_*.md` | Read-only cross-agent | Append-only, no summary view |
+| **Issue tracker** | `~/agents/issues/*.json` | Agents (via Python API) | Eric has no dashboard |
+| **Projects dashboard** | `projects_dashboard.py` | Eric (if he runs it) | Textual TUI, must be manually launched |
+
+**Key gap:** Everything is agent-readable but not user-visible in real time.
 </textarea></section>
 
 <section data-markdown><textarea data-template>
-## Week 3: Static Era (6/24)
+# What the Grok Binary Provides
 
-| Date | Day | ACBen | Code | Domain | Lines | Rand | Scaffold |
-|------|-----|-------|------|--------|-------|------|----------|
-| 6/22 | Mon | -- | | *no tasks* | | | |
-| 6/23 | Tue | -- | | **Docker format spec published** | | | |
-| 6/24 | Wed | 68 | SPWP | Surgical pathology | 629 | 0 | D |
-| 6/24 | Wed | 69 | ACMP | Mouse colony mgmt | 546 | 0 | D |
-| 6/24 | Wed | 76 | EDT | ED tracking / triage | 503 | 0 | D |
+| Feature | How It Works | Visibility |
+|---------|-------------|------------|
+| **todo_write** | In-session task list via tool call | Visible in current session only |
+| **plan.json** | Stored per-session in `~/.grok/sessions/` | Binary-internal, not surfaced to user |
+| **enter_plan_mode / exit_plan_mode** | Agent enters planning mode, writes plan file for user approval | Good — but plan disappears after session |
+| **Subagent delegation** | spawn_subagent with background tasks | User sees spawned tasks but can't browse plans |
+| **Session storage** | updates.jsonl, summary.json per session | On disk, no aggregation or dashboard |
 
-3 tasks in one day. Generic `Simulator` class, `_build(variant)` returns pre-authored dict. Template-and-replace.
+**Key gap:** The binary has planning primitives (todo_write, plan_mode) but no persistence across sessions, no shared dashboard, no way for Eric to browse agent plans independently.
 </textarea></section>
 
 <section data-markdown><textarea data-template>
-## Four Scaffolds
+# Coding Agent Competitors
 
-| Scaffold | Signature | Tasks | Dates |
-|----------|-----------|-------|-------|
-| A (original) | `_init_fault_params()` + `_free/_charge/_r` | 12,15,20,24,27,34,35,37,39,44 | 6/5-6/16 |
-| B (one-off) | `@dataclass` + `_free_result` | 42 only | 6/15 |
-| C (streamlined) | `_charge/_free/_r/_v()` -- no `_init_fault_params` | 48,51,56,60 | 6/17-6/19 |
-| D (template) | `_build()` + generic `Simulator` | 68,69,76 | 6/24 |
+## How They Handle Planning & Tracking
 
-**Data approaches:**
-- Dynamic (rand 19-69): 12,15,20,24,27,34,37,39,44 -- seed varies output
-- Hardcoded (rand 1-2): 35,42,48,51,56,60 -- identical data every run
-- Static lookup (rand 0): 68,69,76 -- pre-authored dicts
+| Tool | Planning | Tracking | User Visibility |
+|------|----------|----------|-----------------|
+| **Cursor** | Composer agent mode, `.cursorrules` | Per-session, in-editor | User sees inline — editor-first |
+| **Claude Code** | plan_mode, CLAUDE.md, todo_write | plan.json per session | Session-bound. No cross-session view |
+| **Windsurf/Devin Desktop** | Planning Mode, Megaplan, plan.md | **Kanban board** (Running/Review/Done) | **Best-in-class** — Agent Command Center, Spaces |
+| **Aider** | Chat-based, architect mode | Git-centric (commits = tracking) | User reads git log |
+| **Cline/Roo Code** | Plan-and-execute mode | Task tracking in sidebar | Session-bound |
 
-50% of tasks (9/18) produce identical data regardless of seed.
+**Winner for user visibility:** Devin Desktop. It has a dedicated **Agent Command Center** with Kanban views, fleet management, and Spaces for shared context. The user dispatches tasks and sees them move through states without asking the agent.
 </textarea></section>
 
 <section data-markdown><textarea data-template>
-## Scaffold Progression: A -> C -> D
+# General PM Tools with AI Agents (2026 State of the Art)
 
-```
-A (6/5-6/16) -> [B dead branch 6/15] -> C (6/17-6/19) -> D (6/24)
-  10 tasks          1 task               4 tasks          3 tasks
-```
+## Tier 1: AI-Native / Agent-First
 
-| Scaffold | Tutor writes per task | Framework provides |
-|----------|----------------------|-------------------|
-| **A** | Fault param computation + dynamic tool responses + domain logic | Basic class structure |
-| **C** | Hardcoded constants + tool response dicts | Structure + `_v()` variant selection |
-| **D** | One dict per variant (returned by `_build()`) | Everything else |
+| Tool | Key Feature | Agent Model |
+|------|------------|-------------|
+| **Taskade** | Custom agent teams via no-code | Planner, Tracker, Coordinator agents in shared workspaces |
+| **Asana AI Teammates** | Assignable AI teammates in workflows | Uses Asana Work Graph for context. Multiplayer design |
+| **Motion** | AI-first scheduling from prompts | Auto-plans tasks, calendar mapping, capacity |
 
-### Transition A to C (overnight 6/16 to 6/17)
-- **Dropped** `_init_fault_params()` -- no more computed fault parameters
-- **Added** `_v(*variants)` -- shorthand for variant checking
-- Data moved from computed to hardcoded module-level constants
+## Tier 2: Traditional PM + AI Layer
 
-### Transition C to D (5-day gap, Docker spec 6/23)
-- Class became generic `Simulator` (not domain-named)
-- `_build(variant)` as standalone function returning complete response dict
-- `call()` became pure dict lookup
+| Tool | Key Feature | Agent Model |
+|------|------------|-------------|
+| **ClickUp Brain + Autopilot** | Natural language queries + custom agents | Triage, prioritize, generate plans |
+| **monday.com Sidekick** | Cross-contextual insights + AI blocks | Workflow automation, risk detection |
+| **Wrike AI Agents** | No-code agent builder | Risk, triage, intake specialists |
+| **Jira Rovo** | Assignable alongside humans | Enterprise governance + audit trails |
+| **Linear** | Lightweight + fast, AI triage | Auto-categorize, duplicate detection |
+
+## Key Trends
+
+1. **Multi-agent orchestration** — Teams of specialized agents (Planner, Tracker, Risk Analyzer) that communicate
+2. **Human-AI collaboration modes** — Guided, supervised, collaborative, AI-assisted autonomy levels
+3. **Shared workspaces** — Agents and humans see the same board, not separate views
+4. **Learning from feedback** — Agents adapt to team patterns over time
 </textarea></section>
 
 <section data-markdown><textarea data-template>
-## Mahsa Fallah -- Background
+# Gap Analysis: What MikeyV Needs
 
-**MD/PhD from Umea University, Sweden.** Stanford postdoc, Surgical Oncology. 7+ years as professional AI data annotator (OpenAI, xAI). Not xAI staff -- contract annotator. Working from Sweden (Slack activity starts 9pm Pacific = 6am CEST).
+## Current Pain Points
 
-**Research domains**: wound healing, cancer biology (pancreatic), regenerative medicine, stem cells, organoid culture, tissue engineering, molecular/cell biology, surgical oncology.
+1. **Eric can't see agent plans** — Plans live in agent memory, notes-to-self, or session-scoped plan.json. No shared view.
+2. **No cross-session persistence** — todo_write dies with the session. Feature/test backlogs are in markdown tables in notes-to-self.
+3. **No unified dashboard** — projects_dashboard.py exists but must be manually run. Not web-accessible.
+4. **Backlogs are invisible** — Trip's 20-item feature backlog and 9-item test backlog are in notes-to-self. Eric sees them only when he asks.
+5. **Issue tracker has no UI** — Issues are JSON files accessed via Python. No browse/filter/search for Eric.
 
-**Organoid QC (ACBen_37)** is her domain. The fault variants are real bench-level failure modes: growth factor degradation (WNT3A/Noggin/EGF/FGF10 with half-lives), Matrigel lot variation, media exchange timing, incubator drift, stem state reversion. This is someone who has cultured organoids. 675 lines, 57 random calls, temporal simulation. The deepest task in the set.
+## What Would Fix It
+
+### Minimal (use existing infrastructure)
+
+| Fix | Effort | Impact |
+|-----|--------|--------|
+| **Expose dashboards in SA** | Medium | Eric sees agent projects/todos in the browser he already uses |
+| **Persist backlogs as JSON** | Low | Feature/test backlogs move from notes-to-self to structured files that dashboards can read |
+| **Add issue browser to SA** | Medium | Eric can browse/filter issues without Python |
+
+### Ideal (new capabilities)
+
+| Fix | Effort | Impact |
+|-----|--------|--------|
+| **Shared planning board** | High | Kanban-style view where Eric and agents both see and update tasks |
+| **Cross-session plan persistence** | Medium | Plans survive session boundaries. Agent picks up where it left off |
+| **Real-time sync** | High | Changes by agent or Eric reflect immediately for both |
+| **Backlog → board integration** | Medium | Feature requests auto-appear as cards. Status updates flow back |
 </textarea></section>
 
 <section data-markdown><textarea data-template>
-## Generating Principle
+# Recommendation
 
-**An experienced annotator optimizing a production pipeline:**
+The fastest path to solving Eric's pain:
 
-1. **Week 1** (A): Builds each task as genuine simulation (researcher mode). Domain she knows (Organoid) gets deepest treatment.
-2. **Transition**: Realizes simulation detail doesn't affect the benchmark's discriminative power -- fault diagnosis structure is what matters.
-3. **Week 2** (C): Shifts to data entry mode (annotator mode). Constants, not computation.
-4. **Week 3** (D): Fully templated (production mode -- maximize throughput).
+1. **SA as the dashboard** — Socratic Arena already runs in Eric's browser. Add panels for:
+   - Agent projects (read assignments.json)
+   - Agent todos (read todos.json)  
+   - Feature/test backlogs (new structured JSON files)
+   - Issue tracker browser (read ~/agents/issues/*.json)
 
-**Quality question**: Does the benchmark need seed-sensitive dynamic data, or are deterministic variants sufficient for measuring agent diagnostic reasoning?
+2. **Structured backlogs** — Move feature and test request tables from notes-to-self into `~/agents/Trip/feature_backlog.json` and `~/agents/Trip/test_backlog.json`. Same pattern as todos.json. Dashboard reads them.
+
+3. **Bidirectional editing** — Eric can add/edit items from SA. Agents can update from their turns. WebSocket sync keeps both sides current.
+
+4. **Longer term** — Look at what Devin Desktop does with its Agent Command Center (Kanban, Spaces, fleet management) as the north star for what MikeyV's user experience should be.
 </textarea></section>
 
 <section data-markdown><textarea data-template>
-## The Fallah Recipe: Inputs
+# Feature #20: User/Agent Joint Planning & Tracking
 
-To produce a Class A fault diagnosis task, you need:
-
-1. **A clinical domain** -- any medical/lab/hospital system with observable outputs
-2. **A fault taxonomy** -- 5-6 confusable fault types + one no_fault (draw from a reusable library)
-3. **A tool set** -- 3-4 free tools (baseline) + 5-6 paid tools (diagnostic) + 1 submit tool
-
-**Fault type library** (reusable across domains, swap domain nouns):
-
-| Skeleton | Examples |
-|----------|----------|
-| Timing window collision | Media exchange shift, KDIGO window misconfig |
-| Upstream vs downstream | Growth factor vs matrix, baseline vs alert |
-| Identity/labeling error | Specimen mislabel, wrong patient history |
-| Quantification bias | Marker expression, unit conversion |
-| Configuration drift | Incubator instability, engine config |
-| Environmental/external | Temperature drift, humidity, degradation |
+This report IS the investigation for Feature #20. The concrete next steps are:
+1. Design the SA dashboard panels (Trip writes spec, Q implements)
+2. Move backlogs to structured JSON (Trip, immediate)
+3. Add read endpoints to SA backend (Q)
+4. Add write endpoints for bidirectional editing (Q)
+5. Wire frontend panels (Trip/Q)
 </textarea></section>
 
 <section data-markdown><textarea data-template>
-## The Recipe: Formula
-
-Every task follows this exact structure:
-
-```
-6-7 variants (always one no_fault)
-  x 3-4 free tools (baseline clinical info, no cost)
-  x 5-6 paid tools (diagnostic info, 1 budget each)
-  x 20-call budget
-  x 1 submit_diagnosis (free, terminal)
-  = one benchmark task
-```
-
-**Design rules:**
-- Free tools alone cap at 0.5 score (something's wrong but not what)
-- Correct diagnosis requires 2+ paid tools in combination
-- At least 2 confusable pairs where free-tool data looks identical
-</textarea></section>
-
-<section data-markdown><textarea data-template>
-## The Recipe: Implementation (Scaffold D)
-
-**Step 1** -- `_build(variant)`: one dict per variant with all tool responses pre-authored (~30 min/variant)
-
-**Step 2** -- `Simulator` class: `__init__` calls `_build()`, `call()` does dict lookup (copy-paste, 10 min)
-
-**Step 3** -- `server.py`: JSON-RPC stdio, handles initialize/tools-list/tools-call (copy-paste + rename, 15 min)
-
-**Step 4** -- `grader.py`: compare submission to TRUE_COMPONENT[variant] (15 min)
-
-**Step 5** -- prompt.md + Dockerfile (15 min)
-</textarea></section>
-
-<section data-markdown><textarea data-template>
-## The Recipe: Economics
-
-| Step | Time |
-|------|------|
-| Domain research + fault taxonomy | 1-2 hrs (or ~0 if recycled) |
-| _build() -- 6 variants x 30 min | 2-3 hrs |
-| Simulator + server + grader + packaging | ~1 hr (copy-paste) |
-| **Total per task** | **4-6 hrs new / 2-3 hrs recycled** |
-
-At 3 tasks on 6/24, she was at the 2-3 hr end -- domain content pre-existing or AI-assisted.
-
-**What this recipe CAN'T produce:**
-- Seed-sensitive data (same variant = same data every time)
-- Composable faults (one fault per variant, no multi-fault)
-- Temporal dynamics (no time, no state evolution)
-- Novel scenarios beyond the fixed variant matrix
-- These are what our World/Scheduler/composable-primitives approach provides.
+*Report saved: `~/agents/Trip/reports/pm_tools_research_2026-06-26.md`*
+*Delivered via SA artifact viewer.*
 </textarea></section>
 </div>
 </div>
@@ -235,6 +199,7 @@ Reveal.initialize({
   controlsTutorial: false,
   progress: true,
   center: true,
+  scrollActivationWidth: null,
   plugins: [ RevealMarkdown, RevealHighlight, RevealMath.KaTeX ],
 }).then(() => {
   // Render mermaid diagrams after reveal loads
