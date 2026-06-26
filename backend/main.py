@@ -2448,17 +2448,19 @@ async def panel_launch(body: dict):
     """Launch a new hosted application panel.
 
     Body: {
-        "appType": "chrome",     // required: preset name
+        "appType": "chrome",     // required: preset name or "custom"
         "url": "https://...",    // optional: URL for chrome
-        "label": "My App"       // optional: display label
+        "label": "My App",      // optional: display label
+        "cmd": "python3 -m app"  // required when appType is "custom"
     }
     """
     app_type = body.get("appType", "chrome")
     url = body.get("url")
     label = body.get("label")
+    cmd = body.get("cmd")
 
     try:
-        session = await panel_manager.launch(app_type=app_type, url=url, label=label)
+        session = await panel_manager.launch(app_type=app_type, url=url, label=label, cmd=cmd)
     except (ValueError, RuntimeError) as e:
         return {"status": "error", "message": str(e)}
 

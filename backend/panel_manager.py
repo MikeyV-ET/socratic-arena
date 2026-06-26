@@ -139,10 +139,16 @@ class PanelManager:
         url: str | None = None,
         label: str | None = None,
         selenium_port: int | None = None,
+        cmd: str | None = None,
     ) -> PanelSession:
-        preset = APP_PRESETS.get(app_type)
-        if not preset:
-            raise ValueError(f"Unknown app type: {app_type}. Available: {list(APP_PRESETS.keys())}")
+        if app_type == "custom":
+            if not cmd:
+                raise ValueError("app_type 'custom' requires a 'cmd' parameter")
+            preset = {"label": label or "Custom App", "cmd": cmd}
+        else:
+            preset = APP_PRESETS.get(app_type)
+            if not preset:
+                raise ValueError(f"Unknown app type: {app_type}. Available: {list(APP_PRESETS.keys())} + 'custom'")
 
         port = self._allocate_port()
         display = self._allocate_display()
