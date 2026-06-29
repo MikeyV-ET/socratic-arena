@@ -59,17 +59,35 @@ Eric's frustration: "WTF don't I have access to your plan?" Each agent maintains
 </textarea></section>
 
 <section data-markdown><textarea data-template>
-# What the Grok Binary Provides
+# What the Grok Binary Provides (Verified)
 
-| Feature | How It Works | Visibility |
-|---------|-------------|------------|
-| **todo_write** | In-session task list via tool call | Visible in current session only |
-| **plan.json** | Stored per-session in `~/.grok/sessions/` | Binary-internal, not surfaced to user |
-| **enter_plan_mode / exit_plan_mode** | Agent enters planning mode, writes plan file for user approval | Good — but plan disappears after session |
-| **Subagent delegation** | spawn_subagent with background tasks | User sees spawned tasks but can't browse plans |
-| **Session storage** | updates.jsonl, summary.json per session | On disk, no aggregation or dashboard |
+## Per-Session Files
 
-**Key gap:** The binary has planning primitives (todo_write, plan_mode) but no persistence across sessions, no shared dashboard, no way for Eric to browse agent plans independently.
+| File | Contents | Used? |
+|------|----------|-------|
+| **plan.json** | `&#123;"todos": &#123;&#125;&#125;` — always empty | **NO.** Appears vestigial. Nothing writes to it. |
+| **plan_mode.json** | `&#123;"state": "Inactive", "was_previously_active": true&#125;` | Yes — tracks plan mode state (active/inactive/reminder count) |
+| **resources_state.json** | `grok_build.Todo`: 168 items, 22KB. Also: FileReadTracker, ReportedTaskCompletions, Scheduler | **This is where todo_write data actually lives.** Buried in a binary internal state blob. |
+| **summary.json** | Session metadata: id, cwd, timestamps, message count, model | No planning data |
+| **signals.json** | Telemetry: 4,439 turns, 9,089 tool calls, 134 compactions | No planning data |
+| **updates.jsonl** | Full conversation log (328MB for this session) | Authoritative record, but not queryable |
+
+## Tool Capabilities
+
+| Tool | What It Does | Where Data Goes | User Can See It? |
+|------|-------------|-----------------|------------------|
+| **todo_write** | Agent creates/updates task items | `resources_state.json` → `grok_build.Todo` | **No** — buried in binary state blob |
+| **enter_plan_mode** | Agent enters read-only exploration mode | `plan_mode.json` tracks state | User sees agent exploring |
+| **exit_plan_mode** | Agent writes plan to a file, binary shows to user for approval | Plan file on disk (specified by binary) | **Yes, briefly** — shown for approval, then forgotten |
+| **spawn_subagent** | Delegate work to child agents | `subagents/` directory per session | User sees spawned tasks in session |
+
+## The Core Problem
+
+**plan.json is a dead file.** The binary creates it with `&#123;"todos": &#123;&#125;&#125;` but nothing ever populates it. The 168-item todo list that the agent maintains via todo_write lives in resources_state.json under a binary-internal key (`grok_build.Todo`). A user looking at plan.json — the obvious place — finds nothing.
+
+**Plans from plan_mode don't persist.** When the agent exits plan mode, the plan is shown to the user for approval and then effectively disappears. There's no plan history, no way to revisit approved plans.
+
+**The data exists but is inaccessible.** 168 todo items, task completions, file read history — all in resources_state.json, which is a binary serialization format not meant for human consumption.
 </textarea></section>
 
 <section data-markdown><textarea data-template>

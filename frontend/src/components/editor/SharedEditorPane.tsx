@@ -296,6 +296,14 @@ class SimpleYjsProvider {
   }
 }
 
+function docTabLabel(doc: DocMeta): string {
+  if (doc.file_path) {
+    const parts = doc.file_path.split("/").filter(Boolean);
+    if (parts.length >= 2) return parts.slice(-2).join("/");
+  }
+  return doc.title;
+}
+
 export function SharedEditorPane({ instanceId, config }: { instanceId?: string; config?: Record<string, any> } = {}) {
   const theme = useArenaStore((s) => s.theme);
   const updatePanelLabel = useArenaStore((s) => s.updatePanelLabel);
@@ -415,7 +423,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
     // Update workbench tab label to show the doc name
     if (instanceId) {
       const doc = docs.find((d) => d.id === docId);
-      if (doc) updatePanelLabel(instanceId, `Editor: ${doc.title}`);
+      if (doc) updatePanelLabel(instanceId, `Editor: ${docTabLabel(doc)}`);
     }
 
     const ydoc = new Y.Doc();
@@ -595,7 +603,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
       setShowCreateBrowse(false);
       await refreshDocs();
       openDoc(doc.id);
-      if (instanceId) updatePanelLabel(instanceId, `Editor: ${doc.title || title}`);
+      if (instanceId) updatePanelLabel(instanceId, `Editor: ${doc.file_path ? docTabLabel(doc) : (doc.title || title)}`);
     } catch { /* ignore */ }
   };
 
@@ -654,7 +662,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
       const doc: DocMeta = await resp.json();
       await refreshDocs();
       openDoc(doc.id);
-      if (instanceId) updatePanelLabel(instanceId, `Editor: ${doc.title}`);
+      if (instanceId) updatePanelLabel(instanceId, `Editor: ${docTabLabel(doc)}`);
       setSidebarTab("docs");
     } catch { /* ignore */ }
   }, [refreshDocs, openDoc]);
