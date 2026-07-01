@@ -53,6 +53,7 @@ Reveal.initialize({{
   controlsTutorial: false,
   progress: true,
   center: true,
+  slideNumber: true,
   view: 'scroll',
   scrollProgress: true,
   plugins: [ RevealMarkdown, RevealHighlight, RevealMath.KaTeX ],

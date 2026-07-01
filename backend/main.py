@@ -3246,7 +3246,7 @@ async def get_demo_presentation():
     demo = ARTIFACTS_DIR / "demo_presentation.html"
     filepath = live if live.is_file() else demo
     if filepath.is_file():
-        return FileResponse(filepath, media_type="text/html")
+        return FileResponse(filepath, media_type="text/html", headers={"Cache-Control": "no-store"})
     return {"error": "presentation not found"}
 
 

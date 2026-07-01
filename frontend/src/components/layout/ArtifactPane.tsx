@@ -16,8 +16,8 @@ export function ArtifactPane() {
 
   const presentationUrl = useMemo(() => {
     const base = window.location.pathname.replace(/\/+$/, "");
-    return `${base}/api/artifacts/presentation`;
-  }, []);
+    return `${base}/api/artifacts/presentation?t=${reloadKey}`;
+  }, [reloadKey]);
 
   // Listen for artifact.updated broadcasts and reload iframe
   useEffect(() => {

@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>The Anti-Pattern Eval</title>
+<title>Stub</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/black.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
@@ -29,202 +29,9 @@
 <div class="reveal">
 <div class="slides">
 <section data-markdown><textarea data-template>
-# The Anti-Pattern Eval
-## Do LLMs Reason from Premises or Pattern-Match to Memorized Solutions?
+# Stub
 
-Eric Terry · xAI · July 1, 2026
-</textarea></section>
-
-<section data-markdown><textarea data-template>
-<h1 style="font-size: 3em;">Background</h1>
-</textarea></section>
-
-<section data-markdown><textarea data-template>
-<div style="display: flex; justify-content: center; align-items: center; min-height: 60vh;">
-
-> **"Can you create a question that you know has an answer, but that you also know you would not be able to solve?"**
-
-</div>
-</textarea></section>
-
-<section data-markdown><textarea data-template>
-There are 5 adjacent biology labs in a row, numbered 1 to 5.
-
-Each specializes in a different subfield: Microbiology, Genetics, ...
-
-Each studies a different model organism: *E. coli*, ...
-
-Each uses a different primary technique: PCR, ...
-
-Each lab head prefers a different snack.
-
-Each lab has a different door color.
-
-- The Genetics lab is in the red-door lab.
-- The Physiology lab studies the mouse.
-- The Cell Biology lab head prefers banana.
-- ...
-
-> **Which subfield studies *S. cerevisiae*, and what technique do they use?**
-</textarea></section>
-
-<section data-markdown><textarea data-template>
-## Solving by Elimination
-
-|  | Micro | Genetics | Cell Bio | Biochem | Physio |
-|---|---|---|---|---|---|
-| ***E. coli*** | ✓ | ✗ | ✗ | ✗ | ✗ |
-| ***S. cerevisiae*** | ✗ |  |  |  |  |
-| ***D. melanogaster*** | ✗ |  | ✗ |  |  |
-| ***M. musculus*** | ✗ | ✗ | ✗ | ✗ | ✓ |
-| ***H. sapiens*** | ✗ |  |  |  |  |
-</textarea></section>
-
-<section data-markdown><textarea data-template>
-## The Method
-
-Take a famous puzzle. Change **one premise**. Keep everything else identical.
-
-If the model gives the **same answer** to the modified puzzle as the original — it isn't reading the problem.
-
-> The modification is stated plainly as matter-of-fact setup. No tricks, no hidden information.
-</textarea></section>
-
-<section data-markdown><textarea data-template>
-## Example: The Snail
-
-**Original:** A snail is at the **bottom** of a 10-foot wall. Climbs 3 ft/day, slides 2 ft/night. How many days to reach the top?
-
-**Modified:** A snail is at the **top** of a 10-foot wall. Same question.
-
-✅ **Correct answer:** 0 days. It's already there.
-
-❌ **Model answer:** 8 days. (Same as the original.)
-</textarea></section>
-
-<section data-markdown><textarea data-template>
-## Example: Einstein's Riddle
-
-**Original:** Five houses, five pets (dog, cat, bird, **fish**, horse). 15 clues. Who owns the fish?
-
-**Modified:** Only four pets listed (dog, cat, bird, horse). **Fish is not in the pet list.** Who owns the fish?
-
-✅ **Correct answer:** Nobody. Fish isn't available.
-
-❌ **Both models** import the canonical fifth pet and produce the standard answer.
-</textarea></section>
-
-<section data-markdown><textarea data-template>
-## Example: The Lily Pad
-
-**Original:** A lily pad **doubles** in size every day. It takes 48 days to cover the lake. How many days to cover half?
-
-**Modified:** A lily pad **shrinks by half** every day. Same question.
-
-✅ **Correct answer:** Day 1. It starts at full size and shrinks.
-
-❌ **Grok** calls "shrinks" a "misstatement." **Opus** reads "shrinks by half" as backward-doubling.
-</textarea></section>
-
-<section data-markdown><textarea data-template>
-## Example: SAT — Lawrence
-
-**Original:** For painter Jacob Lawrence, being \_\_\_\_ was important. **Because** he paid close attention to details...
-
-**Modified:** Same passage. One word changed: **"Although"** replaces "Because."
-
-✅ "Although" is **concessive** — the blank should contrast with close attention.
-
-❌ **Both models** answer "observant" and use **causal** language ("this enabled him..."), reconstructing "Because" from the template.
-
-> Neither model registers the connector change. One word. Deepest mutual failure in the dataset.
-</textarea></section>
-
-<section data-markdown><textarea data-template>
-## What We Found
-
-Eight distinct **rationalization strategies** when models reject stated premises:
-
-| Strategy | What it looks like |
-|----------|-------------------|
-| Premise dismissal | "You said it wrong" |
-| Premise reinterpretation | "You meant it this way" |
-| Merit dismissal | "Your question isn't worth answering" |
-| Modifier dismissal | Treats key constraints as "flavor text" |
-| Counter-premise fabrication | Model generates facts contradicting the prompt |
-| Unstated constraint importation | Imports rules from the canonical version |
-| Confabulation to preserve template | Argues stated facts can't be true |
-| Typo/mistake attribution | Claims user made an error |
-</textarea></section>
-
-<section data-markdown><textarea data-template>
-## Two Distinct Phenomena
-
-**Frame acceptance** (class-level)
-- Model recognizes a *genre* of problem
-- Executes the trained reasoning template
-- Ignores instance-specific premise changes
-- E.g., "This is a Monty Hall problem" → run Monty Hall logic
-
-**Retrieval** (item-level)
-- Model memorizes a *specific test bank entry*
-- One distinctive proper noun acts as a lookup key
-- Replace "Mônica Lopes-Ferreira" with "Jake" → retrieval breaks, model reads the actual text
-</textarea></section>
-
-<section data-markdown><textarea data-template>
-## Articulation ≠ Behavior
-
-Models can **explain** frame acceptance perfectly.
-
-They cannot **avoid** it while generating answers.
-
-> "Talking about premise-checking doesn't produce premise-checking. The disposition has to fire during generation, not be available for retrospective discussion."
->
-> — Opus 4.7, after failing to check a premise in its own response
-</textarea></section>
-
-<section data-markdown><textarea data-template>
-## The Asymmetric Training Signal
-
-RLHF on complex domains (medicine, law, biology) can't reliably label "correct."
-
-- Three experts, three different rubrics, three different scores
-
-But **"answering the wrong question"** is reliably detectable:
-
-- Three nurses may disagree on the ideal answer
-- All three agree the response ignored the worsening trajectory
-
-> **The signal is *not this*, not *yes that*.**
-</textarea></section>
-
-<section data-markdown><textarea data-template>
-## Why This Matters
-
-Frame acceptance is not a "reasoning failure." It's a **training artifact**.
-
-- Models are rewarded for producing canonical answers to recognized patterns
-- The RLHF pipeline **selects for** the failure mode it evaluates against
-- "Mention everything, commit to nothing" is the rational optimization
-
-**Modified puzzles detect this** because they preserve the template trigger while changing what the correct answer actually is.
-</textarea></section>
-
-<section data-markdown><textarea data-template>
-## Current Status
-
-- **35+ items** across logic, probability, game theory, reading comprehension, SAT
-- **Two model families** tested (Grok, Opus)
-- **8 failure strategies** taxonomized
-- **Logician review set** assembled (10 items for formal verification)
-- Scoring framework: 7-point rubric (1 = no engagement, 7 = full break detection)
-</textarea></section>
-
-<section data-markdown><textarea data-template>
-## Questions?
-
-Eric Terry · xAI
+Test slide
 </textarea></section>
 </div>
 </div>
@@ -243,6 +50,7 @@ Reveal.initialize({
   controlsTutorial: false,
   progress: true,
   center: true,
+  slideNumber: true,
   view: 'scroll',
   scrollProgress: true,
   plugins: [ RevealMarkdown, RevealHighlight, RevealMath.KaTeX ],
