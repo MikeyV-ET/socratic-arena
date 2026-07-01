@@ -3793,6 +3793,9 @@ async def adapter_disconnect(agent_name: str):
 
 DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
+ARTIFACTS_DIR.mkdir(exist_ok=True)
+app.mount("/artifacts", StaticFiles(directory=str(ARTIFACTS_DIR)), name="artifacts")
+
 if DIST.is_dir():
     app.mount("/assets", StaticFiles(directory=str(DIST / "assets")), name="assets")
 
