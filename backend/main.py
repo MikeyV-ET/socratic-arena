@@ -3236,7 +3236,7 @@ async def get_artifact_content(artifact_id: str):
     filepath = ARTIFACTS_DIR / artifact.filename
     if not filepath.is_file():
         return {"error": f"file not found: {artifact.filename}"}
-    return FileResponse(filepath, media_type="text/html")
+    return FileResponse(filepath, media_type="text/html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/artifacts/presentation")

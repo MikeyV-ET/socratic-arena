@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Stub</title>
+<title>Mahsa Fallah — Consolidated Analysis</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/black.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
@@ -29,9 +29,144 @@
 <div class="reveal">
 <div class="slides">
 <section data-markdown><textarea data-template>
-# Stub
+# Mahsa Fallah — Consolidated Analysis
+## Bio + Task Implementation Review
 
-Test slide
+Compiled by Cinco (bio) and Jr (task analysis) for Eric Terry
+</textarea></section>
+
+<section data-markdown><textarea data-template>
+# Who Is Mahsa Fallah?
+
+- **PhD** Umeå University, 2018 — molecular biology (plasminogen/wound healing)
+- **Stanford postdoc** — surgical oncology, PDAC, anti-fibrotic therapeutics
+- **Claims** 7+ years AI annotation experience (back to 2019, pre-RLHF)
+- **"ex-OpenAI"** — unverified dates, duration, role
+- **Current:** ext contractor at xAI via TeachX (mfallah@ext.teachx.ai)
+- **STEMM Action Bench:** making tasks at ~1/day, 10x productivity vs peers
+
+> Eric's assessment: "Either she's a fraud who communicates well, or she's 1.5-3x more serious than her position implies. There's a better chance she'd be able to pull me up than vice versa."
+</textarea></section>
+
+<section data-markdown><textarea data-template>
+# Verified vs Unverified
+
+| **Verified** | **Self-Reported / Unverified** |
+|---|---|
+| PhD from Umeå, 2018 (molecular biology) | "7+ years" AI annotation experience |
+| Legitimate publication record (Cell Death & Disease, Sci Transl Med, Cell Reports) | OpenAI tenure (dates, duration, specifics) |
+| Stanford postdoc with real co-authors | Scope of radiology/pathology annotation work |
+| Patent co-inventor | Substack essay examples (generic, no named projects) |
+| Currently making STEMM Action Bench tasks | Title/role specifics at xAI |
+| 10x productivity (Eric's direct observation) | |
+</textarea></section>
+
+<section data-markdown><textarea data-template>
+# Jr's Task Analysis: 18 Tasks, 19 Days
+
+## Week 1: Dynamic Era (6/5-6/12)
+
+| Date | ACBen | Domain | Lines | Rand | Scaffold |
+|------|-------|--------|-------|------|----------|
+| 6/5 | 12 | ICU central monitoring | 633 | 28 | A |
+| 6/8 | 15 | LC-MS/MS quantitation | 702 | 38 | A |
+| 6/8 | 20 | Hospital infection epi | 542 | 42 | A |
+| 6/9 | 24 | Spatial transcriptomics | 511 | 69 | A |
+| 6/9 | 27 | Wearable remote monitoring | 597 | 19 | A |
+| 6/10 | 34 | Radiology AI triage | 546 | 47 | A |
+| 6/11 | **35** | **Medication reconciliation** | **177** | **2** | **A (minimal)** |
+| 6/11 | 37 | Organoid QC pipeline | 675 | 57 | A |
+| 6/12 | 39 | Patient handoff | 750 | 37 | A |
+
+9 tasks, all Scaffold A. Dynamic data (seed varies output). MedRecon (177 lines) is an outlier — same scaffold, skipped computation.
+</textarea></section>
+
+<section data-markdown><textarea data-template>
+## Week 2: Hardcoded Era (6/15-6/19)
+
+| Date | ACBen | Domain | Lines | Rand | Scaffold |
+|------|-------|--------|-------|------|----------|
+| 6/15 | **42** | **Sepsis escalation** | **568** | **1** | **B (one-off)** |
+| 6/16 | 44 | Robotic surgery haptics | 593 | 42 | A (returned) |
+| 6/17 | 48 | AKI e-alert pipeline | 843 | 1 | C |
+| 6/18 | 51 | Radiation oncology | 540 | 1 | C |
+| 6/18 | 56 | Blood bank / transfusion | 559 | 1 | C |
+| 6/19 | 60 | CRISPR functional genomics | 495 | 1 | C |
+
+Transition from dynamic to hardcoded data. Scaffold B tried and abandoned. Scaffold C = streamlined, constants hardcoded.
+</textarea></section>
+
+<section data-markdown><textarea data-template>
+## Week 3: Static Era (6/24)
+
+| Date | ACBen | Domain | Lines | Rand | Scaffold |
+|------|-------|--------|-------|------|----------|
+| 6/24 | 68 | Surgical pathology | 629 | 0 | D |
+| 6/24 | 69 | Mouse colony mgmt | 546 | 0 | D |
+| 6/24 | 76 | ED tracking / triage | 503 | 0 | D |
+
+3 tasks in one day. Generic `Simulator` class, `_build(variant)` returns pre-authored dict. Template-and-replace.
+</textarea></section>
+
+<section data-markdown><textarea data-template>
+# Four Scaffolds: A → B → C → D
+
+| Scaffold | Signature | Tasks | Data Approach |
+|----------|-----------|-------|---------------|
+| **A** (original) | `_init_fault_params()` + dynamic computation | 10 tasks | Dynamic (seed varies output) |
+| **B** (one-off) | `@dataclass` + `_free_result` | 1 task | Hardcoded |
+| **C** (streamlined) | `_charge/_free/_r/_v()` — no `_init_fault_params` | 4 tasks | Hardcoded (rand=1) |
+| **D** (template) | `_build()` + generic `Simulator` | 3 tasks | Static lookup (rand=0) |
+
+**50% of tasks (9/18) produce identical data regardless of seed.**
+
+Progression: increasingly efficient production, decreasingly dynamic simulation.
+</textarea></section>
+
+<section data-markdown><textarea data-template>
+# Key Observation: Not Sims
+
+**Eric's approach (ACBen_41/83):**
+- Physics engine behind real instrument API (rpc-scope)
+- ECS architecture: components register with world model
+- Time advances via `wait()`, observation forces sync
+- Agent doesn't know it's a sim — same API as production
+
+**Mahsa's approach:**
+- Scripted fault-diagnosis scenarios
+- Pre-authored data dictionaries
+- Tool calls return static/hardcoded responses
+- No physics, no world model, no time evolution
+
+Both test diagnostic reasoning. Only Eric's tests instrument operation against physical reality.
+</textarea></section>
+
+<section data-markdown><textarea data-template>
+# The Open Question
+
+The scaffolding is just the container. Where does the **domain content** come from?
+
+Her tasks span: ICU, mass spec, spatial transcriptomics, robotic surgery, CRISPR, blood bank, radiation oncology, surgical pathology, mouse colony management...
+
+This is wider than any single person's hands-on experience.
+
+**Three possibilities:**
+1. Genuine breadth (PhD molecular bio + postdoc surgery + annotation across radiology/pathology)
+2. A **method** for constructing tasks in unfamiliar domains (more valuable — infinitely extensible)
+3. A generative process (LLM-assisted domain content that she edits and quality-controls)
+
+> "What generates the nth story that her approach then turns into a task?" — Eric
+</textarea></section>
+
+<section data-markdown><textarea data-template>
+# For the Meeting
+
+**Polite questions that probe the real question:**
+- "Walk me through how you made [specific task]. What did you start with?"
+- "This task covers [domain outside her PhD]. How did you approach that?"
+- "If I asked you to make a task for a chemistry experiment you'd never run, how would you go about it?"
+
+The last one directly tests whether the well is deep (personal expertise) or infinitely extensible (transferable method).
 </textarea></section>
 </div>
 </div>

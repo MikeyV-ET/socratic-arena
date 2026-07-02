@@ -55,6 +55,7 @@ class _LiveDoc:
         self.text: pycrdt.Text = self.ydoc.get("content", type=pycrdt.Text)
         self.clients: list[WebSocket] = []
         self._autosave_task: asyncio.Task | None = None
+        self._suppress_autosave: bool = False
 
     async def broadcast_to_others(self, sender: WebSocket, msg: bytes):
         """Send a Yjs message to all connected clients except the sender."""
@@ -69,6 +70,9 @@ class _LiveDoc:
     def schedule_autosave(self):
         """Debounced autosave — saves to source file 2s after last edit."""
         if not self.meta.file_path:
+            return
+        if self._suppress_autosave:
+            self._suppress_autosave = False
             return
         if self._autosave_task and not self._autosave_task.done():
             self._autosave_task.cancel()
@@ -156,6 +160,12 @@ async def _reload_doc_from_disk(doc_id: str, file_path: str):
         return
 
     log.info("File watcher: %s changed on disk, updating doc %s", file_path, doc_id)
+    # Cancel pending autosave so old editor content doesn't overwrite the new file
+    if live._autosave_task and not live._autosave_task.done():
+        live._autosave_task.cancel()
+        log.debug("File watcher: cancelled pending autosave for %s", doc_id)
+    # Suppress autosave triggered by this Yjs update (content already matches disk)
+    live._suppress_autosave = True
     state_before = live.ydoc.get_state()
     with live.ydoc.transaction():
         if len(live.text) > 0:
