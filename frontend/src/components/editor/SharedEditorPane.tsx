@@ -83,6 +83,103 @@ function isCsvFile(doc: DocMeta | undefined): "csv" | "tsv" | null {
   return null;
 }
 
+function isJsonFile(doc: DocMeta | undefined): boolean {
+  if (!doc) return false;
+  const path = (doc.file_path || doc.title || "").toLowerCase();
+  return path.endsWith(".json") || path.endsWith(".jsonl");
+}
+
+// ---------------------------------------------------------------------------
+// JSON Tree Viewer
+// ---------------------------------------------------------------------------
+
+function JsonValue({ name, value, depth = 0, defaultOpen = true }: {
+  name?: string;
+  value: unknown;
+  depth?: number;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen && depth < 2);
+
+  if (value === null) return (
+    <div style={{ paddingLeft: depth * 16 }} className="flex items-baseline gap-1 py-0.5">
+      {name !== undefined && <span className="text-muted-foreground">{name}:</span>}
+      <span className="text-orange-400 italic">null</span>
+    </div>
+  );
+
+  if (typeof value === "boolean") return (
+    <div style={{ paddingLeft: depth * 16 }} className="flex items-baseline gap-1 py-0.5">
+      {name !== undefined && <span className="text-muted-foreground">{name}:</span>}
+      <span className="text-purple-400">{value ? "true" : "false"}</span>
+    </div>
+  );
+
+  if (typeof value === "number") return (
+    <div style={{ paddingLeft: depth * 16 }} className="flex items-baseline gap-1 py-0.5">
+      {name !== undefined && <span className="text-muted-foreground">{name}:</span>}
+      <span className="text-blue-400">{value}</span>
+    </div>
+  );
+
+  if (typeof value === "string") return (
+    <div style={{ paddingLeft: depth * 16 }} className="flex items-baseline gap-1 py-0.5">
+      {name !== undefined && <span className="text-muted-foreground">{name}:</span>}
+      <span className="text-green-400 break-words">"{value.length > 500 ? value.slice(0, 500) + "…" : value}"</span>
+    </div>
+  );
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) return (
+      <div style={{ paddingLeft: depth * 16 }} className="flex items-baseline gap-1 py-0.5">
+        {name !== undefined && <span className="text-muted-foreground">{name}:</span>}
+        <span className="text-muted-foreground">[]</span>
+      </div>
+    );
+    return (
+      <div style={{ paddingLeft: depth * 16 }}>
+        <div className="flex items-baseline gap-1 py-0.5 cursor-pointer hover:bg-muted/30" onClick={() => setOpen(!open)}>
+          <span className="text-[10px] w-3 text-muted-foreground select-none">{open ? "▼" : "▶"}</span>
+          {name !== undefined && <span className="text-muted-foreground">{name}:</span>}
+          <span className="text-muted-foreground text-[10px]">Array[{value.length}]</span>
+        </div>
+        {open && value.map((item, i) => (
+          <JsonValue key={i} name={String(i)} value={item} depth={depth + 1} defaultOpen={depth < 1} />
+        ))}
+      </div>
+    );
+  }
+
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 0) return (
+      <div style={{ paddingLeft: depth * 16 }} className="flex items-baseline gap-1 py-0.5">
+        {name !== undefined && <span className="text-muted-foreground">{name}:</span>}
+        <span className="text-muted-foreground">{"{}"}</span>
+      </div>
+    );
+    return (
+      <div style={{ paddingLeft: depth * 16 }}>
+        <div className="flex items-baseline gap-1 py-0.5 cursor-pointer hover:bg-muted/30" onClick={() => setOpen(!open)}>
+          <span className="text-[10px] w-3 text-muted-foreground select-none">{open ? "▼" : "▶"}</span>
+          {name !== undefined && <span className="text-muted-foreground">{name}:</span>}
+          <span className="text-muted-foreground text-[10px]">{"{"}…{"}"} {entries.length} keys</span>
+        </div>
+        {open && entries.map(([k, v]) => (
+          <JsonValue key={k} name={k} value={v} depth={depth + 1} defaultOpen={depth < 1} />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ paddingLeft: depth * 16 }} className="flex items-baseline gap-1 py-0.5">
+      {name !== undefined && <span className="text-muted-foreground">{name}:</span>}
+      <span className="text-foreground">{String(value)}</span>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Highlight decorations (agent-initiated line highlighting)
 // ---------------------------------------------------------------------------
@@ -296,6 +393,72 @@ class SimpleYjsProvider {
   }
 }
 
+function jsonMatch(value: unknown, query: string, path = ""): string[] {
+  const hits: string[] = [];
+  const q = query.toLowerCase();
+  if (value === null || value === undefined) return hits;
+  if (typeof value === "string" && value.toLowerCase().includes(q)) hits.push(path);
+  if (typeof value === "number" && String(value).includes(q)) hits.push(path);
+  if (typeof value === "boolean" && String(value).includes(q)) hits.push(path);
+  if (path.toLowerCase().includes(q)) hits.push(path);
+  if (Array.isArray(value)) {
+    value.forEach((item, i) => hits.push(...jsonMatch(item, query, `${path}[${i}]`)));
+  } else if (typeof value === "object" && value !== null) {
+    for (const [k, v] of Object.entries(value)) {
+      hits.push(...jsonMatch(v, query, path ? `${path}.${k}` : k));
+    }
+  }
+  return [...new Set(hits)];
+}
+
+function JsonTreePane({ data }: { data: unknown }) {
+  const [search, setSearch] = useState("");
+  const hits = useMemo(() => search.length >= 2 ? jsonMatch(data, search) : [], [data, search]);
+
+  return (
+    <div className="h-full flex-1 flex flex-col" data-testid="json-tree-view">
+      <div className="px-3 py-1.5 border-b border-border flex items-center gap-2">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search keys and values..."
+          className="flex-1 text-xs px-2 py-1 bg-background border border-border rounded focus:outline-none focus:border-primary font-mono"
+          data-testid="json-search"
+        />
+        {hits.length > 0 && (
+          <span className="text-[10px] text-muted-foreground shrink-0">{hits.length} match{hits.length !== 1 ? "es" : ""}</span>
+        )}
+      </div>
+      <div className="flex-1 overflow-auto p-3 font-mono text-xs">
+        {search.length >= 2 && hits.length > 0 ? (
+          <div className="space-y-1">
+            {hits.slice(0, 200).map((path) => {
+              const val = path.split(/[.\[\]]/).filter(Boolean).reduce((obj: any, key) => {
+                if (obj == null) return undefined;
+                return Array.isArray(obj) ? obj[Number(key)] : obj[key];
+              }, data);
+              return (
+                <div key={path} className="py-0.5">
+                  <span className="text-muted-foreground">{path}: </span>
+                  <span className={typeof val === "string" ? "text-green-400" : typeof val === "number" ? "text-blue-400" : typeof val === "boolean" ? "text-purple-400" : val === null ? "text-orange-400" : "text-foreground"}>
+                    {typeof val === "string" ? `"${val.length > 200 ? val.slice(0, 200) + "…" : val}"` : String(val)}
+                  </span>
+                </div>
+              );
+            })}
+            {hits.length > 200 && <div className="text-muted-foreground">…and {hits.length - 200} more</div>}
+          </div>
+        ) : search.length >= 2 && hits.length === 0 ? (
+          <div className="text-muted-foreground">No matches</div>
+        ) : (
+          <JsonValue value={data} defaultOpen={true} />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function docTabLabel(doc: DocMeta): string {
   if (doc.file_path) {
     const parts = doc.file_path.split("/").filter(Boolean);
@@ -318,8 +481,8 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
   const [connected, setConnected] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [showCreate, setShowCreate] = useState(false);
-  const [viewMode, _setViewMode] = useState<"edit" | "preview" | "table">("edit");
-  const setViewMode = useCallback((mode: "edit" | "preview" | "table") => {
+  const [viewMode, _setViewMode] = useState<"edit" | "preview" | "table" | "json">("edit");
+  const setViewMode = useCallback((mode: "edit" | "preview" | "table" | "json") => {
     _setViewMode((prev) => {
       // Sync scroll position proportionally when switching between edit and preview
       if (prev === "edit" && mode === "preview") {
@@ -736,6 +899,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
 
   const activeDoc = docs.find((d) => d.id === activeDocId);
   const csvType = isCsvFile(activeDoc);
+  const jsonFile = isJsonFile(activeDoc);
 
   // Parse CSV/TSV data for table view
   const csvData = useMemo(() => {
@@ -744,15 +908,28 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
     return parseCsv(previewText, delimiter);
   }, [csvType, previewText]);
 
-  // Auto-switch to table view when opening a CSV/TSV file
+  // Parse JSON data for tree view
+  const jsonData = useMemo(() => {
+    if (!jsonFile || !previewText) return undefined;
+    const trimmed = previewText.trim();
+    // Handle .jsonl: parse each line
+    if ((activeDoc?.file_path || activeDoc?.title || "").toLowerCase().endsWith(".jsonl")) {
+      const lines = trimmed.split("\n").filter(Boolean);
+      try { return lines.map(l => JSON.parse(l)); } catch { return undefined; }
+    }
+    try { return JSON.parse(trimmed); } catch { return undefined; }
+  }, [jsonFile, previewText, activeDoc]);
+
+  // Auto-switch to appropriate view when opening files
   const prevDocId = useRef<string | null>(null);
   useEffect(() => {
     if (activeDocId && activeDocId !== prevDocId.current) {
       prevDocId.current = activeDocId;
       if (csvType) setViewMode("table");
-      else if (viewMode === "table") setViewMode("edit");
+      else if (jsonFile) setViewMode("json");
+      else if (viewMode === "table" || viewMode === "json") setViewMode("edit");
     }
-  }, [activeDocId, csvType]);
+  }, [activeDocId, csvType, jsonFile]);
 
   return (
     <div className="flex flex-col h-full bg-card" data-testid="shared-editor">
@@ -806,6 +983,17 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
                     data-testid="table-view-btn"
                   >
                     Table
+                  </button>
+                )}
+                {jsonFile && (
+                  <button
+                    onClick={() => setViewMode("json")}
+                    className={`px-2 py-0.5 text-[10px] transition-colors ${
+                      viewMode === "json" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"
+                    }`}
+                    data-testid="json-view-btn"
+                  >
+                    JSON
                   </button>
                 )}
               </div>
@@ -1019,6 +1207,9 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
                 }}
               >{previewText}</Markdown>
             </div>
+            {viewMode === "json" && jsonData !== undefined && (
+              <JsonTreePane data={jsonData} />
+            )}
             {viewMode === "table" && csvData && (
               <div
                 className="h-full flex-1 overflow-auto"
