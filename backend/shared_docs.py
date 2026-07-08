@@ -55,7 +55,7 @@ class _LiveDoc:
         self.text: pycrdt.Text = self.ydoc.get("content", type=pycrdt.Text)
         self.clients: list[WebSocket] = []
         self._autosave_task: asyncio.Task | None = None
-        self._suppress_autosave: bool = False
+        self._suppress_autosave_until: float = 0.0
 
     async def broadcast_to_others(self, sender: WebSocket, msg: bytes):
         """Send a Yjs message to all connected clients except the sender."""
@@ -71,8 +71,8 @@ class _LiveDoc:
         """Debounced autosave — saves to source file 2s after last edit."""
         if not self.meta.file_path:
             return
-        if self._suppress_autosave:
-            self._suppress_autosave = False
+        if time.time() < self._suppress_autosave_until:
+            log.debug("Autosave suppressed for %s (grace period)", self.meta.id)
             return
         if self._autosave_task and not self._autosave_task.done():
             self._autosave_task.cancel()
@@ -80,8 +80,18 @@ class _LiveDoc:
 
     async def _do_autosave(self):
         await asyncio.sleep(2.0)
+        if time.time() < self._suppress_autosave_until:
+            log.debug("Autosave skipped for %s (grace period active at write time)", self.meta.id)
+            return
         fp = Path(self.meta.file_path)
         try:
+            # Skip if content already matches disk (avoid clobbering external writes)
+            try:
+                disk_content = fp.read_text(errors="replace")
+                if disk_content == str(self.text):
+                    return
+            except OSError:
+                pass
             fp.write_text(str(self.text))
             # Pre-set mtime so file watcher ignores this write
             _file_handler._last_mtime[str(fp.resolve())] = fp.stat().st_mtime
@@ -164,8 +174,8 @@ async def _reload_doc_from_disk(doc_id: str, file_path: str):
     if live._autosave_task and not live._autosave_task.done():
         live._autosave_task.cancel()
         log.debug("File watcher: cancelled pending autosave for %s", doc_id)
-    # Suppress autosave triggered by this Yjs update (content already matches disk)
-    live._suppress_autosave = True
+    # Suppress autosave for 5s — covers the reload broadcast + client echo-back cycle
+    live._suppress_autosave_until = time.time() + 5.0
     state_before = live.ydoc.get_state()
     with live.ydoc.transaction():
         if len(live.text) > 0:
