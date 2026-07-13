@@ -23,3 +23,9 @@ SESSION_REGISTRY = Path(os.environ.get("SA_SESSION_REGISTRY", str(Path.home() / 
 DOPPELGANGERS_BASE = Path(os.environ.get("SA_DOPPELGANGERS", str(Path.home() / "doppelgangers")))
 DEFAULT_AGENT = os.environ.get("ARENA_AGENT", "Q")
 AGENTS_JSON = Path(os.environ.get("SA_AGENTS_JSON", str(Path.home() / "projects" / "mikeyv-infra" / "live" / "comms" / "agents.json")))
+
+# Additional directories containing agents (colon-separated paths).
+# Each directory listed is a direct agent home (contains asdaaas/, lab_notebook, etc.)
+# — NOT a parent directory of multiple agents.
+_extra = os.environ.get("SA_EXTRA_AGENT_DIRS", "")
+EXTRA_AGENT_DIRS: list[Path] = [Path(p) for p in _extra.split(":") if p.strip()]

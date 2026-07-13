@@ -18,10 +18,21 @@ from demo_dataset import build_demo_state
 from live_tailer import LiveTailer
 from replay_router import router as replay_router, init_replayer
 from urllib.parse import quote as _url_quote
-from config import AGENTS_HOME, SESSION_REGISTRY, SESSIONS_BASE, DEFAULT_AGENT, USERNAME
+from config import AGENTS_HOME, SESSION_REGISTRY, SESSIONS_BASE, DEFAULT_AGENT, USERNAME, EXTRA_AGENT_DIRS
 
 # Track which agent is currently loaded
 _current_agent: str = DEFAULT_AGENT
+
+
+def _resolve_agent_dir(name: str) -> Path:
+    """Resolve an agent name to its directory. Checks AGENTS_HOME first, then EXTRA_AGENT_DIRS."""
+    candidate = AGENTS_HOME / name
+    if candidate.is_dir():
+        return candidate
+    for extra in EXTRA_AGENT_DIRS:
+        if extra.name == name and extra.is_dir():
+            return extra
+    return candidate  # fallback to default even if missing
 _orphan_flags: dict[str, list] = {}  # flags for nodes not in the 100KB tail
 
 
@@ -885,7 +896,8 @@ async def handle_branch_create(ws: WebSocket, payload: dict):
     pass
 
 
-def _create_moment_from_flag(source_id: str, content: str, date: str, note: str | None, source: str):
+def _create_moment_from_flag(source_id: str, content: str, date: str, note: str | None, source: str,
+                             flag_type: str = "training_candidate", metadata: dict | None = None):
     """Append a user-created moment when a flag is created."""
     # Load scanned moments to get next index
     moments_file = Path(__file__).resolve().parent / "data" / "candidate_moments.json"
@@ -901,7 +913,7 @@ def _create_moment_from_flag(source_id: str, content: str, date: str, note: str 
     while new_idx in deleted_moment_indices:
         new_idx += 1
 
-    user_moments.append({
+    moment = {
         "index": new_idx,
         "timestamp": date,
         "probe": note or content[:100],
@@ -912,8 +924,12 @@ def _create_moment_from_flag(source_id: str, content: str, date: str, note: str 
         "sourceId": source_id,
         "isVerified": False,
         "nodeId": source_id if source == "transcript" else "",
-    })
-    log.info("Created moment #%d from %s flag on %s", new_idx, source, source_id)
+        "flagType": flag_type,
+    }
+    if metadata:
+        moment["metadata"] = metadata
+    user_moments.append(moment)
+    log.info("Created moment #%d from %s %s flag on %s", new_idx, source, flag_type, source_id)
     _save_user_moments()
 
 
@@ -921,12 +937,16 @@ async def handle_flag_create(ws: WebSocket, payload: dict):
     node_id = payload.get("nodeId", "")
     entry_id = payload.get("entryId", "")
     note = payload.get("note")
+    flag_type = payload.get("flagType", "training_candidate")
+    metadata = payload.get("metadata")
 
     # Dedup: if same type flag already exists, update note instead of creating duplicate
     if node_id and node_id in _msg_index:
-        existing = next((f for f in _msg_index[node_id].flags if f.type == "training_candidate"), None)
+        existing = next((f for f in _msg_index[node_id].flags if f.type == flag_type), None)
         if existing:
             existing.note = note
+            if metadata:
+                existing.metadata = metadata
             _save_flags()
             await broadcast({"type": "flag.updated", "payload": {"flag": existing.model_dump()}})
             await broadcast({"type": "state.snapshot", "payload": state.model_dump()})
@@ -934,31 +954,37 @@ async def handle_flag_create(ws: WebSocket, payload: dict):
     elif entry_id:
         for entry in state.notebook.entries:
             if entry.id == entry_id:
-                existing = next((f for f in entry.flags if f.type == "training_candidate"), None)
+                existing = next((f for f in entry.flags if f.type == flag_type), None)
                 if existing:
                     existing.note = note
+                    if metadata:
+                        existing.metadata = metadata
                     _save_flags()
                     await broadcast({"type": "flag.updated", "payload": {"flag": existing.model_dump()}})
                     return
                 break
 
-    flag = Flag(node_id=node_id or entry_id, note=note)
+    flag = Flag(node_id=node_id or entry_id, note=note, type=flag_type, metadata=metadata)
 
     if node_id and node_id in _msg_index:
         _msg_index[node_id].flags.append(flag)
         node = _msg_index[node_id]
-        _create_moment_from_flag(node_id, node.content, node.timestamp or "", note, source="transcript")
+        _create_moment_from_flag(node_id, node.content, node.timestamp or "", note, source="transcript",
+                                flag_type=flag_type, metadata=metadata)
     elif entry_id:
         for entry in state.notebook.entries:
             if entry.id == entry_id:
                 entry.flags.append(flag)
-                _create_moment_from_flag(entry_id, entry.title, entry.title.split(" ")[0] if entry.title else "", note, source="notebook")
+                _create_moment_from_flag(entry_id, entry.title, entry.title.split(" ")[0] if entry.title else "", note, source="notebook",
+                                        flag_type=flag_type, metadata=metadata)
                 break
     elif node_id:
         # Node not in memory (older than 100KB tail) — store as orphan
-        existing_orphan = next((f for f in _orphan_flags.get(node_id, []) if f.type == "training_candidate"), None)
+        existing_orphan = next((f for f in _orphan_flags.get(node_id, []) if f.type == flag_type), None)
         if existing_orphan:
             existing_orphan.note = note
+            if metadata:
+                existing_orphan.metadata = metadata
             _save_flags()
             await broadcast({"type": "flag.updated", "payload": {"flag": existing_orphan.model_dump()}})
             return
@@ -1641,8 +1667,8 @@ def _ab_evaluate(completion: str) -> bool:
 
 
 @app.get("/api/moments")
-async def get_moments():
-    """Return all candidate moments with verified status."""
+async def get_moments(type: str | None = None):
+    """Return candidate moments, optionally filtered by flag type."""
     moments_file = Path(__file__).resolve().parent / "data" / "candidate_moments.json"
     verified_file = Path(__file__).resolve().parent / "data" / "verified_moments.json"
     if not moments_file.is_file():
@@ -1662,7 +1688,8 @@ async def get_moments():
         if node.role == "user":
             probe_to_node[node.content.strip()] = node.id
 
-    return [{
+    # Scanned moments are always type "training_candidate"
+    scanned = [{
         "index": m["index"],
         "timestamp": m["timestamp"],
         "probe": m["probe"],
@@ -1673,8 +1700,10 @@ async def get_moments():
         "confidence": verified_data.get(m["index"], {}).get("confidence"),
         "correctionType": verified_data.get(m["index"], {}).get("correction_type"),
         "nodeId": probe_to_node.get(m["probe"].strip(), ""),
+        "flagType": "training_candidate",
         "tested": False,
-    } for m in moments if m["index"] not in deleted_moment_indices] + [{
+    } for m in moments if m["index"] not in deleted_moment_indices]
+    user = [{
         "index": um["index"],
         "timestamp": um["timestamp"],
         "probe": um["probe"],
@@ -1686,8 +1715,14 @@ async def get_moments():
         "correctionType": None,
         "nodeId": um.get("nodeId", ""),
         "source": um.get("source", "user"),
+        "flagType": um.get("flagType", "training_candidate"),
+        "metadata": um.get("metadata"),
         "tested": False,
     } for um in user_moments if um["index"] not in deleted_moment_indices]
+    result = scanned + user
+    if type:
+        result = [m for m in result if m.get("flagType") == type]
+    return result
 
 
 @app.delete("/api/moments/{index}")
@@ -1743,7 +1778,7 @@ async def get_viewport():
 @app.get("/api/agent/context")
 async def agent_context():
     """Return current context usage for the active agent from health file."""
-    health_path = AGENTS_HOME / _current_agent / "asdaaas" / "health.json"
+    health_path = _resolve_agent_dir(_current_agent) / "asdaaas" / "health.json"
     try:
         h = json.loads(health_path.read_text())
         total = h.get("totalTokens", 0)
@@ -1873,7 +1908,7 @@ async def health():
 
 def _get_agent_info(name: str) -> dict:
     """Build info dict for a single agent."""
-    agent_dir = AGENTS_HOME / name
+    agent_dir = _resolve_agent_dir(name)
     reg = _load_session_registry()
     entry = reg.get(name, {})
     sid = entry.get("session_id", "")
@@ -1929,15 +1964,22 @@ def _get_agent_info(name: str) -> dict:
 
 @app.get("/api/agents")
 async def list_agents():
-    """Discover available agents from ~/agents/ directory."""
+    """Discover available agents from ~/agents/ and extra agent dirs."""
     agents = []
-    known = {"Sr", "Jr", "Trip", "Q", "Cinco"}
+    seen: set[str] = set()
+    # Scan primary agents home — dirs with asdaaas/ AND AGENTS.md (filters out test scaffolding)
     try:
         for d in sorted(AGENTS_HOME.iterdir()):
-            if d.is_dir() and d.name in known:
+            if d.is_dir() and (d / "asdaaas").is_dir() and (d / "AGENTS.md").is_file() and d.name not in seen:
                 agents.append(_get_agent_info(d.name))
+                seen.add(d.name)
     except FileNotFoundError:
         pass
+    # Scan extra agent dirs (each is a direct agent home)
+    for extra in EXTRA_AGENT_DIRS:
+        if extra.is_dir() and (extra / "asdaaas").is_dir() and extra.name not in seen:
+            agents.append(_get_agent_info(extra.name))
+            seen.add(extra.name)
     return {"agents": agents, "current": _current_agent}
 
 
@@ -1952,7 +1994,7 @@ def _human_size(nbytes: int) -> str:
 @app.get("/api/agent/{name}/sessions")
 async def list_agent_sessions(name: str):
     """List all available sessions for an agent, sorted by recency."""
-    agent_dir = AGENTS_HOME / name
+    agent_dir = _resolve_agent_dir(name)
     if not agent_dir.is_dir():
         return {"status": "error", "message": f"agent {name} not found"}
 
@@ -1989,7 +2031,7 @@ async def list_agent_sessions(name: str):
 
 def _get_updates_path_for_session(agent_name: str, session_id: str) -> Path | None:
     """Find updates.jsonl for a specific session ID under an agent's CWD."""
-    agent_dir = AGENTS_HOME / agent_name
+    agent_dir = _resolve_agent_dir(agent_name)
     cwd_encoded = _url_quote(str(agent_dir), safe="")
     candidate = SESSIONS_BASE / cwd_encoded / session_id / "updates.jsonl"
     if candidate.exists():
@@ -2015,7 +2057,7 @@ def _build_agent_state(agent_name: str, session_id: str | None = None) -> tuple[
         updates_path = _get_updates_path_for_session(agent_name, session_id)
     else:
         updates_path = get_agent_updates_path(agent_name)
-    agent_dir = AGENTS_HOME / agent_name
+    agent_dir = _resolve_agent_dir(agent_name)
     notebook_path = agent_dir / f"lab_notebook_{agent_name.lower()}.md"
 
     tail_offset = None
@@ -2045,7 +2087,7 @@ async def switch_agent(body: dict):
     if not agent_name:
         return {"status": "error", "message": "missing agent name"}
 
-    agent_dir = AGENTS_HOME / agent_name
+    agent_dir = _resolve_agent_dir(agent_name)
     if not agent_dir.is_dir():
         return {"status": "error", "message": f"agent {agent_name} not found"}
 
@@ -2085,7 +2127,7 @@ async def switch_agent(body: dict):
 async def get_agent_notebook(name: str):
     """Load a specific agent's lab notebook (independent of chat target)."""
     from notebook_parser import build_notebook
-    notebook_path = AGENTS_HOME / name / f"lab_notebook_{name.lower()}.md"
+    notebook_path = _resolve_agent_dir(name) / f"lab_notebook_{name.lower()}.md"
     if not notebook_path.exists():
         return {"status": "error", "message": f"No notebook for {name}"}
     nb = build_notebook(str(notebook_path))
@@ -2196,7 +2238,7 @@ async def search_agent_notebook(name: str, q: str, limit: int = 50):
     from notebook_parser import build_notebook
     if not q or len(q.strip()) < 2:
         return {"status": "error", "message": "Query must be at least 2 characters"}
-    notebook_path = AGENTS_HOME / name / f"lab_notebook_{name.lower()}.md"
+    notebook_path = _resolve_agent_dir(name) / f"lab_notebook_{name.lower()}.md"
     if not notebook_path.exists():
         return {"status": "error", "message": f"No notebook for {name}"}
     nb = await asyncio.to_thread(build_notebook, str(notebook_path))

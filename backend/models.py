@@ -33,8 +33,9 @@ class CamelModel(BaseModel):
 class Flag(CamelModel):
     id: str = Field(default_factory=new_id)
     node_id: str
-    type: str = "training_candidate"
+    type: str = "training_candidate"  # "training_candidate" | "failure_mode"
     note: str | None = None
+    metadata: dict | None = None  # e.g. {"category": "...", "variant_idea": "...", "severity": "..."}
     created_at: int = Field(default_factory=now_ms)
 
 
