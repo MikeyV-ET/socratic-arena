@@ -662,6 +662,9 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
     prevConnected.current = wsConnected;
   }, [wsConnected, refreshDocs]);
 
+  const pendingDocId = useArenaStore((s) => s.pendingDocId);
+  const setPendingDocId = useArenaStore((s) => s.setPendingDocId);
+
   useEffect(() => {
     refreshDocs();
     const onDocsChanged = () => refreshDocs();
@@ -671,11 +674,16 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
       if (docId) openDoc(docId);
     };
     window.addEventListener("sa-open-doc", onOpenDoc);
+    // Consume any pending doc that was set before this component mounted
+    if (pendingDocId) {
+      openDoc(pendingDocId);
+      setPendingDocId(null);
+    }
     return () => {
       window.removeEventListener("sa-docs-changed", onDocsChanged);
       window.removeEventListener("sa-open-doc", onOpenDoc);
     };
-  }, [refreshDocs, openDoc]);
+  }, [refreshDocs, openDoc, pendingDocId, setPendingDocId]);
 
   // Reconfigure CodeMirror theme when SA theme changes
   useEffect(() => {

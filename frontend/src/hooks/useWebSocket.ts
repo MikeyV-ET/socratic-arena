@@ -236,10 +236,10 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
         if (moments.highlight != null) store.setHighlightedMoment(moments.highlight);
       }
       if (docId) {
-        // Delay dispatch so the editor pane has time to mount its listener after openTab
-        setTimeout(() => {
-          window.dispatchEvent(new CustomEvent("sa-open-doc", { detail: { docId } }));
-        }, 100);
+        // Store pendingDocId so the editor picks it up on mount (race-free)
+        store.setPendingDocId(docId);
+        // Also fire the event for already-mounted editors
+        window.dispatchEvent(new CustomEvent("sa-open-doc", { detail: { docId } }));
       }
       break;
     }

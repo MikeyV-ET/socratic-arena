@@ -211,6 +211,10 @@ interface ArenaState {
   removeCorrection: (correctionId: string) => void;
   setEditingCorrectionNodeId: (nodeId: string | null) => void;
   getCorrectionsForNode: (nodeId: string) => Correction[];
+
+  // Pending doc open (set by workspace.navigate, consumed by editor on mount)
+  pendingDocId: string | null;
+  setPendingDocId: (docId: string | null) => void;
 }
 
 const _viewportTimers: Record<string, ReturnType<typeof setTimeout>> = {};
@@ -784,4 +788,7 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
     })),
     setEditingCorrectionNodeId: (nodeId) => set({ editingCorrectionNodeId: nodeId }),
     getCorrectionsForNode: (nodeId) => get().corrections.filter((c) => c.nodeId === nodeId),
+
+    pendingDocId: null,
+    setPendingDocId: (docId) => set({ pendingDocId: docId }),
 }))
