@@ -578,6 +578,11 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
 
   useEffect(() => () => cleanup(), [cleanup]);
 
+  // Keep docs in a ref so openDoc does not depend on docs state (avoids
+  // refreshDocs → setDocs → new openDoc → effect re-run → infinite GET /api/docs).
+  const docsRef = useRef(docs);
+  docsRef.current = docs;
+
   // Open a document: create Yjs doc, connect provider, mount CodeMirror
   const openDoc = useCallback((docId: string) => {
     cleanup();
@@ -585,7 +590,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
 
     // Update workbench tab label to show the doc name
     if (instanceId) {
-      const doc = docs.find((d) => d.id === docId);
+      const doc = docsRef.current.find((d) => d.id === docId);
       if (doc) updatePanelLabel(instanceId, `Editor: ${docTabLabel(doc)}`);
     }
 
@@ -639,7 +644,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
       });
       editorViewRef.current = view;
     });
-  }, [cleanup, theme, docs, instanceId, updatePanelLabel]);
+  }, [cleanup, theme, instanceId, updatePanelLabel]);
 
   // Fetch doc list
   const refreshDocs = useCallback(async () => {
@@ -665,25 +670,34 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
   const pendingDocId = useArenaStore((s) => s.pendingDocId);
   const setPendingDocId = useArenaStore((s) => s.setPendingDocId);
 
+  // Stable refs for event handlers so this effect mounts once (not every openDoc identity).
+  const openDocRef = useRef(openDoc);
+  openDocRef.current = openDoc;
+  const refreshDocsRef = useRef(refreshDocs);
+  refreshDocsRef.current = refreshDocs;
+
   useEffect(() => {
-    refreshDocs();
-    const onDocsChanged = () => refreshDocs();
+    refreshDocsRef.current();
+    const onDocsChanged = () => refreshDocsRef.current();
     window.addEventListener("sa-docs-changed", onDocsChanged);
     const onOpenDoc = (e: Event) => {
       const docId = (e as CustomEvent).detail?.docId;
-      if (docId) openDoc(docId);
+      if (docId) openDocRef.current(docId);
     };
     window.addEventListener("sa-open-doc", onOpenDoc);
-    // Consume any pending doc that was set before this component mounted
-    if (pendingDocId) {
-      openDoc(pendingDocId);
-      setPendingDocId(null);
-    }
     return () => {
       window.removeEventListener("sa-docs-changed", onDocsChanged);
       window.removeEventListener("sa-open-doc", onOpenDoc);
     };
-  }, [refreshDocs, openDoc, pendingDocId, setPendingDocId]);
+  }, []);
+
+  // Consume pending doc id when it appears (without re-subscribing listeners)
+  useEffect(() => {
+    if (pendingDocId) {
+      openDocRef.current(pendingDocId);
+      setPendingDocId(null);
+    }
+  }, [pendingDocId, setPendingDocId]);
 
   // Reconfigure CodeMirror theme when SA theme changes
   useEffect(() => {
