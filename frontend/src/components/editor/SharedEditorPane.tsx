@@ -731,15 +731,19 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
     };
   }, [activeDocId]);
 
-  // Open doc from config (e.g. filesystem viewer passing docId) or auto-create untitled
+  // Open doc from config (e.g. filesystem viewer passing docId) or auto-create untitled.
+  // Mount once — do not re-run when openDoc/refreshDocs identities change.
   const autoCreated = useRef(false);
+  const configRef = useRef(config);
+  configRef.current = config;
   useEffect(() => {
     if (activeDocId || autoCreated.current) return;
     autoCreated.current = true;
-    if (config?.docId) {
+    const cfg = configRef.current;
+    if (cfg?.docId) {
       (async () => {
-        await refreshDocs();
-        openDoc(config.docId);
+        await refreshDocsRef.current();
+        openDocRef.current(cfg.docId);
       })();
     } else {
       (async () => {
@@ -750,12 +754,13 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
             body: JSON.stringify({ title: "Untitled", contentType: "markdown" }),
           });
           const doc = await resp.json();
-          await refreshDocs();
-          openDoc(doc.id);
+          await refreshDocsRef.current();
+          openDocRef.current(doc.id);
         } catch { /* ignore */ }
       })();
     }
-  }, [activeDocId, refreshDocs, openDoc, config]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional mount-once
+  }, [activeDocId]);
 
   // Create a new doc (on disk if directory specified, in-memory otherwise)
   const createDoc = async () => {

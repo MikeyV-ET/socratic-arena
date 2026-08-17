@@ -248,8 +248,23 @@ async def _notify(event_type: str, payload: dict):
         await _broadcast_fn({"type": event_type, "payload": payload})
 
 
+
+# list_docs response cache (must be defined before _persist_index invalidates it)
+_list_docs_cache: list | None = None
+_list_docs_cache_ts: float = 0.0
+_LIST_DOCS_TTL = 1.0  # seconds
+_list_docs_hits = 0
+_list_docs_last_log = 0.0
+
+
+def _invalidate_list_cache():
+    global _list_docs_cache
+    _list_docs_cache = None
+
+
 def _persist_index():
     """Write document metadata index to disk."""
+    _invalidate_list_cache()
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     index = [d.meta.model_dump() for d in _docs.values()]
     (DATA_DIR / "index.json").write_text(json.dumps(index, indent=2))
@@ -320,8 +335,24 @@ async def create_doc(body: dict):
 
 @router.get("")
 async def list_docs():
-    """List all shared documents."""
-    return [d.meta.model_dump() for d in _docs.values()]
+    """List all shared documents (1s cache to absorb client poll storms)."""
+    global _list_docs_cache, _list_docs_cache_ts, _list_docs_hits, _list_docs_last_log
+    now = time.time()
+    _list_docs_hits += 1
+    if now - _list_docs_last_log >= 10.0:
+        if _list_docs_hits > 20:
+            log.warning(
+                "list_docs hot: %d calls in last ~10s (client should use WS doc.created/deleted, not poll)",
+                _list_docs_hits,
+            )
+        _list_docs_hits = 0
+        _list_docs_last_log = now
+    if _list_docs_cache is not None and (now - _list_docs_cache_ts) < _LIST_DOCS_TTL:
+        return _list_docs_cache
+    payload = [d.meta.model_dump() for d in _docs.values()]
+    _list_docs_cache = payload
+    _list_docs_cache_ts = now
+    return payload
 
 
 @router.get("/{doc_id}")

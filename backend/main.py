@@ -3846,7 +3846,7 @@ if DIST.is_dir():
         file = DIST / path
         if file.is_file():
             return FileResponse(file)
-        return FileResponse(DIST / "index.html")
+        return FileResponse(DIST / "index.html", headers={"Cache-Control": "no-store"})
 
 
 if __name__ == "__main__":
