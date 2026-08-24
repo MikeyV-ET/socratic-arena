@@ -18,21 +18,25 @@ from demo_dataset import build_demo_state
 from live_tailer import LiveTailer
 from replay_router import router as replay_router, init_replayer
 from urllib.parse import quote as _url_quote
-from config import AGENTS_HOME, SESSION_REGISTRY, SESSIONS_BASE, DEFAULT_AGENT, USERNAME, EXTRA_AGENT_DIRS
+from config import AGENTS_HOME, SESSION_REGISTRY, SESSIONS_BASE, DEFAULT_AGENT, USERNAME, EXTRA_AGENT_DIRS, AGENTS_JSON, load_agents_catalog, catalog_agent_home
 
 # Track which agent is currently loaded
 _current_agent: str = DEFAULT_AGENT
 
 
 def _resolve_agent_dir(name: str) -> Path:
-    """Resolve an agent name to its directory. Checks AGENTS_HOME first, then EXTRA_AGENT_DIRS."""
-    candidate = AGENTS_HOME / name
-    if candidate.is_dir():
-        return candidate
+    """Resolve agent name → home directory.
+
+    Prefer agents.json ``home`` (nested paths OK). Do not prefer a flat
+    ~/agents/<Name> stub when the catalog points elsewhere (Squiggy/Lenny).
+    """
+    home = catalog_agent_home(name)
+    if home is not None:
+        return home
     for extra in EXTRA_AGENT_DIRS:
         if extra.name == name and extra.is_dir():
             return extra
-    return candidate  # fallback to default even if missing
+    return AGENTS_HOME / name
 _orphan_flags: dict[str, list] = {}  # flags for nodes not in the 100KB tail
 
 
@@ -1911,7 +1915,10 @@ def _get_agent_info(name: str) -> dict:
     agent_dir = _resolve_agent_dir(name)
     reg = _load_session_registry()
     entry = reg.get(name, {})
-    sid = entry.get("session_id", "")
+    sid = entry.get("session_id", "") or ""
+    if not sid:
+        cat = load_agents_catalog()
+        sid = (cat.get(name) or {}).get("session", "") or ""
 
     # Check for lab notebook
     notebook_path = agent_dir / f"lab_notebook_{name.lower()}.md"
@@ -1962,22 +1969,52 @@ def _get_agent_info(name: str) -> dict:
     }
 
 
+def _agent_dir_is_listable(agent_dir: Path) -> bool:
+    """True if dir looks like a runnable agent home (not empty stub)."""
+    if not agent_dir.is_dir():
+        return False
+    if not (agent_dir / "asdaaas").is_dir():
+        return False
+    # Real agents have AGENTS.md and/or live asdaaas state
+    if (agent_dir / "AGENTS.md").is_file():
+        return True
+    if (agent_dir / "asdaaas" / "health.json").is_file():
+        return True
+    if (agent_dir / "asdaaas" / "conversation.jsonl").is_file():
+        return True
+    return False
+
+
 @app.get("/api/agents")
 async def list_agents():
-    """Discover available agents from ~/agents/ and extra agent dirs."""
+    """Discover agents from agents.json homes, then flat ~/agents fallback."""
     agents = []
     seen: set[str] = set()
-    # Scan primary agents home — dirs with asdaaas/ AND AGENTS.md (filters out test scaffolding)
+    cat = load_agents_catalog()
+    # 1) Catalog (nested homes OK — Squiggy/Lenny under LeviSmith, etc.)
+    for name in sorted(cat.keys()):
+        if name in seen:
+            continue
+        agent_dir = _resolve_agent_dir(name)
+        if not _agent_dir_is_listable(agent_dir):
+            continue
+        agents.append(_get_agent_info(name))
+        seen.add(name)
+    # 2) Flat scan for agents not in catalog (dev/test scaffolding with AGENTS.md)
     try:
         for d in sorted(AGENTS_HOME.iterdir()):
-            if d.is_dir() and (d / "asdaaas").is_dir() and (d / "AGENTS.md").is_file() and d.name not in seen:
+            if d.name in seen:
+                continue
+            if d.is_dir() and (d / "asdaaas").is_dir() and (d / "AGENTS.md").is_file():
                 agents.append(_get_agent_info(d.name))
                 seen.add(d.name)
     except FileNotFoundError:
         pass
-    # Scan extra agent dirs (each is a direct agent home)
+    # 3) Explicit extra dirs
     for extra in EXTRA_AGENT_DIRS:
-        if extra.is_dir() and (extra / "asdaaas").is_dir() and extra.name not in seen:
+        if extra.name in seen:
+            continue
+        if extra.is_dir() and (extra / "asdaaas").is_dir():
             agents.append(_get_agent_info(extra.name))
             seen.add(extra.name)
     return {"agents": agents, "current": _current_agent}
