@@ -15,10 +15,10 @@ from models import (
 )
 from mock_data import build_mock_state
 from demo_dataset import build_demo_state
-from live_tailer import LiveTailer
+from live_tailer import LiveTailer, AaStreamLiveTailer
 from replay_router import router as replay_router, init_replayer
 from urllib.parse import quote as _url_quote
-from config import AGENTS_HOME, SESSION_REGISTRY, SESSIONS_BASE, DEFAULT_AGENT, USERNAME, EXTRA_AGENT_DIRS, AGENTS_JSON, load_agents_catalog, catalog_agent_home
+from config import AGENTS_HOME, SESSION_REGISTRY, SESSIONS_BASE, DEFAULT_AGENT, USERNAME, EXTRA_AGENT_DIRS, AGENTS_JSON, HISTORY_SOURCE, load_agents_catalog, catalog_agent_home
 
 # Track which agent is currently loaded
 _current_agent: str = DEFAULT_AGENT
@@ -68,12 +68,53 @@ def _find_session_dir(session_id: str) -> Path | None:
     return best
 
 
+def get_agent_hot_path(agent_name: str) -> Path | None:
+    """AA history/hot.jsonl for agent (aa.stream). Legacy full_stream/ fallback one cycle."""
+    home = catalog_agent_home(agent_name)
+    candidates = []
+    if home:
+        candidates.append(Path(home))
+    candidates.append(AGENTS_HOME / agent_name)
+    # nested LeviSmith-style homes from catalog only; EXTRA dirs
+    for d in EXTRA_AGENT_DIRS:
+        candidates.append(Path(d))
+    seen = set()
+    for h in candidates:
+        h = Path(h)
+        if h in seen:
+            continue
+        seen.add(h)
+        for sub in ("history", "full_stream"):
+            p = h / "asdaaas" / sub / "hot.jsonl"
+            if p.is_file():
+                return p
+    return None
+
+
 def get_agent_updates_path(agent_name: str) -> Path | None:
-    """Return the path to an agent's updates.jsonl if it exists."""
+    """Return path to the conversation stream file for this agent.
+
+    HISTORY_SOURCE=aa_stream → {home}/asdaaas/history/hot.jsonl only (legacy full_stream/ fallback; no grok).
+    HISTORY_SOURCE=grok (default) → ~/.grok/sessions/.../updates.jsonl
+    """
+    if HISTORY_SOURCE == "aa_stream":
+        # Forced AA hot tip only — never open grok updates.jsonl.
+        return get_agent_hot_path(agent_name)
+
     reg = _load_session_registry()
     entry = reg.get(agent_name)
     if not entry:
-        return None
+        # fallback: catalog session id
+        cat = load_agents_catalog()
+        cfg = cat.get(agent_name) or {}
+        sid = cfg.get("session") or cfg.get("session_id") or ""
+        if not sid:
+            return None
+        sdir = _find_session_dir(sid)
+        if not sdir:
+            return None
+        p = sdir / "updates.jsonl"
+        return p if p.exists() else None
     sid = entry.get("session_id", "")
     if not sid:
         return None
@@ -106,6 +147,7 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
+log.info("SA history source: %s", HISTORY_SOURCE)
 
 app = FastAPI(title="Socratic Arena")
 
@@ -462,7 +504,9 @@ clients: list[WebSocket] = []
 # Live tailer for streaming session updates to arena
 _live_tailer: LiveTailer | None = None
 _live_task: asyncio.Task | None = None
-LIVE_TAIL_INTERVAL = 2.0  # seconds between polls
+LIVE_TAIL_INTERVAL = 2.0  # seconds between polls (grok / default)
+# aa_stream hot tip is already near-real-time; poll much tighter so SA tracks TUI.
+LIVE_TAIL_INTERVAL_AA_STREAM = float(os.environ.get("SA_LIVE_TAIL_INTERVAL", "0.1"))
 
 # Agent management removed — asdaaas handles agent lifecycle.
 # The arena is a pure UI+tooling layer.
@@ -516,11 +560,26 @@ def _start_live_tailer(agent_name: str, tail_offset: int | None = None):
 
     updates_path = get_agent_updates_path(agent_name)
     if not updates_path:
-        log.info("LiveTailer: no updates.jsonl for %s, skipping", agent_name)
+        log.info(
+            "LiveTailer: no history file for %s (source=%s), skipping",
+            agent_name, HISTORY_SOURCE,
+        )
         _live_tailer = None
         return
 
-    _live_tailer = LiveTailer(str(updates_path), agent_label=agent_name)
+    # Close previous tailer (release inotify fd)
+    old = _live_tailer
+    if old is not None and hasattr(old, "close"):
+        try:
+            old.close()
+        except Exception:
+            pass
+
+    if HISTORY_SOURCE == "aa_stream":
+        _live_tailer = AaStreamLiveTailer(str(updates_path), agent_label=agent_name)
+        log.info("LiveTailer: aa_stream mode for %s → %s", agent_name, updates_path)
+    else:
+        _live_tailer = LiveTailer(str(updates_path), agent_label=agent_name)
     if tail_offset is not None:
         _live_tailer.seek_to_offset(tail_offset)
     else:
@@ -538,85 +597,156 @@ def _start_live_tailer(agent_name: str, tail_offset: int | None = None):
     log.info("LiveTailer: started for %s (%s)", agent_name, updates_path)
 
 
+def _apply_live_tail_entries(entries: list, *, do_broadcast: bool = True) -> int:
+    """Apply live-tailer actions to in-memory state. Optionally WS-broadcast.
+
+    Returns number of add actions applied (updates/finalizes counted too as applied).
+    Always mutates state so snapshots stay current even with zero clients.
+    """
+    applied = 0
+    for entry in entries:
+        action = entry.get("action")
+
+        if action == "add":
+            node_data = entry["node"]
+            node_id = node_data["id"]
+            if node_id in _msg_index:
+                log.debug("LiveTailer: skipping duplicate node %s", node_id)
+                continue
+            node = ConversationNode.model_validate(node_data)
+            state.messages.append(node)
+            _msg_index[node_id] = node
+            applied += 1
+            if do_broadcast and clients:
+                # fire-and-forget style: caller is async loop
+                pass  # broadcast handled by async wrapper
+            entry["_broadcast"] = {
+                "type": "tree.live_node",
+                "payload": {
+                    "action": "add",
+                    "node": node_data,
+                    "parentId": entry.get("parent_id"),
+                },
+            } if do_broadcast else None
+
+        elif action == "update":
+            node_id = entry["node_id"]
+            msg = _msg_index.get(node_id)
+            if msg:
+                msg.content = entry["content"]
+                if entry.get("thinking"):
+                    msg.thinking = entry["thinking"]
+            applied += 1
+            entry["_broadcast"] = {
+                "type": "tree.live_node",
+                "payload": {
+                    "action": "update",
+                    "nodeId": node_id,
+                    "content": entry["content"],
+                    "thinking": entry.get("thinking"),
+                },
+            } if do_broadcast else None
+
+        elif action == "finalize":
+            node_id = entry["node_id"]
+            msg = _msg_index.get(node_id)
+            if msg:
+                msg.content = entry["content"]
+                if entry.get("thinking"):
+                    msg.thinking = entry["thinking"]
+            applied += 1
+            entry["_broadcast"] = {
+                "type": "tree.live_node",
+                "payload": {
+                    "action": "finalize",
+                    "nodeId": node_id,
+                    "content": entry["content"],
+                    "thinking": entry.get("thinking"),
+                },
+            } if do_broadcast else None
+
+    return applied
+
+
+async def _drain_live_tailer(*, do_broadcast: bool = True, max_rounds: int = 100) -> int:
+    """Poll live tailer until empty (or max_rounds). Keep state at EOF.
+
+    Used on a timer and on WebSocket connect so first snapshot is not stale.
+    """
+    if not _live_tailer:
+        return 0
+    total = 0
+    for _ in range(max_rounds):
+        entries = _live_tailer.poll()
+        if not entries:
+            break
+        _apply_live_tail_entries(entries, do_broadcast=do_broadcast)
+        total += len(entries)
+        if do_broadcast and clients:
+            for entry in entries:
+                b = entry.get("_broadcast")
+                if b:
+                    await broadcast(b)
+    return total
+
+
+def _live_tail_sleep_s() -> float:
+    if HISTORY_SOURCE == "aa_stream":
+        return max(0.05, LIVE_TAIL_INTERVAL_AA_STREAM)
+    return LIVE_TAIL_INTERVAL
+
+
 async def _live_tail_loop():
-    """Background loop that polls updates.jsonl for new content."""
+    """Background loop: always advance in-memory state; broadcast when clients exist.
+
+    aa_stream + AaStreamLiveTailer: block on inotify (with timeout safety net).
+    Otherwise: fixed-interval poll.
+    """
+    mode = "inotify+timeout" if (
+        HISTORY_SOURCE == "aa_stream"
+        and _live_tailer is not None
+        and hasattr(_live_tailer, "wait_for_change")
+        and getattr(_live_tailer, "_inotify_fd", None) is not None
+    ) else f"poll:{_live_tail_sleep_s():.2f}s"
+    # Re-evaluate after tailer starts — log once per arm attempt inside loop too
+    log.info("SA live tail mode: %s (source=%s)", mode, HISTORY_SOURCE)
+    armed_log = False
     while True:
         try:
-            await asyncio.sleep(LIVE_TAIL_INTERVAL)
-            if not _live_tailer or not clients:
+            if not _live_tailer:
+                await asyncio.sleep(0.5)
                 continue
 
-            entries = _live_tailer.poll()
-            if not entries:
-                continue
+            # Event-driven wait when possible
+            if hasattr(_live_tailer, "wait_for_change") and getattr(_live_tailer, "_inotify_fd", None) is not None:
+                if not armed_log:
+                    log.info(
+                        "SA live tail: inotify armed on %s (timeout safety %.2fs)",
+                        getattr(_live_tailer, "filepath", "?"),
+                        max(1.0, _live_tail_sleep_s() * 10),
+                    )
+                    armed_log = True
+                # timeout so we still catch up if an event was missed/coalesced oddly
+                timeout = max(1.0, _live_tail_sleep_s() * 10)  # default 1s if sleep=0.1
+                await asyncio.to_thread(_live_tailer.wait_for_change, timeout)
+            else:
+                await asyncio.sleep(_live_tail_sleep_s())
 
-            for entry in entries:
-                action = entry.get("action")
-
-                if action == "add":
-                    node_data = entry["node"]
-                    node_id = node_data["id"]
-
-                    # Skip duplicates
-                    if node_id in _msg_index:
-                        log.debug("LiveTailer: skipping duplicate node %s", node_id)
-                        continue
-
-                    # Append to flat message list
-                    node = ConversationNode.model_validate(node_data)
-                    state.messages.append(node)
-                    _msg_index[node_id] = node
-
-                    await broadcast({
-                        "type": "tree.live_node",
-                        "payload": {
-                            "action": "add",
-                            "node": node_data,
-                            "parentId": entry.get("parent_id"),
-                        },
-                    })
-
-                elif action == "update":
-                    node_id = entry["node_id"]
-                    msg = _msg_index.get(node_id)
-                    if msg:
-                        msg.content = entry["content"]
-                        if entry.get("thinking"):
-                            msg.thinking = entry["thinking"]
-
-                    await broadcast({
-                        "type": "tree.live_node",
-                        "payload": {
-                            "action": "update",
-                            "nodeId": node_id,
-                            "content": entry["content"],
-                            "thinking": entry.get("thinking"),
-                        },
-                    })
-
-                elif action == "finalize":
-                    node_id = entry["node_id"]
-                    msg = _msg_index.get(node_id)
-                    if msg:
-                        msg.content = entry["content"]
-                        if entry.get("thinking"):
-                            msg.thinking = entry["thinking"]
-
-                    await broadcast({
-                        "type": "tree.live_node",
-                        "payload": {
-                            "action": "finalize",
-                            "nodeId": node_id,
-                            "content": entry["content"],
-                            "thinking": entry.get("thinking"),
-                        },
-                    })
+            n = await _drain_live_tailer(do_broadcast=True)
+            if n:
+                log.debug("LiveTailer: applied %d entries (clients=%d)", n, len(clients))
 
         except asyncio.CancelledError:
             log.info("LiveTailer: task cancelled")
+            if _live_tailer is not None and hasattr(_live_tailer, "close"):
+                try:
+                    _live_tailer.close()
+                except Exception:
+                    pass
             return
         except Exception:
             log.exception("LiveTailer: error in tail loop")
+            await asyncio.sleep(0.5)
 
 
 # --- WebSocket ---
@@ -627,6 +757,11 @@ async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
     clients.append(ws)
     try:
+        # Catch up file → state BEFORE first snapshot (fixes "missing later turns until buffer push").
+        n = await _drain_live_tailer(do_broadcast=False)
+        if n:
+            log.info("LiveTailer: catch-up on WS connect applied %d entries", n)
+
         # Send trimmed state on connect
         await ws.send_text(json.dumps({
             "type": "state.snapshot",
@@ -641,6 +776,7 @@ async def websocket_endpoint(ws: WebSocket):
             payload = msg.get("payload", {})
 
             if msg_type == "state.sync":
+                await _drain_live_tailer(do_broadcast=False)
                 await ws.send_text(json.dumps({
                     "type": "state.snapshot",
                     "payload": _state_snapshot_payload(),
@@ -2067,7 +2203,12 @@ async def list_agent_sessions(name: str):
 
 
 def _get_updates_path_for_session(agent_name: str, session_id: str) -> Path | None:
-    """Find updates.jsonl for a specific session ID under an agent's CWD."""
+    """Find stream file for a specific session ID under an agent's CWD.
+
+    aa_stream mode: always the agent hot tip (lifetime AA stream; session_id ignored).
+    """
+    if HISTORY_SOURCE == "aa_stream":
+        return get_agent_hot_path(agent_name)
     agent_dir = _resolve_agent_dir(agent_name)
     cwd_encoded = _url_quote(str(agent_dir), safe="")
     candidate = SESSIONS_BASE / cwd_encoded / session_id / "updates.jsonl"
@@ -2238,10 +2379,17 @@ async def get_agent_history_page(name: str, before: int, limit: int = 50, sessio
         updates_path = get_agent_updates_path(name)
     if not updates_path:
         return {"status": "error", "message": f"No session data for {name}"}
-    entries, new_cursor = await asyncio.to_thread(
-        parse_updates_page, str(updates_path), before_offset=before,
-        limit=min(limit, 200), agent_label=name
-    )
+    if HISTORY_SOURCE == "aa_stream":
+        from aa_stream_parser import parse_aa_stream_page
+        entries, new_cursor = await asyncio.to_thread(
+            parse_aa_stream_page, str(updates_path), before,
+            min(limit, 200), name,
+        )
+    else:
+        entries, new_cursor = await asyncio.to_thread(
+            parse_updates_page, str(updates_path), before_offset=before,
+            limit=min(limit, 200), agent_label=name
+        )
     messages = entries_to_messages(entries, agent_label=name)
     return {
         "status": "ok", "agent": name,

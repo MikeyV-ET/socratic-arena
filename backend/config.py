@@ -10,6 +10,10 @@ Env vars:
     SA_SESSION_REGISTRY ~/.grok/session_registry.json
     SA_DOPPELGANGERS    ~/doppelgangers          Replay doppelganger dir
     SA_EXTRA_AGENT_DIRS colon-separated extra agent home paths
+    SA_HISTORY_SOURCE   grok | aa_stream         Conversation stream source
+                          grok (default): ~/.grok/sessions/.../updates.jsonl
+                          aa_stream: {home}/asdaaas/history/hot.jsonl only (fallback full_stream/)
+                            (no grok fallback — used by SA-dev)
     ARENA_AGENT         Q                       Default agent name
     SA_USERNAME         (system username)       Display name for the human user
 """
@@ -25,6 +29,11 @@ SESSIONS_BASE = Path(os.environ.get("SA_SESSIONS_BASE", str(Path.home() / ".grok
 SESSION_REGISTRY = Path(os.environ.get("SA_SESSION_REGISTRY", str(Path.home() / ".grok" / "session_registry.json")))
 DOPPELGANGERS_BASE = Path(os.environ.get("SA_DOPPELGANGERS", str(Path.home() / "doppelgangers")))
 DEFAULT_AGENT = os.environ.get("ARENA_AGENT", "Q")
+
+# Conversation history source: "grok" (updates.jsonl) or "aa_stream" (AA hot.jsonl only).
+HISTORY_SOURCE = os.environ.get("SA_HISTORY_SOURCE", "grok").strip().lower()
+if HISTORY_SOURCE not in ("grok", "aa_stream"):
+    HISTORY_SOURCE = "grok"
 
 # Canonical catalog (same spine as agent-abide). Nested homes live here.
 AGENTS_JSON = Path(os.environ.get(

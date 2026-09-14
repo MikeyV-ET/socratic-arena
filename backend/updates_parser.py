@@ -329,9 +329,13 @@ def count_conversation_turns(filepath: str) -> tuple[int, int]:
     if cached and cached[1] == file_size:
         return cached
     count = 0
+    aa = filepath.endswith("hot.jsonl") or "/full_stream/" in filepath or "/history/" in filepath
     with open(filepath, 'rb') as f:
         for line in f:
-            if b'"user_message_chunk"' in line or b'"agent_message_chunk"' in line:
+            if aa:
+                if b'"class":"message"' in line or b'"class": "message"' in line:
+                    count += 1
+            elif b'"user_message_chunk"' in line or b'"agent_message_chunk"' in line:
                 count += 1
     _turn_count_cache[filepath] = (count, file_size)
     return count, file_size
@@ -576,12 +580,18 @@ def search_updates(filepath: str, query: str, limit: int = 50, agent_label: str 
 
 
 def build_flat_messages(filepath: str, agent_label: str | None = None, tail_only: bool = False, tail_bytes: int = 102400) -> list[ConversationNode]:
-    """Parse updates.jsonl into a flat ordered list of ConversationNodes.
+    """Parse updates.jsonl OR aa.stream hot.jsonl into ConversationNodes.
 
     If tail_only=True, only reads the last tail_bytes of the file.
     Returns messages in chronological order.
     """
-    if tail_only:
+    from aa_stream_parser import is_aa_stream_path, parse_aa_stream, parse_aa_stream_tail
+    if is_aa_stream_path(filepath):
+        if tail_only:
+            entries = parse_aa_stream_tail(filepath, tail_bytes=tail_bytes, agent_label=agent_label)
+        else:
+            entries = parse_aa_stream(filepath, agent_label=agent_label)
+    elif tail_only:
         entries = parse_updates_tail(filepath, tail_bytes=tail_bytes, agent_label=agent_label)
     else:
         entries = parse_updates(filepath, agent_label=agent_label)

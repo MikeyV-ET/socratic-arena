@@ -6,6 +6,11 @@ Groups consecutive chunks from the same turn, same as updates_parser.parse_updat
 
 import json
 import os
+import select
+import struct
+import time
+import ctypes
+import ctypes.util
 import re
 import logging
 from pathlib import Path
@@ -333,3 +338,168 @@ class LiveTailer:
             "content": a["content"],
             "thinking": a.get("thinking"),
         }
+
+
+class AaStreamLiveTailer:
+    """Live tailer for aa.stream hot.jsonl (SA-dev / HISTORY_SOURCE=aa_stream).
+
+    Prefer inotify wakeups on hot.jsonl; fall back to timeout poll if inotify
+    unavailable. Still drains complete lines via poll().
+    """
+
+    _IN_MODIFY = 0x00000002
+    _IN_CLOSE_WRITE = 0x00000008
+    _IN_MOVE_SELF = 0x00000800
+    _IN_DELETE_SELF = 0x00000400
+    _IN_ATTRIB = 0x00000004
+
+    def __init__(self, filepath: str, agent_label: str = "Q"):
+        self.filepath = filepath
+        self.agent_label = agent_label
+        self._offset: int = 0
+        self._inode: int = 0
+        self._current_agent: dict | None = None
+        self._current_thinking: str | None = None
+        self._last_node_id: str | None = None
+        self._known_ids: set[str] = set()
+        self._inotify_fd: int | None = None
+        self._inotify_wd: int | None = None
+        self._libc = None
+        self._setup_inotify()
+
+    def _setup_inotify(self):
+        """Single inotify watch on hot.jsonl (one instance for this tailer)."""
+        try:
+            self._libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+            self._libc.inotify_init.restype = ctypes.c_int
+            self._libc.inotify_add_watch.argtypes = [
+                ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32
+            ]
+            self._libc.inotify_add_watch.restype = ctypes.c_int
+            fd = self._libc.inotify_init()
+            if fd < 0:
+                raise OSError(ctypes.get_errno(), "inotify_init")
+            import fcntl
+            fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+            fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+            mask = (
+                self._IN_MODIFY
+                | self._IN_CLOSE_WRITE
+                | self._IN_MOVE_SELF
+                | self._IN_DELETE_SELF
+            )
+            path = str(Path(self.filepath).resolve())
+            wd = self._libc.inotify_add_watch(fd, path.encode(), mask)
+            if wd < 0:
+                os.close(fd)
+                raise OSError(ctypes.get_errno(), f"inotify_add_watch {path}")
+            self._inotify_fd = fd
+            self._inotify_wd = wd
+            log.info("AaStreamLiveTailer: inotify armed on %s (fd=%s wd=%s)", path, fd, wd)
+        except Exception as e:
+            self._inotify_fd = None
+            self._inotify_wd = None
+            log.warning(
+                "AaStreamLiveTailer: inotify unavailable (%s) — using poll fallback", e
+            )
+
+    def close(self):
+        if self._inotify_fd is not None:
+            try:
+                os.close(self._inotify_fd)
+            except OSError:
+                pass
+            self._inotify_fd = None
+            self._inotify_wd = None
+
+    def wait_for_change(self, timeout_s: float = 1.0) -> bool:
+        """Block until hot.jsonl changes or timeout. Returns True if event seen.
+
+        Safe to call from a worker thread (used via asyncio.to_thread).
+        """
+        if self._inotify_fd is None:
+            time.sleep(timeout_s)
+            return False
+        try:
+            r, _, _ = select.select([self._inotify_fd], [], [], max(0.0, timeout_s))
+        except (ValueError, OSError):
+            time.sleep(min(timeout_s, 0.1))
+            return False
+        if not r:
+            return False
+        # Drain event queue (coalesce)
+        try:
+            while True:
+                data = os.read(self._inotify_fd, 65536)
+                if not data:
+                    break
+                # If file replaced, re-arm watch
+                i = 0
+                while i + 16 <= len(data):
+                    wd, mask, cookie, name_len = struct.unpack_from("iIII", data, i)
+                    i += 16 + name_len
+                    if mask & (self._IN_DELETE_SELF | self._IN_MOVE_SELF):
+                        log.info("AaStreamLiveTailer: file replaced/moved — re-arm inotify")
+                        self.close()
+                        self._setup_inotify()
+                        return True
+        except BlockingIOError:
+            pass
+        except OSError:
+            pass
+        return True
+
+    def seek_to_end(self):
+        try:
+            st = os.stat(self.filepath)
+            self._offset = st.st_size
+            self._inode = st.st_ino
+            log.info("AaStreamLiveTailer: end of %s (offset=%d)", self.filepath, self._offset)
+        except OSError:
+            self._offset = 0
+            self._inode = 0
+
+    def seek_to_offset(self, offset: int):
+        try:
+            st = os.stat(self.filepath)
+            self._offset = min(offset, st.st_size)
+            self._inode = st.st_ino
+            log.info("AaStreamLiveTailer: offset %d of %s", self._offset, self.filepath)
+        except OSError:
+            self._offset = 0
+            self._inode = 0
+
+    def set_last_node_id(self, node_id: str | None):
+        self._last_node_id = node_id
+
+    def set_known_ids(self, ids: set[str]):
+        self._known_ids = set(ids)
+        log.info("AaStreamLiveTailer: %d known ids", len(self._known_ids))
+
+    def poll(self) -> list[dict]:
+        from aa_stream_parser import iter_aa_stream_lines_from_offset, events_to_live_actions
+        try:
+            st = os.stat(self.filepath)
+        except OSError:
+            return []
+        # truncate / rotate
+        if self._inode and st.st_ino != self._inode:
+            self._offset = 0
+            self._inode = st.st_ino
+        if st.st_size < self._offset:
+            self._offset = 0
+
+        events, new_off = iter_aa_stream_lines_from_offset(self.filepath, self._offset)
+        self._offset = new_off
+        if not events:
+            return []
+
+        actions, self._current_agent, self._current_thinking, self._last_node_id = events_to_live_actions(
+            events,
+            agent_label=self.agent_label,
+            known_ids=self._known_ids,
+            last_node_id=self._last_node_id,
+            partial_agent=self._current_agent,
+            partial_thinking=self._current_thinking,
+        )
+        return actions

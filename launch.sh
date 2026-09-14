@@ -20,8 +20,22 @@ for arg in "$@"; do
 done
 set -- "${ARGS[@]+"${ARGS[@]}"}"
 case "$SA_PROFILE" in
-    prod) _DEF_BACKEND=8000; _DEF_FRONTEND=5173 ;;
-    dev)  _DEF_BACKEND=8002; _DEF_FRONTEND=5175 ;;
+    prod) _DEF_BACKEND=8000; _DEF_FRONTEND=5173
+          # prod: same as dev — AA history/hot.jsonl (inotify live tail)
+          export SA_HISTORY_SOURCE="${SA_HISTORY_SOURCE:-aa_stream}"
+          export SA_LIVE_TAIL_INTERVAL="${SA_LIVE_TAIL_INTERVAL:-0.1}"
+          export SA_AGENT="${SA_AGENT:-Trip-G}"
+          export ARENA_AGENT="${ARENA_AGENT:-$SA_AGENT}"
+          AGENT="${SA_AGENT}"
+          ;;
+    dev)  _DEF_BACKEND=8002; _DEF_FRONTEND=5175
+          # dev: AA history/hot.jsonl ONLY — split from grok backend files
+          export SA_HISTORY_SOURCE="${SA_HISTORY_SOURCE:-aa_stream}"
+          export SA_LIVE_TAIL_INTERVAL="${SA_LIVE_TAIL_INTERVAL:-0.1}"
+          export SA_AGENT="${SA_AGENT:-Trip-G}"
+          export ARENA_AGENT="${ARENA_AGENT:-$SA_AGENT}"
+          AGENT="${SA_AGENT}"
+          ;;
     *)    echo "Unknown profile: $SA_PROFILE (use prod or dev)"; exit 1 ;;
 esac
 BACKEND_PORT="${SA_BACKEND_PORT:-$_DEF_BACKEND}"

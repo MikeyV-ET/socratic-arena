@@ -22,8 +22,11 @@ import pycrdt
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler, FileModifiedEvent
+import select
+import struct
+import threading
+import ctypes
+import ctypes.util
 
 from models import new_id
 
@@ -104,17 +107,28 @@ class _LiveDoc:
 
 # ---------------------------------------------------------------------------
 # inotify file watcher — detects external edits to open documents
+#
+# IMPORTANT: Linux inotify has a low per-user *instance* limit (often 128).
+# watchdog.Observer.schedule() creates a NEW inotify instance per watched
+# path — that exhausts the budget when many docs are open-from-disk.
+# We use a single inotify fd + many add_watch() calls instead.
 # ---------------------------------------------------------------------------
 
-class _DocFileHandler(FileSystemEventHandler):
-    """Watchdog handler that queues reload events for open documents."""
+# inotify constants
+_IN_MODIFY = 0x00000002
+_IN_CLOSE_WRITE = 0x00000008
+_IN_MOVED_TO = 0x00000080
+_IN_CREATE = 0x00000100
+_IN_EVENT_SIZE = 16  # sizeof(struct inotify_event) without name
+
+
+class _DocFileHandler:
+    """Maps watched file paths → doc ids; debounces by mtime; queues reloads."""
 
     def __init__(self):
-        super().__init__()
         # file_path (resolved str) -> doc_id
         self._watched: dict[str, str] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
-        # debounce: track last-handled mtime per path to avoid double-fires
         self._last_mtime: dict[str, float] = {}
 
     def watch(self, file_path: str, doc_id: str):
@@ -126,13 +140,9 @@ class _DocFileHandler(FileSystemEventHandler):
         self._watched.pop(resolved, None)
         self._last_mtime.pop(resolved, None)
 
-    def on_modified(self, event):
-        if event.is_directory:
-            return
-        resolved = str(Path(event.src_path).resolve())
+    def on_path_changed(self, resolved: str):
         if resolved not in self._watched:
             return
-        # Debounce: skip if mtime hasn't changed
         try:
             mtime = Path(resolved).stat().st_mtime
         except OSError:
@@ -145,12 +155,135 @@ class _DocFileHandler(FileSystemEventHandler):
         if self._loop and self._loop.is_running():
             self._loop.call_soon_threadsafe(
                 asyncio.ensure_future,
-                _reload_doc_from_disk(doc_id, resolved)
+                _reload_doc_from_disk(doc_id, resolved),
             )
 
 
+class _InotifyHub:
+    """One inotify instance, many directory watches."""
+
+    def __init__(self, handler: _DocFileHandler):
+        self._handler = handler
+        self._fd: int | None = None
+        self._wd_to_dir: dict[int, str] = {}
+        self._dir_to_wd: dict[str, int] = {}
+        self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self._libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+        self._libc.inotify_init.restype = ctypes.c_int
+        self._libc.inotify_add_watch.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
+        self._libc.inotify_add_watch.restype = ctypes.c_int
+        self._libc.inotify_rm_watch.argtypes = [ctypes.c_int, ctypes.c_int]
+        self._libc.inotify_rm_watch.restype = ctypes.c_int
+
+    @property
+    def active(self) -> bool:
+        return self._fd is not None and self._fd >= 0
+
+    def start(self) -> bool:
+        if self.active:
+            return True
+        fd = self._libc.inotify_init()
+        if fd < 0:
+            err = ctypes.get_errno()
+            log.warning(
+                "File watcher: inotify_init failed (errno=%s) — external disk sync disabled",
+                err,
+            )
+            return False
+        self._fd = fd
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, name="sa-inotify-hub", daemon=True)
+        self._thread.start()
+        log.info("File watcher: single-inotify hub started (fd=%s)", fd)
+        return True
+
+    def stop(self):
+        self._stop.set()
+        fd = self._fd
+        if fd is not None and fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        self._fd = None
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=2.0)
+        self._thread = None
+        with self._lock:
+            self._wd_to_dir.clear()
+            self._dir_to_wd.clear()
+
+    def watch_dir(self, parent_dir: str) -> bool:
+        """Add a non-recursive watch on parent_dir. Idempotent."""
+        parent_dir = str(Path(parent_dir).resolve())
+        with self._lock:
+            if parent_dir in self._dir_to_wd:
+                return True
+            if not self.active:
+                if not self.start():
+                    return False
+            mask = _IN_MODIFY | _IN_CLOSE_WRITE | _IN_MOVED_TO | _IN_CREATE
+            wd = self._libc.inotify_add_watch(
+                self._fd, parent_dir.encode(), mask
+            )
+            if wd < 0:
+                err = ctypes.get_errno()
+                log.warning(
+                    "File watcher: add_watch failed for %s (errno=%s)", parent_dir, err
+                )
+                return False
+            self._wd_to_dir[wd] = parent_dir
+            self._dir_to_wd[parent_dir] = wd
+            log.info(
+                "File watcher: watching dir %s (wd=%s, n_dirs=%d)",
+                parent_dir, wd, len(self._dir_to_wd),
+            )
+            return True
+
+    def _run(self):
+        assert self._fd is not None
+        fd = self._fd
+        while not self._stop.is_set():
+            try:
+                r, _, _ = select.select([fd], [], [], 0.5)
+            except (ValueError, OSError):
+                break
+            if not r:
+                continue
+            try:
+                data = os.read(fd, 65536)
+            except OSError:
+                break
+            if not data:
+                continue
+            self._dispatch(data)
+
+    def _dispatch(self, data: bytes):
+        i = 0
+        n = len(data)
+        while i + _IN_EVENT_SIZE <= n:
+            wd, mask, cookie, name_len = struct.unpack_from("iIII", data, i)
+            i += _IN_EVENT_SIZE
+            name = data[i : i + name_len].split(b"\x00", 1)[0].decode("utf-8", "replace")
+            i += name_len
+            with self._lock:
+                parent = self._wd_to_dir.get(wd)
+            if not parent:
+                continue
+            if not name:
+                # directory itself modified — check all watched files in this dir
+                for fpath in list(self._handler._watched):
+                    if str(Path(fpath).parent) == parent:
+                        self._handler.on_path_changed(fpath)
+                continue
+            resolved = str((Path(parent) / name).resolve())
+            self._handler.on_path_changed(resolved)
+
+
 _file_handler = _DocFileHandler()
-_observer: Observer | None = None
+_inotify_hub: _InotifyHub | None = None
 _watched_dirs: set[str] = set()
 
 
@@ -170,11 +303,9 @@ async def _reload_doc_from_disk(doc_id: str, file_path: str):
         return
 
     log.info("File watcher: %s changed on disk, updating doc %s", file_path, doc_id)
-    # Cancel pending autosave so old editor content doesn't overwrite the new file
     if live._autosave_task and not live._autosave_task.done():
         live._autosave_task.cancel()
         log.debug("File watcher: cancelled pending autosave for %s", doc_id)
-    # Suppress autosave for 5s — covers the reload broadcast + client echo-back cycle
     live._suppress_autosave_until = time.time() + 5.0
     state_before = live.ydoc.get_state()
     with live.ydoc.transaction():
@@ -182,7 +313,6 @@ async def _reload_doc_from_disk(doc_id: str, file_path: str):
             del live.text[0:len(live.text)]
         live.text += new_content
 
-    # Broadcast Yjs update to all connected WebSocket clients
     update = live.ydoc.get_update(state_before)
     if update and update != b"\x00\x00" and live.clients:
         fwd = pycrdt.create_update_message(update)
@@ -197,8 +327,8 @@ async def _reload_doc_from_disk(doc_id: str, file_path: str):
 
 
 def _ensure_watching(file_path: str, doc_id: str):
-    """Start watching the directory containing file_path if not already watched."""
-    global _observer
+    """Watch the directory containing file_path (single shared inotify instance)."""
+    global _inotify_hub
     _file_handler.watch(file_path, doc_id)
 
     parent_dir = str(Path(file_path).resolve().parent)
@@ -208,25 +338,36 @@ def _ensure_watching(file_path: str, doc_id: str):
         log.warning("File watcher: skipping missing dir %s", parent_dir)
         return
 
-    if _observer is None:
-        _observer = Observer()
-        _observer.daemon = True
-        _observer.start()
-        log.info("File watcher: started observer")
+    if _inotify_hub is None:
+        _inotify_hub = _InotifyHub(_file_handler)
 
-    _observer.schedule(_file_handler, parent_dir, recursive=False)
-    _watched_dirs.add(parent_dir)
-    log.info("File watcher: watching dir %s", parent_dir)
+    if _inotify_hub.watch_dir(parent_dir):
+        _watched_dirs.add(parent_dir)
+    # if watch_dir failed (no inotify), leave _watched_dirs clean so we can retry later
 
 
 def start_file_watcher(loop: asyncio.AbstractEventLoop):
     """Called at app startup to give the watcher access to the event loop."""
+    global _inotify_hub
     _file_handler._loop = loop
-    # Watch all already-open docs that have file_path
+    # Reset hub on restart so we don't leak across reloads
+    if _inotify_hub is not None:
+        try:
+            _inotify_hub.stop()
+        except Exception:
+            pass
+        _inotify_hub = None
+    _watched_dirs.clear()
+
     for doc_id, live in _docs.items():
         if live.meta.file_path:
             _ensure_watching(live.meta.file_path, doc_id)
-    log.info("File watcher: initialized, watching %d files", len(_file_handler._watched))
+    n_dirs = len(_watched_dirs)
+    n_files = len(_file_handler._watched)
+    log.info(
+        "File watcher: initialized — %d files in %d dirs (single inotify instance)",
+        n_files, n_dirs,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -57,8 +57,26 @@ DEFAULT_AGENTS_HOME = _CFG_AGENTS_HOME
 # PATH HELPERS
 # ============================================================================
 
+def resolve_agent_home(agents_home: Path, agent_name: str) -> Path:
+    """Resolve agent name → real home directory.
+
+    Prefer agents.json ``home`` (nested paths OK: LeviSmith/Squiggy).
+    Flat ``agents_home/Name`` stubs must not win over the catalog — that
+    is how SA messages were dropped for Squiggy (inbox under ~/agents/Squiggy
+    while asdaaas cwd is ~/agents/LeviSmith/Squiggy).
+    """
+    try:
+        from config import catalog_agent_home
+        home = catalog_agent_home(agent_name)
+        if home is not None:
+            return Path(home)
+    except Exception:
+        pass
+    return Path(agents_home) / agent_name
+
+
 def agent_adapter_dir(agents_home: Path, agent_name: str) -> Path:
-    return agents_home / agent_name / "asdaaas" / "adapters" / ADAPTER_NAME
+    return resolve_agent_home(agents_home, agent_name) / "asdaaas" / "adapters" / ADAPTER_NAME
 
 
 def ensure_dirs(agents_home: Path, agent_name: str):
@@ -136,8 +154,8 @@ def _find_updates_jsonl(agents_home: Path, agent_name: str) -> Path | None:
         except Exception:
             pass
 
-    # Fallback: scan agent's CWD for grok session
-    agent_cwd = agents_home / agent_name
+    # Fallback: scan agent's CWD for grok session (catalog home if nested)
+    agent_cwd = resolve_agent_home(agents_home, agent_name)
     cwd_encoded = _url_quote(str(agent_cwd), safe="")
     sessions_dir = _SESSIONS / cwd_encoded
     if sessions_dir.exists():
