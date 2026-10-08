@@ -222,7 +222,24 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       const populate = msg.payload.populate as Record<string, string> | undefined;
       const moments = msg.payload.moments as { filter?: string; highlight?: number } | undefined;
       const docId = msg.payload.docId as string | undefined;
-      if (tab) store.openTab(tab);
+      const newPanel = Boolean(msg.payload.newPanel);
+      const panelLabel = msg.payload.panelLabel as string | undefined;
+      const viewKey = (msg.payload.viewKey as string | undefined)
+        || (panelLabel ? `label:${panelLabel}` : undefined);
+      // newPanel + viewKey: spawn once per key; retries/dual-WS focus existing
+      if (newPanel && (tab === "editor" || tab === undefined) && docId) {
+        const cfg: Record<string, unknown> = { docId };
+        if (viewKey) cfg.viewKey = viewKey;
+        const iid = store.addPanel("editor", cfg);
+        if (panelLabel) store.updatePanelLabel(iid, panelLabel);
+        break;
+      }
+      // pendingDocId + panel config BEFORE/WITH openTab so editor opens the real doc
+      if (docId) {
+        store.setPendingDocId(docId);
+        window.dispatchEvent(new CustomEvent("sa-open-doc", { detail: { docId } }));
+      }
+      if (tab) store.openTab(tab, docId ? { docId } : undefined);
       if (scrollTo) {
         if (tab === "notebook") {
           store.scrollToNotebookEntry(scrollTo);
@@ -234,12 +251,6 @@ function handleMessage(msg: { type: string; payload: Record<string, unknown> }) 
       if (moments) {
         if (moments.filter) store.setMomentFilter(moments.filter as "all" | "verified" | "untested");
         if (moments.highlight != null) store.setHighlightedMoment(moments.highlight);
-      }
-      if (docId) {
-        // Store pendingDocId so the editor picks it up on mount (race-free)
-        store.setPendingDocId(docId);
-        // Also fire the event for already-mounted editors
-        window.dispatchEvent(new CustomEvent("sa-open-doc", { detail: { docId } }));
       }
       break;
     }

@@ -59,6 +59,7 @@ class _LiveDoc:
         self.clients: list[WebSocket] = []
         self._autosave_task: asyncio.Task | None = None
         self._suppress_autosave_until: float = 0.0
+        self._ignore_watch_until: float = 0.0
 
     async def broadcast_to_others(self, sender: WebSocket, msg: bytes):
         """Send a Yjs message to all connected clients except the sender."""
@@ -98,6 +99,8 @@ class _LiveDoc:
             fp.write_text(str(self.text))
             # Pre-set mtime so file watcher ignores this write
             _file_handler._last_mtime[str(fp.resolve())] = fp.stat().st_mtime
+            # inotify may still fire before that mtime is visible; ignore echo
+            self._ignore_watch_until = time.time() + 2.0
             self.meta.updated_at = time.time()
             _persist_index()
             log.debug("Autosaved %s to %s", self.meta.id, fp)
@@ -302,10 +305,19 @@ async def _reload_doc_from_disk(doc_id: str, file_path: str):
     if new_content == current:
         return
 
-    log.info("File watcher: %s changed on disk, updating doc %s", file_path, doc_id)
+    # Autosave write echoes through inotify. Prefer live Yjs over disk
+    # when the user still has keystrokes not yet on disk.
+    if time.time() < live._ignore_watch_until:
+        log.debug("File watcher: ignoring %s (echo of our autosave)", file_path)
+        return
     if live._autosave_task and not live._autosave_task.done():
-        live._autosave_task.cancel()
-        log.debug("File watcher: cancelled pending autosave for %s", doc_id)
+        log.info(
+            "File watcher: ignoring disk change for %s (local edits pending autosave)",
+            doc_id,
+        )
+        return
+
+    log.info("File watcher: %s changed on disk, updating doc %s", file_path, doc_id)
     live._suppress_autosave_until = time.time() + 5.0
     state_before = live.ydoc.get_state()
     with live.ydoc.transaction():
@@ -615,6 +627,7 @@ async def save_doc_to_file(doc_id: str):
         _file_handler._last_mtime[str(fp.resolve())] = fp.stat().st_mtime
     except OSError:
         pass
+    live._ignore_watch_until = time.time() + 2.0
     live.meta.updated_at = time.time()
     _persist_index()
     return {"status": "ok", "path": str(fp)}
@@ -626,7 +639,6 @@ async def save_doc_to_file(doc_id: str):
 
 files_router = APIRouter(prefix="/api/files", tags=["files"])
 
-_FILE_EXTS = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".toml", ".sh", ".csv", ".log"}
 from config import AGENTS_HOME as _CFG_AH
 _AGENT_HOME: Path = _CFG_AH
 
@@ -640,7 +652,7 @@ def set_agent_home(path: Path):
 async def browse_files(path: str | None = None):
     """List directory contents for the file browser.
 
-    Returns dirs and text files. Defaults to the current agent's home.
+    Returns dirs and all non-hidden files. Defaults to the current agent's home.
     """
     if path:
         target = Path(path).resolve()
@@ -658,7 +670,7 @@ async def browse_files(path: str | None = None):
                 continue
             if item.is_dir():
                 entries.append({"name": item.name, "type": "dir", "path": str(item)})
-            elif item.suffix.lower() in _FILE_EXTS:
+            elif item.is_file():
                 try:
                     size = item.stat().st_size
                 except OSError:

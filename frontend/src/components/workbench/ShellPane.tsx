@@ -5,8 +5,13 @@ import "@xterm/xterm/css/xterm.css";
 
 const basePath = (window as any).__SA_BASE_PATH ?? "";
 
+/** Keep test mirror bounded — full rewrite of unbounded string every chunk was O(n²) lag. */
+const MIRROR_MAX_CHARS = 80_000;
+const MIRROR_FLUSH_MS = 100;
+
 function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "")
+  return s
+    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "")
     .replace(/\x1b\][^\x07]*\x07/g, "")
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "");
@@ -20,6 +25,8 @@ export function ShellPane({ instanceId, config }: { instanceId: string; config?:
   const termRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const outputRef = useRef("");
+  const mirrorDirtyRef = useRef(false);
+  const mirrorTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -28,6 +35,8 @@ export function ShellPane({ instanceId, config }: { instanceId: string; config?:
       cursorBlink: true,
       fontSize: 14,
       screenReaderMode: false,
+      // Slightly larger scrollback is fine; avoid pathological growth in mirror
+      scrollback: 5000,
       theme: {
         background: "#1e1e1e",
         foreground: "#d4d4d4",
@@ -45,25 +54,43 @@ export function ShellPane({ instanceId, config }: { instanceId: string; config?:
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
-    // Buffer input typed before the WebSocket finishes connecting.
     const pending: string[] = [];
+
+    const flushMirror = () => {
+      mirrorTimerRef.current = null;
+      if (!mirrorDirtyRef.current || !mirrorRef.current) return;
+      mirrorDirtyRef.current = false;
+      // Only keep a tail for e2e/mirror consumers
+      const full = outputRef.current;
+      mirrorRef.current.textContent =
+        full.length > MIRROR_MAX_CHARS ? full.slice(-MIRROR_MAX_CHARS) : full;
+    };
+
+    const scheduleMirror = () => {
+      mirrorDirtyRef.current = true;
+      if (mirrorTimerRef.current == null) {
+        mirrorTimerRef.current = window.setTimeout(flushMirror, MIRROR_FLUSH_MS);
+      }
+    };
 
     ws.onopen = () => {
       const dims = fitAddon.proposeDimensions();
       if (dims) {
         ws.send(`\x1b[8;${dims.rows};${dims.cols}t`);
       }
-      // Flush any keystrokes that arrived before the connection opened
       for (const d of pending) ws.send(d);
       pending.length = 0;
     };
 
     ws.onmessage = (ev) => {
-      term.write(ev.data);
-      outputRef.current += stripAnsi(ev.data);
-      if (mirrorRef.current) {
-        mirrorRef.current.textContent = outputRef.current;
+      const data = typeof ev.data === "string" ? ev.data : String(ev.data);
+      term.write(data);
+      // Cap retained plain text so += doesn't grow without bound
+      outputRef.current += stripAnsi(data);
+      if (outputRef.current.length > MIRROR_MAX_CHARS * 2) {
+        outputRef.current = outputRef.current.slice(-MIRROR_MAX_CHARS);
       }
+      scheduleMirror();
     };
 
     ws.onclose = () => {
@@ -78,8 +105,6 @@ export function ShellPane({ instanceId, config }: { instanceId: string; config?:
       }
     });
 
-    const container = containerRef.current;
-
     const ro = new ResizeObserver(() => {
       fitAddon.fit();
       const dims = fitAddon.proposeDimensions();
@@ -91,14 +116,16 @@ export function ShellPane({ instanceId, config }: { instanceId: string; config?:
 
     return () => {
       ro.disconnect();
+      if (mirrorTimerRef.current != null) {
+        window.clearTimeout(mirrorTimerRef.current);
+        mirrorTimerRef.current = null;
+      }
       ws.close();
       wsRef.current = null;
       term.dispose();
       termRef.current = null;
     };
   }, [sessionId]);
-
-
 
   return (
     <div className="h-full w-full relative" style={{ backgroundColor: "#1e1e1e" }}>

@@ -4,9 +4,19 @@ import { useArenaStore } from "@/stores/arenaStore";
 import type { ConversationNode } from "@/types";
 import { Message } from "./Message";
 import { InputBar } from "./InputBar";
+import { EphactViewer } from "./EphactViewer";
+import { extractEphacts, isControlTurnContent } from "@/lib/ephact";
 import { FontSizeControl } from "@/components/common/FontSizeControl";
 import { PaneAgentSelector } from "@/components/common/PaneAgentSelector";
 import { SA_VERSION } from "@/version";
+
+function visibleChatMessages(
+  msgs: { role: string; content: string }[],
+  verbosity: "quiet" | "verbose",
+) {
+  if (verbosity === "verbose") return msgs;
+  return msgs.filter((m) => !(m.role === "user" && isControlTurnContent(m.content || "")));
+}
 
 function ActivityIndicator({ readOnly }: { readOnly: boolean }) {
   const awaiting = useArenaStore((s) => s.awaitingResponse);
@@ -97,9 +107,12 @@ function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, paneId
   const healthDot = (status: string | null) =>
     status === "working" || status === "active" ? "bg-success" : status === "ready" ? "bg-blue-400" : "bg-muted-foreground";
 
+  const chatVerbosity = useArenaStore((s) => s.chatVerbosity);
+  const setChatVerbosity = useArenaStore((s) => s.setChatVerbosity);
+
   return (
-    <header className="flex items-center justify-between px-2 py-0.5 border-b border-border/50">
-      <div className="flex items-center gap-2">
+    <header className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-2 py-0.5 border-b border-border/50">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
         <span className="text-sm font-bold text-foreground mr-1">Socratic Arena <span className="font-normal text-[10px] text-muted-foreground">v{SA_VERSION}</span></span>
         <select
           value={currentAgent}
@@ -139,7 +152,7 @@ function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, paneId
           );
         })()}
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 justify-end min-w-0">
         <FontSizeControl paneId={paneId} />
         <button
           onClick={toggleChatSide}
@@ -149,6 +162,21 @@ function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, paneId
           {chatSide === "left" ? "\u21C0" : "\u21BC"}
         </button>
         <button
+          type="button"
+          onClick={() => setChatVerbosity(chatVerbosity === "verbose" ? "quiet" : "verbose")}
+          className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors ${
+            chatVerbosity === "verbose"
+              ? "border-accent/40 bg-accent/10 text-foreground"
+              : "border-border text-muted-foreground hover:bg-muted"
+          }`}
+          title={chatVerbosity === "verbose"
+            ? "Verbose: control turns visible. Click for quiet (hide continues)."
+            : "Quiet: control turns hidden. Click for verbose."}
+          data-testid="chat-verbosity-toggle"
+        >
+          {chatVerbosity === "verbose" ? "verbose" : "quiet"}
+        </button>
+        <button
           onClick={toggleTheme}
           className="px-1 py-0.5 text-[11px] text-muted-foreground hover:text-foreground rounded border border-border hover:bg-muted transition-colors"
           title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
@@ -156,8 +184,8 @@ function LivePaneHeader({ agents, currentAgent, switching, onAgentSwitch, paneId
           {theme === "dark" ? "\u2600" : "\u263E"}
         </button>
         {contextPct !== null && (
-          <div className="flex items-center gap-1" title={`${currentAgent || "Agent"} context: ${contextPct.toFixed(0)}% used`}>
-            <div className="w-12 h-1 rounded-full bg-muted overflow-hidden">
+          <div className="flex items-center gap-1 shrink-0" title={`${currentAgent || "Agent"} context: ${contextPct.toFixed(0)}% used`}>
+            <div className="w-12 sm:w-16 h-1 rounded-full bg-muted overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all ${contextPct > 80 ? "bg-destructive" : contextPct > 60 ? "bg-warning" : "bg-success"}`}
                 style={{ width: `${contextPct}%` }}
@@ -268,6 +296,28 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
   const [showJumpButton, setShowJumpButton] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [contextPct, setContextPct] = useState<number | null>(null);
+
+  const pushEphacts = useArenaStore((s) => s.pushEphacts);
+  const ephactVisible = useArenaStore((s) => s.ephactViewerVisible);
+  const setEphactViewerVisible = useArenaStore((s) => s.setEphactViewerVisible);
+  const chatVerbosity = useArenaStore((s) => s.chatVerbosity);
+  const setChatVerbosity = useArenaStore((s) => s.setChatVerbosity);
+  const ephactCount = useArenaStore((s) => s.ephactsByAgent[currentAgent]?.length ?? 0);
+
+  // Harvest <ephact> tags once per message id (dismissed ephacts stay dismissed in store)
+  const harvestedEphactNodes = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (readOnly || !currentAgent) return;
+    const recent = messages.filter((m) => m.role === "assistant").slice(-40);
+    for (const m of recent) {
+      if (harvestedEphactNodes.current.has(m.id)) continue;
+      const found = extractEphacts(m.content || "");
+      harvestedEphactNodes.current.add(m.id);
+      if (found.length) pushEphacts(currentAgent, found, m.id);
+    }
+  }, [messages, currentAgent, readOnly, pushEphacts]);
+
+
   const [connectedAdapters, setConnectedAdapters] = useState<string[]>([]);
   const prevRootId = useRef<string | null>(null);
 
@@ -927,7 +977,22 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
             <span className="text-sm text-muted-foreground animate-pulse">{readOnly ? "No history data" : "Connecting..."}</span>
           </div>
         </div>
-        {!readOnly && <InputBar />}
+        {!readOnly && (
+        <>
+          {ephactCount > 0 && !ephactVisible && (
+            <button
+              type="button"
+              className="w-full text-[10px] py-0.5 border-t border-border text-muted-foreground hover:bg-muted/40"
+              onClick={() => setEphactViewerVisible(true)}
+              data-testid="ephact-show"
+            >
+              📌 show ephacts ({ephactCount})
+            </button>
+          )}
+          <EphactViewer agent={currentAgent || ""} />
+          <InputBar />
+        </>
+      )}
       </div>
     );
   }
@@ -996,7 +1061,22 @@ export function ConversationPane({ readOnly = false, paneId = "conversation" }: 
           Jump to latest
         </button>
       )}
-      {!readOnly && <InputBar />}
+      {!readOnly && (
+        <>
+          {ephactCount > 0 && !ephactVisible && (
+            <button
+              type="button"
+              className="w-full text-[10px] py-0.5 border-t border-border text-muted-foreground hover:bg-muted/40"
+              onClick={() => setEphactViewerVisible(true)}
+              data-testid="ephact-show"
+            >
+              📌 show ephacts ({ephactCount})
+            </button>
+          )}
+          <EphactViewer agent={currentAgent || ""} />
+          <InputBar />
+        </>
+      )}
     </div>
   );
 }

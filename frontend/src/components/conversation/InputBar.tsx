@@ -14,7 +14,8 @@ export function InputBar() {
     if (!ta) return;
     ta.style.height = "auto";
     ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
-    useArenaStore.getState().triggerScrollToBottom();
+    // Do NOT triggerScrollToBottom here — it re-rendered the whole ConversationPane
+    // on every keystroke (molasses) and did not keep history pinned while typing anyway.
   }, []);
 
   const handleSubmit = (e: React.FormEvent) => {

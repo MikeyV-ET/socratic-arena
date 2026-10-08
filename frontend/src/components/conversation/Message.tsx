@@ -7,6 +7,7 @@ import "katex/dist/katex.min.css";
 import type { ConversationNode } from "@/types";
 import { useArenaStore } from "@/stores/arenaStore";
 import { FlagButton } from "./FlagButton";
+import { classifyControlTurn } from "@/lib/ephact";
 
 const proseClass = "text-sm text-foreground leading-relaxed prose prose-sm max-w-none prose-p:my-1.5 prose-li:my-0.5 prose-table:text-xs prose-th:text-left prose-td:px-2 prose-td:py-1 prose-th:px-2 prose-th:py-1";
 
@@ -42,8 +43,48 @@ export function Message({ node }: MessageProps) {
   const displayContent = isUser
     ? rawContent.replace(/\s*\[Context left [^\]]*\]\s*/g, "").trim()
     : rawContent;
+  const control = isUser ? classifyControlTurn(displayContent || rawContent) : null;
+  const chatVerbosity = useArenaStore((s) => s.chatVerbosity);
   const hasBranches = false; // flat model: no branches
   const branchCount = 0;
+
+  // Quiet mode: hide control turns entirely
+  if (control && chatVerbosity === "quiet") {
+    return null;
+  }
+
+  // Verbose: show control turns with compact helpful formatting
+  if (control) {
+    const ms = node.timestamp > 0
+      ? (node.timestamp < 1e12 ? node.timestamp * 1000 : node.timestamp)
+      : 0;
+    return (
+      <div
+        className="px-3 py-1 mx-2 my-0.5 rounded-md border border-dashed border-border/60 bg-muted/25"
+        data-testid={`control-turn-${control.kind}`}
+        data-control-kind={control.kind}
+      >
+        <div className="max-w-3xl mx-auto flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] font-mono uppercase tracking-wide text-amber-700/90 dark:text-amber-400/90 shrink-0 px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/25">
+            {control.label}
+          </span>
+          {control.id && (
+            <span className="text-[10px] font-mono text-muted-foreground/80 shrink-0" title={control.id}>
+              {control.id}
+            </span>
+          )}
+          <p className="text-[11px] text-muted-foreground leading-snug flex-1 min-w-0">
+            {control.summary}
+          </p>
+          {ms > 0 && (
+            <span className="text-[10px] text-muted-foreground/70 tabular-nums shrink-0" title={new Date(ms).toLocaleString()}>
+              {new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

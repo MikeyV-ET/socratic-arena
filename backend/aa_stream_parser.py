@@ -8,10 +8,62 @@ Spec: agent-abide docs/specs/aa_stream/HOT_FORMAT_v1.md
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
 from models import new_id
+
+
+def _delay_control_from_tool_text(text: str) -> str | None:
+    """If tool writes AA commands/cmd_*.json with action delay, return display line."""
+    if not text or "delay" not in text:
+        return None
+    # Require writing a command file (not scanning/editing source that mentions delay)
+    if not re.search(r"commands/cmd_[^\s\"']*\.json|commands/cmd_\$\{?date|commands/cmd_\$\(", text):
+        return None
+    if not re.search(
+        r'["\']action["\']\s*:\s*["\']delay["\']|"action"\s*:\s*"delay"',
+        text,
+    ):
+        return None
+    sec = None
+    m = re.search(
+        r'["\']?seconds["\']?\s*:\s*["\']?(until_event|\d+(?:\.\d+)?)["\']?',
+        text,
+    )
+    if m:
+        sec = m.group(1)
+    txt = None
+    tm = re.search(r'["\']text["\']\s*:\s*["\']([^"\']{1,120})["\']', text)
+    if tm:
+        txt = tm.group(1)
+    if sec == "until_event":
+        detail = "until_event (standing by)"
+    elif sec is not None:
+        detail = f"{sec}s before next continue"
+    else:
+        detail = "delay registered"
+    if txt:
+        detail += f" — {txt}"
+    return f"[aa.control] delay: {detail}"
+
+
+def _live_user_node(eid: str, content: str, ts: int) -> dict:
+    return {
+        "id": eid,
+        "branch_id": "main",
+        "role": "user",
+        "content": content,
+        "thinking": None,
+        "timestamp": ts,
+        "children": [],
+        "flags": [],
+        "metadata": None,
+        "agent_label": None,
+    }
+
+
 
 
 def is_aa_stream_path(path: str | Path) -> bool:
@@ -140,6 +192,28 @@ def _group_events(raw: list[dict], agent_label: str | None = None) -> list[dict]
         sid = ev.get("stream_seq")
         eid = f"aa-{sid}" if sid is not None else new_id()
 
+        # Tool call writing AA delay command → synthetic control turn
+        if kind == "tool_call" or (isinstance(body, dict) and body.get("kind") == "tool_call"):
+            blob = text or ""
+            if isinstance(body, dict):
+                for k in ("command", "args", "input", "content", "text", "name"):
+                    v = body.get(k)
+                    if v is not None:
+                        blob += "\n" + (v if isinstance(v, str) else json.dumps(v, default=str))
+            ctrl = _delay_control_from_tool_text(blob)
+            if ctrl:
+                flush_agent()
+                entries.append({
+                    "id": f"{eid}-ctrl",
+                    "role": "user",
+                    "content": ctrl,
+                    "thinking": None,
+                    "timestamp": ts,
+                    "tools": [],
+                    "model": None,
+                    "_control": True,
+                })
+
         # User speech
         if cls == "message" and role == "user":
             flush_agent()
@@ -155,6 +229,28 @@ def _group_events(raw: list[dict], agent_label: str | None = None) -> list[dict]
                 "tools": [],
                 "model": None,
             })
+            continue
+
+        # AA control registration (delay, etc.) — show as system in SA
+        if cls == "message" and (
+            role == "system"
+            or kind == "control"
+            or (isinstance(body, dict) and body.get("kind") == "control")
+        ):
+            flush_agent()
+            if not text.strip():
+                text = str(body.get("detail") or body.get("action") or "")
+            if text.strip():
+                entries.append({
+                    "id": eid,
+                    "role": "user",  # SA Message treats user+classifier as control chrome
+                    "content": text if text.startswith("[aa.control]") else f"[aa.control] {text}",
+                    "thinking": None,
+                    "timestamp": ts,
+                    "tools": [],
+                    "model": None,
+                    "_control": True,
+                })
             continue
 
         # Thinking
@@ -266,6 +362,32 @@ def events_to_live_actions(
         ts = _ts_ms(ev)
         sid = ev.get("stream_seq")
         eid = f"aa-{sid}" if sid is not None else new_id()
+
+        
+        # Tool-call delay command → control turn
+        if kind == "tool_call" or (isinstance(body, dict) and body.get("kind") == "tool_call"):
+            blob = text or ""
+            if isinstance(body, dict):
+                for k in ("command", "args", "input", "content", "text", "name"):
+                    v = body.get(k)
+                    if v is not None:
+                        blob += "\n" + (v if isinstance(v, str) else json.dumps(v, default=str))
+            ctrl = _delay_control_from_tool_text(blob)
+            if ctrl:
+                emit_add(_live_user_node(f"{eid}-ctrl", ctrl, ts), last_id)
+
+        # AA control (delay registration, etc.)
+        if cls == "message" and (
+            role == "system"
+            or kind == "control"
+            or (isinstance(body, dict) and body.get("kind") == "control")
+        ):
+            txt = (text or "").strip() or str((body or {}).get("detail") or (body or {}).get("action") or "")
+            if txt:
+                if not txt.startswith("[aa.control]"):
+                    txt = f"[aa.control] {txt}"
+                emit_add(_live_user_node(eid, txt, ts), last_id)
+            continue
 
         if cls == "message" and role == "user" and text.strip():
             if current_agent:

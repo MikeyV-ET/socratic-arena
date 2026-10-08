@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EditorView, basicSetup } from "codemirror";
-import { EditorState, StateEffect, StateField, Compartment } from "@codemirror/state";
+import { EditorState, StateEffect, StateField, Compartment, type Extension } from "@codemirror/state";
 import { Decoration, type DecorationSet } from "@codemirror/view";
 import { markdown } from "@codemirror/lang-markdown";
+import { yaml } from "@codemirror/lang-yaml";
 import { languages } from "@codemirror/language-data";
 import { oneDark } from "@codemirror/theme-one-dark";
+import { parseAllDocuments } from "yaml";
 import * as Y from "yjs";
 import { yCollab } from "y-codemirror.next";
 import Markdown from "react-markdown";
@@ -87,6 +89,43 @@ function isJsonFile(doc: DocMeta | undefined): boolean {
   if (!doc) return false;
   const path = (doc.file_path || doc.title || "").toLowerCase();
   return path.endsWith(".json") || path.endsWith(".jsonl");
+}
+
+function isYamlFile(doc: DocMeta | undefined): boolean {
+  if (!doc) return false;
+  const path = (doc.file_path || doc.title || "").toLowerCase();
+  return path.endsWith(".yaml") || path.endsWith(".yml");
+}
+
+function parseYamlTree(text: string): unknown {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  try {
+    const docs = parseAllDocuments(trimmed);
+    if (docs.some((d) => d.errors.length > 0)) return undefined;
+    const values = docs.map((d) => d.toJS());
+    if (values.length === 1) return values[0];
+    return values;
+  } catch {
+    return undefined;
+  }
+}
+
+function isMarkdownFile(doc: DocMeta | undefined): boolean {
+  if (!doc) return true;
+  const path = (doc.file_path || doc.title || "").toLowerCase();
+  if (!path) return true;
+  if (path.endsWith(".md") || path.endsWith(".markdown")) return true;
+  if (!doc.file_path && !path.includes(".")) return true;
+  return false;
+}
+
+function languageExtensions(doc: DocMeta | undefined): Extension {
+  if (isYamlFile(doc)) return yaml();
+  if (isMarkdownFile(doc)) {
+    return [markdown({ codeLanguages: languages }), wysiwygPlugin, wysiwygTheme];
+  }
+  return [];
 }
 
 // ---------------------------------------------------------------------------
@@ -525,6 +564,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
   const [showCreateBrowse, setShowCreateBrowse] = useState(false);
   const [tocWidth, setTocWidth] = useState(192);
   const themeCompRef = useRef(new Compartment());
+  const langCompRef = useRef(new Compartment());
 
   const startTocResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -573,6 +613,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
     providerRef.current = null;
     ydocRef.current?.destroy();
     ydocRef.current = null;
+    if (editorContainerRef.current) editorContainerRef.current.replaceChildren();
     setConnected(false);
   }, []);
 
@@ -588,10 +629,15 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
     cleanup();
     setActiveDocId(docId);
 
-    // Update workbench tab label to show the doc name
+    // Update tab label from doc name only if still generic (keep agent panelLabel)
     if (instanceId) {
       const doc = docsRef.current.find((d) => d.id === docId);
-      if (doc) updatePanelLabel(instanceId, `Editor: ${docTabLabel(doc)}`);
+      if (doc) {
+        const me = useArenaStore.getState().workbenchPanels.find((p) => p.instanceId === instanceId);
+        const cur = me?.label || "";
+        const generic = !cur || cur === "Editor" || cur.startsWith("Editor:") || /^editor(\s+\d+)?$/i.test(cur);
+        if (generic) updatePanelLabel(instanceId, `Editor: ${docTabLabel(doc)}`);
+      }
     }
 
     const ydoc = new Y.Doc();
@@ -604,25 +650,21 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
     provider.onStatusChange = setConnected;
     providerRef.current = provider;
 
-    // Track text for markdown preview
+    // Track text for markdown preview (reads live Y.Text — stays correct after sync)
     const updatePreview = () => setPreviewText(ytext.toString());
     ytext.observe(updatePreview);
-    // Initial sync takes a moment; update once synced
     ydoc.on("update", updatePreview);
+    updatePreview();
 
-    // Wait for container to be ready
-    requestAnimationFrame(() => {
-      if (!editorContainerRef.current) return;
-
+    const buildExtensions = () => {
+      const docMeta = docsRef.current.find((d) => d.id === docId);
       const extensions = [
         basicSetup,
-        markdown({ codeLanguages: languages }),
+        langCompRef.current.of(languageExtensions(docMeta)),
         yCollab(ytext),
         EditorView.lineWrapping,
         highlightField,
         highlightTheme,
-        wysiwygPlugin,
-        wysiwygTheme,
         authorColorConfig.of({
           ytext,
           localClientId: ydoc.clientID,
@@ -632,18 +674,50 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
         authorColorTheme,
       ];
       extensions.push(themeCompRef.current.of(theme === "dark" ? oneDark : []));
+      return extensions;
+    };
 
+    const mountEditor = () => {
+      if (!editorContainerRef.current) return;
+      // Tear down empty/stale view if Y.Text now has content CM doesn't
+      if (editorViewRef.current) {
+        const cmLen = editorViewRef.current.state.doc.length;
+        const yLen = ytext.length;
+        if (cmLen > 0 || yLen === 0) return; // already good or still empty source
+        editorViewRef.current.destroy();
+        editorViewRef.current = null;
+      }
+      // destroy() can leave a .cm-editor husk; a second view then stacks
+      // (blank pane on top, real file below, two scrollbars).
+      editorContainerRef.current.replaceChildren();
       const state = EditorState.create({
         doc: ytext.toString(),
-        extensions,
+        extensions: buildExtensions(),
       });
-
-      const view = new EditorView({
+      editorViewRef.current = new EditorView({
         state,
         parent: editorContainerRef.current!,
       });
-      editorViewRef.current = view;
-    });
+    };
+
+    // Mount once container exists; remount when first sync fills Y.Text (edit vs preview desync fix)
+    requestAnimationFrame(() => mountEditor());
+    const onYUpdate = () => {
+      updatePreview();
+      const view = editorViewRef.current;
+      if (!view) {
+        mountEditor();
+        return;
+      }
+      // y-codemirror sometimes misses the initial bulk sync if CM mounted empty
+      if (view.state.doc.length === 0 && ytext.length > 0) {
+        mountEditor();
+      }
+    };
+    ydoc.on("update", onYUpdate);
+    // Also try shortly after WS handshake
+    window.setTimeout(() => onYUpdate(), 150);
+    window.setTimeout(() => onYUpdate(), 500);
   }, [cleanup, theme, instanceId, updatePanelLabel]);
 
   // Fetch doc list
@@ -676,28 +750,48 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
   const refreshDocsRef = useRef(refreshDocs);
   refreshDocsRef.current = refreshDocs;
 
+  const activeTab = useArenaStore((s) => s.activeTab);
+  const isActivePanel = Boolean(instanceId) && activeTab === instanceId;
+
   useEffect(() => {
     refreshDocsRef.current();
     const onDocsChanged = () => refreshDocsRef.current();
     window.addEventListener("sa-docs-changed", onDocsChanged);
+    // Only the *active* editor instance should honor global open events —
+    // otherwise every Editor panel jumps to the same docId.
     const onOpenDoc = (e: Event) => {
-      const docId = (e as CustomEvent).detail?.docId;
-      if (docId) openDocRef.current(docId);
+      const detail = (e as CustomEvent).detail ?? {};
+      const docId = detail.docId as string | undefined;
+      const target = detail.instanceId as string | undefined;
+      if (!docId) return;
+      if (target) {
+        if (target !== instanceId) return;
+      } else {
+        const active = useArenaStore.getState().activeTab;
+        if (instanceId && active !== instanceId) return;
+      }
+      openDocRef.current(docId);
     };
     window.addEventListener("sa-open-doc", onOpenDoc);
     return () => {
       window.removeEventListener("sa-docs-changed", onDocsChanged);
       window.removeEventListener("sa-open-doc", onOpenDoc);
     };
-  }, []);
+  }, [instanceId]);
 
-  // Consume pending doc id when it appears (without re-subscribing listeners)
+  // pendingDocId: only the active editor panel consumes it
   useEffect(() => {
-    if (pendingDocId) {
+    if (!pendingDocId) return;
+    if (instanceId && useArenaStore.getState().activeTab !== instanceId) return;
+    void (async () => {
+      await refreshDocsRef.current();
+      // Re-check still active and still pending
+      if (instanceId && useArenaStore.getState().activeTab !== instanceId) return;
+      if (useArenaStore.getState().pendingDocId !== pendingDocId) return;
       openDocRef.current(pendingDocId);
       setPendingDocId(null);
-    }
-  }, [pendingDocId, setPendingDocId]);
+    })();
+  }, [pendingDocId, setPendingDocId, instanceId, isActivePanel]);
 
   // Reconfigure CodeMirror theme when SA theme changes
   useEffect(() => {
@@ -706,6 +800,17 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
       effects: themeCompRef.current.reconfigure(theme === "dark" ? oneDark : []),
     });
   }, [theme]);
+
+  // Reconfigure language when yaml-vs-markdown actually changes
+  const yamlLang = isYamlFile(docs.find((d) => d.id === activeDocId));
+  const mdLang = isMarkdownFile(docs.find((d) => d.id === activeDocId));
+  useEffect(() => {
+    if (!editorViewRef.current || !activeDocId) return;
+    const docMeta = docs.find((d) => d.id === activeDocId);
+    editorViewRef.current.dispatch({
+      effects: langCompRef.current.reconfigure(languageExtensions(docMeta)),
+    });
+  }, [activeDocId, yamlLang, mdLang]);
 
   // Listen for highlight events from the main WS (agent-initiated)
   useEffect(() => {
@@ -731,36 +836,15 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
     };
   }, [activeDocId]);
 
-  // Open doc from config (e.g. filesystem viewer passing docId) or auto-create untitled.
-  // Mount once — do not re-run when openDoc/refreshDocs identities change.
-  const autoCreated = useRef(false);
-  const configRef = useRef(config);
-  configRef.current = config;
+  // Open doc from panel config.docId (per-instance; used by addPanel / newPanel navigate).
   useEffect(() => {
-    if (activeDocId || autoCreated.current) return;
-    autoCreated.current = true;
-    const cfg = configRef.current;
-    if (cfg?.docId) {
-      (async () => {
-        await refreshDocsRef.current();
-        openDocRef.current(cfg.docId);
-      })();
-    } else {
-      (async () => {
-        try {
-          const resp = await fetch(`${basePath}/api/docs`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title: "Untitled", contentType: "markdown" }),
-          });
-          const doc = await resp.json();
-          await refreshDocsRef.current();
-          openDocRef.current(doc.id);
-        } catch { /* ignore */ }
-      })();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional mount-once
-  }, [activeDocId]);
+    const id = config?.docId as string | undefined;
+    if (!id) return;
+    void (async () => {
+      await refreshDocsRef.current();
+      openDocRef.current(id);
+    })();
+  }, [config?.docId]);
 
   // Create a new doc (on disk if directory specified, in-memory otherwise)
   const createDoc = async () => {
@@ -927,6 +1011,8 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
   const activeDoc = docs.find((d) => d.id === activeDocId);
   const csvType = isCsvFile(activeDoc);
   const jsonFile = isJsonFile(activeDoc);
+  const yamlFile = isYamlFile(activeDoc);
+  const treeFile = jsonFile || yamlFile;
 
   // Parse CSV/TSV data for table view
   const csvData = useMemo(() => {
@@ -935,17 +1021,18 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
     return parseCsv(previewText, delimiter);
   }, [csvType, previewText]);
 
-  // Parse JSON data for tree view
+  // Parse JSON/YAML data for tree view
   const jsonData = useMemo(() => {
-    if (!jsonFile || !previewText) return undefined;
+    if (!treeFile || !previewText) return undefined;
     const trimmed = previewText.trim();
+    if (yamlFile) return parseYamlTree(trimmed);
     // Handle .jsonl: parse each line
     if ((activeDoc?.file_path || activeDoc?.title || "").toLowerCase().endsWith(".jsonl")) {
       const lines = trimmed.split("\n").filter(Boolean);
       try { return lines.map(l => JSON.parse(l)); } catch { return undefined; }
     }
     try { return JSON.parse(trimmed); } catch { return undefined; }
-  }, [jsonFile, previewText, activeDoc]);
+  }, [treeFile, yamlFile, previewText, activeDoc]);
 
   // Auto-switch to appropriate view when opening files
   const prevDocId = useRef<string | null>(null);
@@ -953,10 +1040,10 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
     if (activeDocId && activeDocId !== prevDocId.current) {
       prevDocId.current = activeDocId;
       if (csvType) setViewMode("table");
-      else if (jsonFile) setViewMode("json");
+      else if (treeFile) setViewMode("json");
       else if (viewMode === "table" || viewMode === "json") setViewMode("edit");
     }
-  }, [activeDocId, csvType, jsonFile]);
+  }, [activeDocId, csvType, treeFile]);
 
   return (
     <div className="flex flex-col h-full bg-card" data-testid="shared-editor">
@@ -993,14 +1080,16 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
                 >
                   Edit
                 </button>
-                <button
-                  onClick={() => setViewMode("preview")}
-                  className={`px-2 py-0.5 text-[10px] transition-colors ${
-                    viewMode === "preview" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  Preview
-                </button>
+                {!yamlFile && (
+                  <button
+                    onClick={() => setViewMode("preview")}
+                    className={`px-2 py-0.5 text-[10px] transition-colors ${
+                      viewMode === "preview" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Preview
+                  </button>
+                )}
                 {csvType && (
                   <button
                     onClick={() => setViewMode("table")}
@@ -1023,21 +1112,34 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
                     JSON
                   </button>
                 )}
+                {yamlFile && (
+                  <button
+                    onClick={() => setViewMode("json")}
+                    className={`px-2 py-0.5 text-[10px] transition-colors ${
+                      viewMode === "json" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"
+                    }`}
+                    data-testid="yaml-tree-btn"
+                  >
+                    Tree
+                  </button>
+                )}
               </div>
               <span className={`w-2 h-2 rounded-full ${connected ? "bg-green-500" : "bg-red-500"}`}
                 title={connected ? "Connected" : "Disconnected"} />
             </>
           )}
-          <button
-            onClick={() => setShowToc(!showToc)}
-            className={`px-2 py-0.5 text-[10px] rounded transition-colors ${
-              showToc ? "bg-primary/20 text-primary" : "bg-primary/10 hover:bg-primary/20 text-primary"
-            }`}
-            title="Table of contents"
-            data-testid="toc-toggle"
-          >
-            TOC
-          </button>
+          {!yamlFile && (
+            <button
+              onClick={() => setShowToc(!showToc)}
+              className={`px-2 py-0.5 text-[10px] rounded transition-colors ${
+                showToc ? "bg-primary/20 text-primary" : "bg-primary/10 hover:bg-primary/20 text-primary"
+              }`}
+              title="Table of contents"
+              data-testid="toc-toggle"
+            >
+              TOC
+            </button>
+          )}
           <div className="relative">
             <button
               onClick={() => setShowOpen(!showOpen)}
@@ -1205,7 +1307,7 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
           <>
             <div
               ref={editorContainerRef}
-              className="h-full flex-1 overflow-auto [&_.cm-editor]:h-full [&_.cm-scroller]:!overflow-auto"
+              className="h-full min-h-0 flex-1 overflow-hidden [&_.cm-editor]:h-full [&_.cm-scroller]:overflow-auto"
               data-testid="shared-editor-content"
               style={{ display: viewMode === "edit" ? undefined : "none" }}
             />
@@ -1236,6 +1338,11 @@ export function SharedEditorPane({ instanceId, config }: { instanceId?: string; 
             </div>
             {viewMode === "json" && jsonData !== undefined && (
               <JsonTreePane data={jsonData} />
+            )}
+            {viewMode === "json" && treeFile && jsonData === undefined && (
+              <div className="h-full flex-1 p-4 text-xs text-muted-foreground font-mono" data-testid="tree-parse-error">
+                Could not parse {yamlFile ? "YAML" : "JSON"}.
+              </div>
             )}
             {viewMode === "table" && csvData && (
               <div

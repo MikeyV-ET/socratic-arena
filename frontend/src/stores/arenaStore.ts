@@ -22,6 +22,17 @@ export interface PanelInfo {
 
 const emptyNotebook: Notebook = { entries: [] };
 
+
+export interface EphactItem {
+  id: string;
+  type: string;
+  title: string;
+  content: string;
+  agent: string;
+  ts: number;
+  sourceNodeId?: string;
+}
+
 interface ArenaState {
   // Core data — flat ordered message list (replaces ConversationTree)
   messages: ConversationNode[];
@@ -29,6 +40,13 @@ interface ArenaState {
   notebook: Notebook;
   prompts: TrainingPrompt[];
   artifacts: Artifact[];
+  ephactsByAgent: Record<string, EphactItem[]>;
+  ephactActiveByAgent: Record<string, number>;
+  ephactViewerVisible: boolean;
+  /** quiet = hide control turns; verbose = show formatted */
+  chatVerbosity: "quiet" | "verbose";
+  /** sigs user closed — do not re-harvest from history */
+  ephactDismissedByAgent: Record<string, string[]>;
 
   // UI state
   selectedNodeId: string | null;
@@ -52,7 +70,7 @@ interface ArenaState {
   pinTab: (instanceId: string) => void;
   unpinTab: (instanceId: string) => void;
   closeTab: (instanceId: string) => void;
-  openTab: (typeOrInstanceId: string) => void;
+  openTab: (typeOrInstanceId: string, config?: Record<string, unknown>) => void;
   addPanel: (type: string, config?: Record<string, any>) => string;
   reorderTabs: (instanceIds: string[]) => void;
   updatePanelConfig: (instanceId: string, config: Record<string, any>) => void;
@@ -144,6 +162,12 @@ interface ArenaState {
   setNotebook: (notebook: Notebook) => void;
   setPrompts: (prompts: TrainingPrompt[]) => void;
   setArtifacts: (artifacts: Artifact[]) => void;
+  pushEphacts: (agent: string, items: Omit<EphactItem, "id" | "ts" | "agent">[], sourceNodeId?: string) => void;
+  setEphactActive: (agent: string, index: number) => void;
+  removeEphact: (agent: string, id: string) => void;
+  setEphactViewerVisible: (v: boolean) => void;
+  setChatVerbosity: (v: "quiet" | "verbose") => void;
+  clearEphacts: (agent: string) => void;
   applySnapshot: (payload: { messages?: ConversationNode[]; notebook?: Notebook; prompts?: TrainingPrompt[]; artifacts?: Artifact[] }) => void;
   switchBranch: (branchId: string) => void;
   selectNode: (nodeId: string) => void;
@@ -232,6 +256,11 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
   notebook: emptyNotebook,
   prompts: [],
   artifacts: [],
+  ephactsByAgent: {},
+  ephactActiveByAgent: {},
+  ephactViewerVisible: true,
+  chatVerbosity: (typeof localStorage !== "undefined" && localStorage.getItem("sa-chat-verbosity") === "quiet" ? "quiet" : "verbose") as "quiet" | "verbose",
+  ephactDismissedByAgent: {},
 
   selectedNodeId: null,
   scrollTargetId: null,
@@ -289,6 +318,23 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
 
   addPanel: (type, config = {}) => {
     const state = get();
+    // Idempotent open: same viewKey → focus existing panel (no doublet on retry/dual-WS)
+    const viewKey = config?.viewKey;
+    if (viewKey != null && String(viewKey) !== "") {
+      const byKey = state.workbenchPanels.find(
+        (p) => p.config?.viewKey != null && String(p.config.viewKey) === String(viewKey),
+      );
+      if (byKey) {
+        const merged = { ...byKey.config, ...config };
+        const panels = state.workbenchPanels.map((p) =>
+          p.instanceId === byKey.instanceId ? { ...p, config: merged } : p,
+        );
+        localStorage.setItem("sa-workbench-panels", JSON.stringify(panels));
+        localStorage.setItem("sa-active-tab", byKey.instanceId);
+        set({ workbenchPanels: panels, activeTab: byKey.instanceId });
+        return byKey.instanceId;
+      }
+    }
     const instanceId = `${type}-${Math.random().toString(36).slice(2, 8)}`;
     const typeLabel = type.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
     const count = state.workbenchPanels.filter((p) => p.type === type).length;
@@ -344,14 +390,36 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
     }
     return updates as any;
   }),
-  openTab: (typeOrId) => {
+  openTab: (typeOrId, config) => {
     const s = get();
     const byId = s.workbenchPanels.find((p) => p.instanceId === typeOrId);
-    if (byId) { set({ activeTab: typeOrId }); return; }
+    if (byId) {
+      if (config && Object.keys(config).length) {
+        const panels = s.workbenchPanels.map((p) =>
+          p.instanceId === typeOrId ? { ...p, config: { ...p.config, ...config } } : p
+        );
+        localStorage.setItem("sa-workbench-panels", JSON.stringify(panels));
+        set({ workbenchPanels: panels, activeTab: typeOrId });
+      } else {
+        set({ activeTab: typeOrId });
+      }
+      return;
+    }
     const byType = s.workbenchPanels.find((p) => p.type === typeOrId);
-    if (byType) { set({ activeTab: byType.instanceId }); return; }
+    if (byType) {
+      if (config && Object.keys(config).length) {
+        const panels = s.workbenchPanels.map((p) =>
+          p.instanceId === byType.instanceId ? { ...p, config: { ...p.config, ...config } } : p
+        );
+        localStorage.setItem("sa-workbench-panels", JSON.stringify(panels));
+        set({ workbenchPanels: panels, activeTab: byType.instanceId });
+      } else {
+        set({ activeTab: byType.instanceId });
+      }
+      return;
+    }
     const label = typeOrId.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
-    const panel = { instanceId: typeOrId, type: typeOrId, label, config: {} };
+    const panel = { instanceId: typeOrId, type: typeOrId, label, config: config ? { ...config } : {} };
     const next = [...s.workbenchPanels, panel];
     localStorage.setItem("sa-workbench-panels", JSON.stringify(next));
     set({ workbenchPanels: next, activeTab: typeOrId });
@@ -527,6 +595,83 @@ export const useArenaStore = create<ArenaState>((set, get) => ({
   setNotebook: (notebook) => set({ notebook }),
   setPrompts: (prompts) => set({ prompts }),
   setArtifacts: (artifacts) => set({ artifacts }),
+  pushEphacts: (agent, items, sourceNodeId) => {
+    if (!agent || !items.length) return;
+    set((s) => {
+      const prev = s.ephactsByAgent[agent] ?? [];
+      const dismissed = new Set(s.ephactDismissedByAgent[agent] ?? []);
+      const next = [...prev];
+      const sigOf = (title: string, content: string) => `${title}::${content.slice(0, 120)}`;
+      for (const it of items) {
+        const sig = sigOf(it.title, it.content);
+        if (dismissed.has(sig)) continue;
+        if (next.some((e) => sigOf(e.title, e.content) === sig)) continue;
+        next.push({
+          id: `eph_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+          type: it.type,
+          title: it.title,
+          content: it.content,
+          agent,
+          ts: Date.now() / 1000,
+          sourceNodeId: sourceNodeId ?? (it as { sourceNodeId?: string }).sourceNodeId,
+        });
+      }
+      if (next.length === prev.length) return {};
+      return {
+        ephactsByAgent: { ...s.ephactsByAgent, [agent]: next },
+        ephactActiveByAgent: { ...s.ephactActiveByAgent, [agent]: next.length - 1 },
+        ephactViewerVisible: true,
+      };
+    });
+  },
+  setEphactActive: (agent, index) =>
+    set((s) => ({
+      ephactActiveByAgent: { ...s.ephactActiveByAgent, [agent]: index },
+    })),
+  removeEphact: (agent, id) =>
+    set((s) => {
+      const prev = s.ephactsByAgent[agent] ?? [];
+      const gone = prev.find((e) => e.id === id);
+      const next = prev.filter((e) => e.id !== id);
+      const idx = Math.min(s.ephactActiveByAgent[agent] ?? 0, Math.max(0, next.length - 1));
+      const sig = gone ? `${gone.title}::${gone.content.slice(0, 120)}` : "";
+      const prevDismissed = s.ephactDismissedByAgent[agent] ?? [];
+      const dismissed = sig && !prevDismissed.includes(sig)
+        ? [...prevDismissed, sig].slice(-200)
+        : prevDismissed;
+      return {
+        ephactsByAgent: { ...s.ephactsByAgent, [agent]: next },
+        ephactActiveByAgent: { ...s.ephactActiveByAgent, [agent]: idx },
+        ephactViewerVisible: next.length > 0 ? s.ephactViewerVisible : false,
+        ephactDismissedByAgent: { ...s.ephactDismissedByAgent, [agent]: dismissed },
+      };
+    }),
+  setEphactViewerVisible: (v) => set({ ephactViewerVisible: v }),
+  setChatVerbosity: (v) => {
+    try { localStorage.setItem("sa-chat-verbosity", v); } catch { /* ignore */ }
+    set({ chatVerbosity: v });
+  },
+
+  clearEphacts: (agent) =>
+    set((s) => {
+      const prev = s.ephactsByAgent[agent] ?? [];
+      const prevDismissed = s.ephactDismissedByAgent[agent] ?? [];
+      const extra = prev.map((e) => `${e.title}::${e.content.slice(0, 120)}`);
+      const dismissed = [...prevDismissed];
+      for (const sig of extra) {
+        if (!dismissed.includes(sig)) dismissed.push(sig);
+      }
+      return {
+        ephactsByAgent: { ...s.ephactsByAgent, [agent]: [] },
+        ephactActiveByAgent: { ...s.ephactActiveByAgent, [agent]: 0 },
+        ephactViewerVisible: false,
+        ephactDismissedByAgent: {
+          ...s.ephactDismissedByAgent,
+          [agent]: dismissed.slice(-200),
+        },
+      };
+    }),
+
   applySnapshot: (payload) => set((state) => {
     let msgUpdate: Record<string, unknown> = {};
     if (payload.messages) {

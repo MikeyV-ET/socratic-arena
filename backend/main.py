@@ -613,7 +613,16 @@ def _apply_live_tail_entries(entries: list, *, do_broadcast: bool = True) -> int
             if node_id in _msg_index:
                 log.debug("LiveTailer: skipping duplicate node %s", node_id)
                 continue
-            node = ConversationNode.model_validate(node_data)
+            try:
+                node = ConversationNode.model_validate(node_data)
+            except Exception:
+                log.warning(
+                    "LiveTailer: skip invalid node %s keys=%s",
+                    node_id,
+                    list(node_data) if isinstance(node_data, dict) else type(node_data),
+                    exc_info=True,
+                )
+                continue
             state.messages.append(node)
             _msg_index[node_id] = node
             applied += 1
@@ -3917,7 +3926,8 @@ async def shell_websocket(ws: WebSocket, session_id: str):
     async def read_pty():
         try:
             while True:
-                data = await loop.run_in_executor(None, lambda: os.read(master_fd, 4096))
+                # Larger reads + executor hop; decode with replace for partial UTF-8
+                data = await loop.run_in_executor(None, lambda: os.read(master_fd, 16384))
                 if not data:
                     break
                 await ws.send_text(data.decode("utf-8", errors="replace"))
@@ -3938,7 +3948,9 @@ async def shell_websocket(ws: WebSocket, session_id: str):
                     except (ValueError, OSError):
                         pass
                 continue
-            os.write(master_fd, msg.encode("utf-8"))
+            # Never block the event loop on PTY write
+            payload = msg.encode("utf-8")
+            await loop.run_in_executor(None, lambda b=payload: os.write(master_fd, b))
     except WebSocketDisconnect:
         pass
     finally:
@@ -3965,6 +3977,40 @@ _adapter_procs: dict[str, _sp.Popen] = {}  # agent_name -> Popen
 def _adapter_script() -> str:
     return str(Path(__file__).resolve().parent / "arena_adapter.py")
 
+
+def _live_adapter_pids(agent_name: str | None = None) -> dict[str, list[int]]:
+    """PIDs of arena_adapter.py on this host, keyed by --agent.
+
+    uvicorn only tracks adapters it forked. A host-started adapter is
+    invisible to that dict, so /api/adapter/connect used to spawn a second.
+    """
+    needle = b"arena_adapter.py"
+    found: dict[str, list[int]] = {}
+    proc = Path("/proc")
+    if not proc.is_dir():
+        return found
+    for ent in proc.iterdir():
+        if not ent.name.isdigit():
+            continue
+        try:
+            cmd = (ent / "cmdline").read_bytes().replace(b"\0", b" ")
+        except OSError:
+            continue
+        if needle not in cmd:
+            continue
+        parts = cmd.decode("utf-8", "replace").split()
+        name = ""
+        for i, tok in enumerate(parts):
+            if tok == "--agent" and i + 1 < len(parts):
+                name = parts[i + 1]
+                break
+        if not name:
+            continue
+        if agent_name is not None and name != agent_name:
+            continue
+        found.setdefault(name, []).append(int(ent.name))
+    return found
+
 def _arena_url() -> str:
     port = os.environ.get("SA_BACKEND_PORT", "8000")
     return f"http://localhost:{port}"
@@ -3976,7 +4022,8 @@ async def adapter_connections():
     for name in list(_adapter_procs):
         if _adapter_procs[name].poll() is not None:
             del _adapter_procs[name]
-    return {"connected": list(_adapter_procs.keys())}
+    live = set(_adapter_procs.keys()) | set(_live_adapter_pids())
+    return {"connected": sorted(live)}
 
 @app.post("/api/adapter/connect/{agent_name}")
 async def adapter_connect(agent_name: str, request: Request):
@@ -3984,8 +4031,12 @@ async def adapter_connect(agent_name: str, request: Request):
     # Clean stale entry
     if agent_name in _adapter_procs:
         if _adapter_procs[agent_name].poll() is None:
-            return {"status": "already_connected", "agent": agent_name}
+            return {"status": "already_connected", "agent": agent_name, "pid": _adapter_procs[agent_name].pid}
         del _adapter_procs[agent_name]
+
+    existing = _live_adapter_pids(agent_name).get(agent_name) or []
+    if existing:
+        return {"status": "already_connected", "agent": agent_name, "pid": existing[0]}
 
     script = _adapter_script()
     if not Path(script).exists():

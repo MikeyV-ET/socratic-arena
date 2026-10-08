@@ -15,6 +15,7 @@ import { ChatPanel } from "@/components/workbench/ChatPanel";
 import { SharedEditorPane } from "@/components/editor/SharedEditorPane";
 import { FilesystemPane } from "@/components/workbench/FilesystemPane";
 import { ShellPane } from "@/components/workbench/ShellPane";
+import { EphactPopoutBody } from "@/components/conversation/EphactViewer";
 
 export function PopoutPanel({ instanceId, type, config }: { instanceId: string; type: string; config: Record<string, any> }) {
   const theme = useArenaStore((s) => s.theme);
@@ -37,6 +38,7 @@ export function PopoutPanel({ instanceId, type, config }: { instanceId: string; 
     case "chat": content = <ChatPanel instanceId={instanceId} config={config} />; break;
     case "filesystem": content = <FilesystemPane />; break;
     case "shell": content = <ShellPane instanceId={instanceId} />; break;
+    case "ephact": content = config?.ephact ? <EphactPopoutBody ephact={config.ephact} /> : <div className="p-4 text-muted-foreground">No ephact</div>; break;
     default: content = <div className="flex items-center justify-center h-full text-muted-foreground">Unknown panel type</div>;
   }
 

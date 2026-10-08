@@ -1148,6 +1148,22 @@ test.describe("Filesystem viewer", () => {
     const breadcrumb = fsPanel.locator('[data-testid="fs-breadcrumb"]');
     await expect(breadcrumb).toBeVisible({ timeout: 10_000 });
   });
+
+  test("F6: Browse lists png/jsonl, not only md/json/py", async ({ page, request }) => {
+    const resp = await request.get("/api/files/browse", {
+      params: { path: "/home/eric/agents/Trip-G" },
+    });
+    expect(resp.ok()).toBeTruthy();
+    const data = await resp.json();
+    const names: string[] = (data.entries || []).map((e: { name: string }) => e.name);
+    expect(names.some((n) => n.endsWith(".png"))).toBeTruthy();
+    expect(names).toContain("session_timeline.jsonl");
+
+    await page.locator('[data-testid="open-tab-menu"]').click();
+    await page.locator('[data-testid="add-panel-filesystem"]').click();
+    const fsPanel = page.locator('[data-testid^="panel-content-filesystem"]');
+    await expect(fsPanel.locator('[data-testid="fs-file"]').first()).toBeVisible({ timeout: 10_000 });
+  });
 });
 
 // =========================================================================

@@ -35,3 +35,24 @@ Flagged messages appear in the Moments pane.
 ## Message Model
 
 The conversation is a flat linear list (not a tree). Your responses append to the end. History is paginated and searchable.
+## Ephacts (2026-09-16)
+
+Agent speech may include `<ephact type="table|list|code|paragraph" title="...">...</ephact>`.
+SA harvests these into a pinned viewer above the chat input (max ~50% height), with tabs and pop-out.
+Same tag format as TUI ephact (see agent-abide `docs/howto/ephact.md`).
+
+## Control turns
+
+Continue/context/system doorbells that arrive as `role=user` are classified and shown as compact
+**control** rows (not labeled Eric).
+
+## Chat verbosity (quiet / verbose)
+
+Header toggle **quiet | verbose** (persisted in `localStorage` as `sa-chat-verbosity`).
+
+| Mode | Control turns (continues, doorbells, …) |
+|------|----------------------------------------|
+| **quiet** | Hidden |
+| **verbose** | Shown as compact amber **continue** / control rows (not labeled Eric) |
+
+Default: **verbose**.

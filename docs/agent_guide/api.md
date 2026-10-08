@@ -39,9 +39,13 @@ Backend runs on port 8000 by default. All endpoints are under `/api/`.
 
 ## WebSocket Messages (send via arena adapter)
 
+### workspace.navigate (editor)
+
+For multi-editor side-by-side opens use `newPanel` + stable `viewKey` (idempotent). See [editor.md](editor.md).
+
 | Type | Direction | Purpose |
 |------|-----------|---------|
-| `workspace.navigate` | agent->UI | Switch tab, scroll to node/entry, open doc |
+| `workspace.navigate` | agent->UI | Switch tab, scroll, open doc; editor: `docId`, optional `newPanel`+`viewKey`+`panelLabel` (see editor.md) |
 | `workspace.search` | agent->UI | Trigger search in a pane |
 | `doc.highlight` | agent->UI | Highlight ranges in shared editor |
 | `conversation.send` | UI->agent | User message (handled by adapter) |
